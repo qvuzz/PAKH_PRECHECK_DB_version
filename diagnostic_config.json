@@ -1,0 +1,16 @@
+{
+    "EXCLUDED_SYSTEM_CODES": [
+        "0000002042",
+        "0000000330",
+        "0000000300",
+        "0000000302",
+        "330",
+        "300",
+        "302"
+    ],
+    "VALID_TITLES": [
+        "Mobile Internet 2G/3G",
+        "Mobile Internet 4G",
+        "Mobile Internet 5G"
+    ]
+}

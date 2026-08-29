@@ -1,0 +1,48 @@
+# Python virtual environment
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Browser profile data and runtime artifacts
+chrome_profile/
+*.pma
+# SQLite database files and runtime logs
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.log
+
+# Excel / temporary generated files
+*.xlsx
+*.xls
+*.csv
+
+# Thư mục kết quả và dữ liệu tạm thời / khách hàng
+result/
+number/
+output/
+cem/
+scratch/
+
+# File JSON dữ liệu tạm thời và cache runtime
+temp_su_co_ai.json
+btools_extracted_data.json
+ai_cache.json
+debug_response.html
+
+# File tạm thời khác
+temp.txt
+*.txt
+!requirements.txt
+
+# Cấu hình bí mật - KHÔNG BAO GIỜ commit file này
+.env
+
+# OS / editor artifacts
+.DS_Store
+Thumbs.db
+
