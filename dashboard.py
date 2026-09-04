@@ -51,7 +51,7 @@ execute_tts_old_voice_cycle = execute_tts_old_api_voice_cycle
 
 from services.tts_new_data import execute_tts_new_data_cycle, execute_ttsnew_cycle
 from services.tts_new_voice import execute_tts_new_voice_cycle
-from tts_old_api import close_tts_old_ticket_api, fetch_nguyen_nhan_list_api, extract_token_from_browser
+from tts_old_api import close_tts_old_ticket_api, fetch_nguyen_nhan_list_api, extract_token_from_browser, save_cached_auth
 from services.automation_worker import automation_worker_loop
 
 
@@ -103,8 +103,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
         # 2. Logo VNPT
-        elif parsed.path in ("/vnpt-logo.svg", "/favicon.ico"):
-            logo_path = os.path.join(BASE_DIR, "vnpt-logo.svg")
+        elif parsed.path in ("/vnpt-logo.svg", "/vnpt-logo-horizontal.svg", "/favicon.ico"):
+            file_name = "vnpt-logo-horizontal.svg" if "horizontal" in parsed.path else "vnpt-logo.svg"
+            logo_path = os.path.join(BASE_DIR, file_name)
+            if not os.path.exists(logo_path):
+                logo_path = os.path.join(BASE_DIR, "vnpt-logo.svg")
             if os.path.exists(logo_path):
                 with open(logo_path, "rb") as f:
                     content = f.read()
@@ -250,6 +253,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "user": user_info,
                     "timestamp": time.time()
                 }
+                if token:
+                    save_cached_auth(token, user_info)
                 user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or username
                 try:
                     state.log("SUCCESS", f"🔑 [XÁC THỰC] {user_display} (IP: {client_ip}) đã đăng nhập TTS thành công!")
@@ -265,6 +270,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "success": False,
                     "otp_required": True,
                     "session_id": result.get("session_id"),
+                    "username": result.get("username", username),
+                    "phone": result.get("phone", ""),
                     "message": result.get("message", "Vui lòng nhập mã OTP để tiếp tục.")
                 })
             else:
@@ -291,6 +298,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "user": user_info,
                     "timestamp": time.time()
                 }
+                if token:
+                    save_cached_auth(token, user_info)
                 user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or "KTV"
                 try:
                     state.log("SUCCESS", f"🔑 [XÁC THỰC OTP] {user_display} (IP: {client_ip}) đã qua bước OTP thành công!")
@@ -302,9 +311,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "user": user_info
                 })
             else:
+                client_ip = self.client_address[0]
+                err_msg = result.get("error", "Xác thực OTP thất bại. Vui lòng thử lại.")
+                try:
+                    state.log("ERROR", f"❌ [XÁC THỰC OTP THẤT BÀI] IP {client_ip}: {err_msg}")
+                except Exception:
+                    pass
                 self._send_json({
                     "success": False,
-                    "error": result.get("error", "Xác thực OTP thất bại. Vui lòng thử lại.")
+                    "error": err_msg
                 })
             return
 
@@ -624,6 +639,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
 
             ticket_dict = dict(row)
+            if not ticket_dict.get("id_yeu_cau") and ticket_dict.get("flow_id"):
+                ticket_dict["id_yeu_cau"] = ticket_dict["flow_id"]
+            if not ticket_dict.get("ma_ccos") and ticket_dict.get("ticket_code"):
+                ticket_dict["ma_ccos"] = ticket_dict["ticket_code"]
 
             if comment_input is not None:
                 update_ticket_field(phone, "comment", comment_input, incident_time=incident_time)

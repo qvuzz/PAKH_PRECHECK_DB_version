@@ -19,7 +19,9 @@ def standardize_btools_data(btools_data):
     Hàm nhận vào danh sách dữ liệu thô từ BTools,
     bổ sung dịch nghĩa VÀ BẮT BUỘC giữ lại mã Code gốc để ghi file JSON không bị trống.
     """
-    # 📌 NẾU DỮ LIỆU THÔ BAN ĐẦU RỖNG HOẶC NONE, TRẢ VỀ RỖNG LUÔN
+    # 📌 NẾU DỮ LIỆU THÔ LÀ NONE (LỖI HOẶC CHƯA ĐĂNG NHẬP), BẢO LƯU NONE ĐỂ BÁO LỖI
+    if btools_data is None:
+        return None
     if not btools_data:
         return []
 

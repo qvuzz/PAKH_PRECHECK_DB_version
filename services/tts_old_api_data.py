@@ -126,12 +126,15 @@ def execute_tts_old_api_data_cycle(driver=None):
                 formatted_packages = get_formatted_sapc_packages(phone_84)
 
                 # 2. Tra cứu BTools
-                clean_btools_data = []
+                clean_btools_data = None
                 try:
                     raw_btools = extract_btools_single_phone(driver, phone_84, start_d, end_d)
-                    clean_btools_data = standardize_btools_data(raw_btools)
+                    if raw_btools is None:
+                        state.log("WARN", f"⚠️ Không thể tra cứu BTools cho {phone_84}: Chưa đăng nhập BTools hoặc lỗi máy chủ. TẠM DỪNG TỰ ĐỘNG ĐÓNG!")
+                    else:
+                        clean_btools_data = standardize_btools_data(raw_btools)
                 except Exception as ex_bt:
-                    state.log("WARN", f"Lỗi cào BTools cho {phone_84}: {ex_bt}")
+                    state.log("WARN", f"⚠️ Lỗi cào BTools cho {phone_84}: {ex_bt}")
 
                 # 3. Tóm tắt AI
                 num_output_dir = str(BASE_DIR / "number")
@@ -142,7 +145,7 @@ def execute_tts_old_api_data_cycle(driver=None):
                         "phone": phone_84,
                         "package_title": t.get("title", ""),
                         "ticket_content": t.get("content", ""),
-                        "btools_technical_data": clean_btools_data
+                        "btools_technical_data": clean_btools_data if clean_btools_data is not None else []
                     }, jf, ensure_ascii=False, indent=4)
 
                 ai_summary = analyze_ticket_with_ai(json_filename)
@@ -173,7 +176,8 @@ def execute_tts_old_api_data_cycle(driver=None):
                     "source": "tts_old_api",
                     "created_time": t.get("created_time") or inc_time,
                     "ticket_id": t.get("ticket_id"),
-                    "flow_id": str(t.get("id_yeu_cau") or "")
+                    "flow_id": str(t.get("id_yeu_cau") or ""),
+                    "ticket_code": t.get("ma_ccos") or t.get("MaCCOS") or ""
                 }
 
                 # 5. Kiểm tra điều kiện tự động đóng
@@ -195,9 +199,11 @@ def execute_tts_old_api_data_cycle(driver=None):
                     "error_area": excel_reader.get_error_area(ai_sum_text)
                 }
 
-                can_close = bool(matched_nguyen_nhan and excel_reader.is_level_1_auto_close_candidate(check_dict))
+                can_close = bool(clean_btools_data is not None and matched_nguyen_nhan and excel_reader.is_level_1_auto_close_candidate(check_dict))
 
-                if state.auto_close and can_close:
+                if clean_btools_data is None:
+                    state.log("WARN", f"⚠️ Phiếu {phone_84} lỗi tra cứu BTools (chưa đăng nhập hoặc lỗi máy chủ). Giữ trạng thái 'Chưa đóng' để KTV kiểm tra!")
+                elif state.auto_close and can_close:
                     state.log("STEP", f"🤖 Thuê bao {phone_84} đủ điều kiện. Đang đóng tự động qua REST API...")
                     # Tìm Id nguyên nhân tương ứng
                     id_nn = None

@@ -882,86 +882,102 @@
         </div>
     </header>
 
-    <!-- POPUP ĐĂNG NHẬP TTS VNPT TRỰC TIẾP (HỖ TRỢ OTP / 2FA) -->
-    <div id="welcomeTtsModal" class="connect-modal-backdrop" style="display:none;">
-        <div class="connect-modal-box" style="width:430px; text-align:left; padding:28px 24px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1); border-radius:12px;">
+    <!-- POPUP ĐĂNG NHẬP CHUẨN GIAO DIỆN VNPT CAS SSO (HỖ TRỢ OTP / 2FA) -->
+    <div id="welcomeTtsModal" class="connect-modal-backdrop" style="display:none; background: radial-gradient(circle at 50% 25%, #eef7fc 0%, #d5eaf7 100%);">
+        <div class="connect-modal-box" style="width:380px; max-width:92vw; background:#ffffff; border-radius:12px; box-shadow:0 10px 35px rgba(0, 75, 150, 0.16); padding:28px 24px; text-align:left; border:1px solid #cbe4f6;">
             
-            <!-- BƯỚC 1: NHẬP TÀI KHOẢN & MẬT KHẨU -->
+            <!-- LOGO VNPT CHUẨN XANH -->
+            <div style="text-align:center; margin-bottom:22px;">
+                <img src="/vnpt-logo-horizontal.svg" alt="VNPT Logo" style="height:50px; display:inline-block; vertical-align:middle;">
+            </div>
+
+            <!-- BƯỚC 1: FORM ĐĂNG NHẬP (Y CHANG ẢNH 1) -->
             <div id="boxStep1Login">
-                <div style="text-align:center; margin-bottom:20px;">
-                    <div style="font-size:36px; margin-bottom:6px;">🔑</div>
-                    <h2 style="font-size:18px; font-weight:800; color:#0f172a; margin:0;">
-                        Đăng Nhập Hệ Thống TTS
-                    </h2>
-                    <p style="font-size:13px; color:#64748b; margin:6px 0 0 0;">
-                        Nhập tài khoản & mật khẩu TTS để truy cập VNPT Precheck
-                    </p>
-                </div>
-
-                <form id="directLoginForm" onsubmit="handleDirectLoginSubmit(event)" style="display:flex; flex-direction:column; gap:14px;">
-                    <div>
-                        <label style="display:block; font-size:12.5px; font-weight:700; color:#334155; margin-bottom:6px;">
-                            Tài khoản TTS VNPT
-                        </label>
-                        <input type="text" id="loginTtsUsername" class="control-input" style="width:100%; box-sizing:border-box; padding:10px 12px; font-size:14px; border-radius:8px; border:1px solid #cbd5e1;" placeholder="Ví dụ: quangvu..." autocomplete="username" required>
+                <form id="directLoginForm" onsubmit="handleDirectLoginSubmit(event)" style="display:flex; flex-direction:column; gap:12px;">
+                    <!-- Ô TÀI KHOẢN (NỀN VÀNG NHẠT #ffffcc) -->
+                    <div style="position:relative;">
+                        <input type="text" id="loginTtsUsername" class="control-input" 
+                            style="width:100%; box-sizing:border-box; height:44px; padding:8px 14px; font-size:15px; font-weight:600; color:#1e293b; background-color:#ffffcc !important; border:1px solid #b8cde0; border-radius:6px; outline:none;" 
+                            placeholder="quangvu" autocomplete="username" required>
                     </div>
 
-                    <div>
-                        <label style="display:block; font-size:12.5px; font-weight:700; color:#334155; margin-bottom:6px;">
-                            Mật khẩu TTS
-                        </label>
-                        <input type="password" id="loginTtsPassword" class="control-input" style="width:100%; box-sizing:border-box; padding:10px 12px; font-size:14px; border-radius:8px; border:1px solid #cbd5e1;" placeholder="••••••••" autocomplete="current-password" required>
+                    <!-- Ô MẬT KHẨU (NỀN VÀNG NHẠT #ffffcc CÓ ICON MẮT ẨN/HIỆN) -->
+                    <div style="position:relative;">
+                        <input type="password" id="loginTtsPassword" class="control-input" 
+                            style="width:100%; box-sizing:border-box; height:44px; padding:8px 40px 8px 14px; font-size:15px; color:#1e293b; background-color:#ffffcc !important; border:1px solid #b8cde0; border-radius:6px; outline:none;" 
+                            placeholder="••••••••" autocomplete="current-password" required>
+                        <span onclick="togglePasswordVisibility()" style="position:absolute; right:12px; top:50%; transform:translateY(-50%); cursor:pointer; font-size:16px; color:#64748b; user-select:none;" title="Hiện/Ẩn mật khẩu">
+                            👁️
+                        </span>
                     </div>
 
-                    <!-- THÔNG BÁO LỖI / TRẠNG THÁI -->
-                    <div id="loginTtsStatusMsg" style="display:none; padding:10px 12px; border-radius:8px; font-size:13px; line-height:1.4;"></div>
+                    <!-- THÔNG BÁO TRẠNG THÁI / LỖI -->
+                    <div id="loginTtsStatusMsg" style="display:none; padding:8px 12px; border-radius:6px; font-size:12.5px; line-height:1.4;"></div>
 
-                    <button type="submit" id="btnDirectLoginSubmit" class="btn btn-primary" style="width:100%; padding:11px 16px; font-size:14.5px; font-weight:700; border-radius:8px; display:flex; justify-content:center; align-items:center; gap:8px; margin-top:4px;">
-                        <span>🚀 Đăng Nhập & Vào Dashboard</span>
+                    <!-- NÚT ĐĂNG NHẬP XANH ĐẬM (Y CHANG ẢNH 1) -->
+                    <button type="submit" id="btnDirectLoginSubmit" 
+                        style="width:100%; height:44px; margin-top:4px; background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; font-size:15px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; border:none; border-radius:6px; cursor:pointer; box-shadow:0 2px 6px rgba(13, 113, 220, 0.35); display:flex; justify-content:center; align-items:center; gap:8px;">
+                        <span>ĐĂNG NHẬP</span>
                     </button>
                 </form>
 
-                <!-- NÚT PHỤ CHO LOCALHOST DÙNG PHIÊN CÓ SẴN -->
-                <div id="loginServerQuickBox" style="display:none; margin-top:16px; padding-top:14px; border-top:1px dashed #e2e8f0; text-align:center;">
-                    <button type="button" class="btn btn-secondary" onclick="syncServerTokenQuick()" style="width:100%; padding:8px 12px; font-size:12.5px; font-weight:600;">
-                        ⚡ Dùng ngay phiên máy chủ có sẵn (Localhost)
+                <!-- THÔNG TIN HỖ TRỢ BÊN DƯỚI (Y CHANG ẢNH 1) -->
+                <div style="margin-top:20px; font-size:11.8px; line-height:1.65; color:#334155; border-top:1px solid #eef3f8; padding-top:16px;">
+                    <div>- Số điện thoại Hỗ trợ Email là: <b style="color:#d90429;">1800 1555 Nhánh 3</b></div>
+                    <div>- Địa chỉ Email hỗ trợ: <b style="color:#d90429;">hotro.email@vnpt.vn</b></div>
+                    <div>- Đối với quên mật khẩu, hết hạn mật khẩu soạn tin nhắn: <b>MK&lt;khoảng cách&gt;&lt;Tên truy nhập&gt;</b> gửi <b>293</b></div>
+                    <div>- Ví dụ: <b>MK nguyenvana.lcu</b> gửi <b>293</b></div>
+                    <div>- Để đổi mật khẩu, truy cập vào <a href="https://id.vnpt.com.vn/cas/forgotPassword" target="_blank" style="color:#0284c7; text-decoration:none;">đường dẫn đây</a> để thực hiện</div>
+                </div>
+
+                <!-- NÚT PHỤ DÀNH RIÊNG CHO LOCALHOST (MÁY CHỦ CỦA ANH) -->
+                <div id="loginServerQuickBox" style="display:none; margin-top:14px; padding-top:10px; border-top:1px dashed #cbd5e1; text-align:center;">
+                    <button type="button" class="btn btn-secondary" onclick="syncServerTokenQuick()" style="width:100%; padding:6px 12px; font-size:12px; font-weight:600;">
+                        ⚡ Dùng ngay phiên máy chủ đang mở (Localhost)
                     </button>
                 </div>
             </div>
 
-            <!-- BƯỚC 2: XÁC THỰC MÃ OTP HOẶC SMARTCA -->
+            <!-- BƯỚC 2: FORM XÁC THỰC MÃ OTP (Y CHANG ẢNH 2) -->
             <div id="boxStep2Otp" style="display:none;">
-                <div style="text-align:center; margin-bottom:18px;">
-                    <div style="font-size:36px; margin-bottom:6px;">📲</div>
-                    <h2 style="font-size:18px; font-weight:800; color:#0f172a; margin:0;">
-                        Xác Thực Mã OTP TTS
-                    </h2>
-                    <p id="otpPromptMsg" style="font-size:13px; color:#475569; margin:6px 0 0 0; line-height:1.5;">
-                        Mã OTP đã được gửi về số điện thoại của bạn.
-                    </p>
+                <div style="text-align:center; margin-bottom:16px;">
+                    <div style="font-size:14.5px; color:#334155;">Xin chào: <b id="otpUserLabel" style="color:#0f172a;">quangvu</b></div>
+                    <div style="font-size:14px; font-weight:600; color:#1e293b; margin-top:6px;">
+                        Xin vui lòng nhập mã xác thực OTP của bạn
+                    </div>
                 </div>
 
-                <form id="directOtpForm" onsubmit="handleDirectOtpSubmit(event)" style="display:flex; flex-direction:column; gap:14px;">
+                <form id="directOtpForm" onsubmit="handleDirectOtpSubmit(event)" style="display:flex; flex-direction:column; gap:12px;">
+                    <!-- Ô NHẬP OTP NỀN TRẮNG -->
                     <div>
-                        <label style="display:block; font-size:12.5px; font-weight:700; color:#334155; margin-bottom:6px; text-align:center;">
-                            Nhập mã OTP (hoặc bấm xác thực SmartCA)
-                        </label>
-                        <input type="text" id="loginTtsOtp" class="control-input" style="width:100%; box-sizing:border-box; padding:12px; font-size:20px; font-weight:800; text-align:center; letter-spacing:4px; border-radius:8px; border:2px solid #005baa; color:#005baa;" placeholder="MÃ OTP" autocomplete="one-time-code">
+                        <input type="text" id="loginTtsOtp" class="control-input" 
+                            style="width:100%; box-sizing:border-box; height:44px; padding:8px 14px; font-size:18px; font-weight:700; color:#005baa; text-align:center; letter-spacing:3px; background:#ffffff; border:1px solid #94a3b8; border-radius:6px; outline:none;" 
+                            placeholder="" autocomplete="one-time-code">
                     </div>
 
-                    <div id="loginOtpStatusMsg" style="display:none; padding:10px 12px; border-radius:8px; font-size:13px; line-height:1.4;"></div>
+                    <!-- THÔNG BÁO LỖI OTP -->
+                    <div id="loginOtpStatusMsg" style="display:none; padding:8px 12px; border-radius:6px; font-size:12.5px; line-height:1.4;"></div>
 
-                    <button type="submit" id="btnDirectOtpSubmit" class="btn btn-primary" style="width:100%; padding:11px 16px; font-size:14.5px; font-weight:700; border-radius:8px; display:flex; justify-content:center; align-items:center; gap:8px;">
-                        <span>🔐 Xác Nhận OTP & Vào Dashboard</span>
-                    </button>
-
-                    <button type="button" class="btn btn-secondary" onclick="handleDirectOtpSubmit(null)" style="width:100%; padding:9px 16px; font-size:13px; font-weight:600; border-radius:8px;">
-                        📱 Tôi xác thực qua App SmartCA (Kiểm tra ngay)
+                    <!-- NÚT ĐĂNG NHẬP XANH -->
+                    <button type="submit" id="btnDirectOtpSubmit" 
+                        style="width:100%; height:44px; margin-top:4px; background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; font-size:15px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; border:none; border-radius:6px; cursor:pointer; box-shadow:0 2px 6px rgba(13, 113, 220, 0.35); display:flex; justify-content:center; align-items:center; gap:8px;">
+                        <span>ĐĂNG NHẬP</span>
                     </button>
                 </form>
 
-                <div style="text-align:center; margin-top:14px;">
-                    <a href="javascript:void(0)" onclick="backToStep1Login()" style="font-size:12.5px; color:#64748b; text-decoration:none; font-weight:600;">
+                <!-- THÔNG BÁO SỐ ĐIỆN THOẠI NHẬN OTP (Y CHANG ẢNH 2) -->
+                <div style="margin-top:18px; font-size:12px; line-height:1.6; color:#334155; border-top:1px solid #eef3f8; padding-top:14px;">
+                    <div id="otpPhoneText">
+                        Mã xác thực OTP của bạn hiện đã được gửi đến số điện thoại: <b id="otpPhoneLabel">0917969796</b>
+                    </div>
+                    <div style="margin-top:10px; color:#475569; font-size:11.8px;">
+                        Nếu số trên không phải số điện thoại của bạn thì xin vui lòng liên hệ quản trị (điện thoại 18001555 Nhánh 3 hoặc gửi email hotro.email@vnpt.vn) để đăng ký lại
+                    </div>
+                </div>
+
+                <!-- QUAY LẠI -->
+                <div style="text-align:center; margin-top:16px;">
+                    <a href="javascript:void(0)" onclick="backToStep1Login()" style="font-size:12px; color:#64748b; text-decoration:none;">
                         ⬅️ Quay lại đăng nhập tài khoản khác
                     </a>
                 </div>
@@ -1734,12 +1750,12 @@
                             } else {
                                 actionHtml = `
                                     <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                                        <span class="badge-close-yellow" title="${t.cannot_close_reason || 'Chưa đủ điều kiện đóng tự động'}">
+                                        <span class="badge-close-yellow" title="${t.cannot_close_reason || 'Chưa đủ điều kiện tự động đóng, dành cho KTV kiểm tra xử lý'}">
                                             <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
-                                            Chưa đóng được
+                                            KTV xử lý
                                         </span>
-                                        <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px; margin-top:2px;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="KTV nhập cột 10 & 11 rồi bấm để đóng qua API">
-                                            ⚡ Đóng (API)
+                                        <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px; margin-top:2px;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="KTV kiểm tra cột 10 & 11 rồi bấm để đóng thủ công qua API">
+                                            ⚡ Đóng thủ công
                                         </button>
                                     </div>
                                 `;
@@ -1965,6 +1981,8 @@
         }
 
         async function closeTtsOldApiTicket(phone, incidentTime, btnElem) {
+            if (btnElem && btnElem.disabled) return;
+
             const session = getTtsAuthSession();
             if (!session || !session.token) {
                 alert("⚠️ Bạn cần đăng nhập tài khoản TTS của mình trước khi thực hiện thao tác đóng phiếu!");
@@ -2010,15 +2028,29 @@
                     await loadTickets(true);
                     await fetchStatus();
                 } else {
-                    alert("⚠️ " + (data.message || "Thao tác đóng phiếu qua REST API thất bại."));
-                    if (btnElem) {
-                        btnElem.disabled = false;
-                        btnElem.innerHTML = originalHtml;
-                        btnElem.style.opacity = '1';
+                    // Nếu thông báo có chứa 'Lưu ý CCOS' hoặc đã đóng trên TTS
+                    if (data.message && data.message.includes('thành công')) {
+                        lastTicketsSignature = "";
+                        await loadTickets(true);
+                        await fetchStatus();
+                    } else {
+                        alert("⚠️ " + (data.message || "Thao tác đóng phiếu qua REST API thất bại."));
+                        if (btnElem) {
+                            btnElem.disabled = false;
+                            btnElem.innerHTML = originalHtml;
+                            btnElem.style.opacity = '1';
+                        }
                     }
                 }
             } catch (e) {
-                alert("Lỗi khi gửi yêu cầu đóng phiếu REST API: " + e);
+                console.warn("Lỗi kết nối khi gửi yêu cầu đóng phiếu:", e);
+                // Tự động kiểm tra lại DB xem phiếu đã thực sự đóng trên máy chủ chưa
+                setTimeout(async () => {
+                    lastTicketsSignature = "";
+                    await loadTickets(true);
+                    await fetchStatus();
+                }, 1000);
+
                 if (btnElem) {
                     btnElem.disabled = false;
                     btnElem.innerHTML = originalHtml;
@@ -2268,7 +2300,7 @@
                 const btn = document.getElementById('btnDirectLoginSubmit');
                 if (btn) {
                     btn.disabled = false;
-                    btn.innerHTML = '<span>🚀 Đăng Nhập & Vào Dashboard</span>';
+                    btn.innerHTML = '<span>ĐĂNG NHẬP</span>';
                 }
             }
         }
@@ -2414,6 +2446,11 @@
             return null;
         }
 
+        function togglePasswordVisibility() {
+            const pInp = document.getElementById('loginTtsPassword');
+            if (!pInp) return;
+            pInp.type = (pInp.type === 'password') ? 'text' : 'password';
+        }
         let currentLoginSessionId = null;
 
         async function handleDirectLoginSubmit(e) {
@@ -2439,14 +2476,14 @@
 
             if (btn) {
                 btn.disabled = true;
-                btn.innerHTML = '<span class="status-dot processing" style="width:8px; height:8px; display:inline-block;"></span> Đang xác thực với máy chủ TTS VNPT...';
+                btn.innerHTML = '<span class="status-dot processing" style="width:8px; height:8px; display:inline-block;"></span> ĐANG XỬ LÝ...';
             }
             if (msg) {
                 msg.style.display = 'block';
                 msg.style.background = '#f0f9ff';
                 msg.style.color = '#0284c7';
                 msg.style.border = '1px solid #bae6fd';
-                msg.innerText = '⏳ Đang kiểm tra thông tin tài khoản, vui lòng chờ...';
+                msg.innerText = '⏳ Đang kết nối xác thực với VNPT CAS...';
             }
 
             try {
@@ -2473,12 +2510,22 @@
                         loadTickets(true);
                     }, 500);
                 } else if (data.otp_required) {
-                    // Chuyển sang Bước 2: Nhập OTP
+                    // Chuyển sang Bước 2: Nhập OTP y chang Ảnh 2
                     currentLoginSessionId = data.session_id;
                     document.getElementById('boxStep1Login').style.display = 'none';
                     document.getElementById('boxStep2Otp').style.display = 'block';
-                    const promptMsg = document.getElementById('otpPromptMsg');
-                    if (promptMsg) promptMsg.innerText = data.message || 'Mã OTP đã được gửi về số điện thoại của bạn.';
+
+                    const userLabel = document.getElementById('otpUserLabel');
+                    if (userLabel) userLabel.innerText = data.username || username;
+                    const phoneLabel = document.getElementById('otpPhoneLabel');
+                    const phoneBox = document.getElementById('otpPhoneText');
+                    if (data.phone) {
+                        if (phoneLabel) phoneLabel.innerText = data.phone;
+                        if (phoneBox) phoneBox.style.display = 'block';
+                    } else {
+                        if (phoneBox) phoneBox.innerHTML = 'Mã xác thực OTP của bạn hiện đã được gửi đến số điện thoại đăng ký tài khoản.';
+                    }
+
                     const otpInp = document.getElementById('loginTtsOtp');
                     if (otpInp) {
                         otpInp.value = '';
@@ -2489,12 +2536,12 @@
                     const otpBtn = document.getElementById('btnDirectOtpSubmit');
                     if (otpBtn) {
                         otpBtn.disabled = false;
-                        otpBtn.innerHTML = '<span>🔐 Xác Nhận OTP & Vào Dashboard</span>';
+                        otpBtn.innerHTML = '<span>ĐĂNG NHẬP</span>';
                     }
                 } else {
                     if (btn) {
                         btn.disabled = false;
-                        btn.innerHTML = '<span>🚀 Đăng Nhập & Vào Dashboard</span>';
+                        btn.innerHTML = '<span>ĐĂNG NHẬP</span>';
                     }
                     if (msg) {
                         msg.style.background = '#fef2f2';
@@ -2506,7 +2553,7 @@
             } catch(err) {
                 if (btn) {
                     btn.disabled = false;
-                    btn.innerHTML = '<span>🚀 Đăng Nhập & Vào Dashboard</span>';
+                    btn.innerHTML = '<span>ĐĂNG NHẬP</span>';
                 }
                 if (msg) {
                     msg.style.background = '#fef2f2';
@@ -2568,7 +2615,7 @@
                 } else {
                     if (btn) {
                         btn.disabled = false;
-                        btn.innerHTML = '<span>🔐 Xác Nhận OTP & Vào Dashboard</span>';
+                        btn.innerHTML = '<span>ĐĂNG NHẬP</span>';
                     }
                     if (msg) {
                         msg.style.background = '#fef2f2';
@@ -2580,7 +2627,7 @@
             } catch(err) {
                 if (btn) {
                     btn.disabled = false;
-                    btn.innerHTML = '<span>🔐 Xác Nhận OTP & Vào Dashboard</span>';
+                    btn.innerHTML = '<span>ĐĂNG NHẬP</span>';
                 }
                 if (msg) {
                     msg.style.background = '#fef2f2';
@@ -2597,7 +2644,7 @@
             const btn = document.getElementById('btnDirectLoginSubmit');
             if (btn) {
                 btn.disabled = false;
-                btn.innerHTML = '<span>🚀 Đăng Nhập & Vào Dashboard</span>';
+                btn.innerHTML = '<span>ĐĂNG NHẬP</span>';
             }
             const msg = document.getElementById('loginTtsStatusMsg');
             if (msg) msg.style.display = 'none';

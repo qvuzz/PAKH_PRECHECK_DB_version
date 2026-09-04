@@ -342,7 +342,14 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     comment_suffix = ""
     action_suffix = ""
 
-    # 🎯 KỊCH BẢN ĐẶC THÙ 0: ĐỌC THÔNG TIN CORE (NAM, HSS PROFILE) TỪ OUTPUT JSON
+    # 🎯 KỊCH BẢN ĐẶC THÙ: BTOOLS BỊ LỖI HOẶC CHƯA ĐĂNG NHẬP (KHÔNG ĐƯỢC TỰ ĐỘNG ĐÓNG PHIẾU)
+    if clean_data is None:
+        return (
+            "LỖI KẾT NỐI BTOOLS",
+            "Không thể tra cứu dữ liệu lưu lượng BTools (chưa đăng nhập BTools hoặc máy chủ 10.159.21.241 bị lỗi/hết phiên). Cần kiểm tra lại phiên BTools trên trình duyệt Chrome.",
+            "Vui lòng mở tab BTools trên Chrome để đăng nhập hoặc kiểm tra kết nối mạng nội bộ, sau đó bấm '⚡ Tiền kiểm' để kiểm tra lại.",
+            "F8D7DA"
+        )
     sub_info = {}
     if phone_84:
         out_json_file = os.path.join(HSS_PROFILE_DIR, f"{phone_84}.json")
@@ -366,7 +373,12 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
 
     # 2. KỊCH BẢN MOBILE INTERNET 5G
     combined_report_text = f"{package_title} {ticket_content}".lower()
-    is_5g_reported = "5g" in combined_report_text
+    # Loại bỏ các cụm dung lượng như 1.5GB, 5GB, 15GB, 5G/ngày, 2.5G data... tránh nhận diện nhầm là mạng 5G
+    cleaned_5g_text = re.sub(r'\b\d+([.,]\d+)?\s*(gb|mb|giga|tb)\b', ' ', combined_report_text, flags=re.IGNORECASE)
+    cleaned_5g_text = re.sub(r'\d+([.,]\d+)?(gb|mb)\b', ' ', cleaned_5g_text, flags=re.IGNORECASE)
+    cleaned_5g_text = re.sub(r'\b\d+[.,]\d+\s*g\b', ' ', cleaned_5g_text, flags=re.IGNORECASE)
+    cleaned_5g_text = re.sub(r'\b\d+\s*g\s*/\s*(?:ngày|tháng|ngay|thang|day|thg)\b', ' ', cleaned_5g_text, flags=re.IGNORECASE)
+    is_5g_reported = ("mobile internet 5g" in package_title.lower()) or bool(re.search(r'(?<![0-9a-zA-Z.])5g(?![0-9a-zA-Z])', cleaned_5g_text, flags=re.IGNORECASE))
     if is_5g_reported:
         hss_profile = str(sub_info.get("HSS Profile") or "").strip()
         valid_5g_profiles = {"55", "56", "65", "66", "67"}

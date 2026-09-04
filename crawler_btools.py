@@ -165,11 +165,35 @@ def parse_btools_table_html(html):
     return data_rows
 
 
+def is_valid_btools_html(html):
+    """
+    Kiểm tra xem phản hồi HTML có phải là trang dữ liệu BTools hợp lệ và đã đăng nhập hay không.
+    Trả về (is_valid: bool, error_msg: str)
+    """
+    if not html or not isinstance(html, str):
+        return False, "Không nhận được phản hồi HTML từ BTools"
+    
+    # Bị chuyển hướng về trang đăng nhập CAS
+    if any(k in html for k in ["CAS – Central Authentication Service", "/cas/login", "id=\"login\"", "Tên đăng nhập"]):
+        if "/cas/" in html or "Central Authentication Service" in html or "cas-section" in html:
+            return False, "BTools chưa được đăng nhập (bị chuyển hướng về cổng xác thực CAS)"
+            
+    if "SQLException" in html or "Internal Server Error" in html or "HTTP Status 500" in html:
+        return False, "Máy chủ BTools báo lỗi cơ sở dữ liệu (SQLException / 500)"
+        
+    # Trang BTools hợp lệ: chứa bảng data_view, table customers, form tìm kiếm hoặc các cột dữ liệu
+    if any(k in html for k in ["customers", "data_view.jsp", "RAT_TYPE", "MSISDN", "DATA_VOLUME", "name=\"name\"", "Tìm Kiếm"]):
+        return True, ""
+        
+    return False, "Trang phản hồi không đúng cấu trúc BTools"
+
+
 def extract_btools_single_phone(driver, phone_84, start_d, end_d):
     """
     Tra cứu dữ liệu kỹ thuật BTools của một thuê bao.
-    Tự động ưu tiên CHẠY NGẦM qua HTTP Request (0.5s) mà không chuyển hướng tab trình duyệt.
-    Nếu thất bại sẽ tự động fallback sang Chrome.
+    Trả về:
+      - list: Danh sách các dòng dữ liệu (có thể [] nếu thuê bao thực sự không có data trong khoảng thời gian).
+      - None: Nếu BTools chưa đăng nhập, bị điều hướng về CAS, hoặc gặp lỗi kết nối/máy chủ.
     """
     target_phone = _normalize_phone(phone_84)
     s_clean = _normalize_date_btools(start_d)
@@ -179,7 +203,7 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
         f"name={target_phone}&start_d={s_clean}&end_d={e_clean}&submit=T%C3%ACm+Ki%E1%BA%BFm"
     )
 
-    print(f"[BTools] Tra cuu ngam cho thue bao: {target_phone} ({s_clean} -> {e_clean})")
+    print(f"[BTools] Tra cứu ngầm cho thuê bao: {target_phone} ({s_clean} -> {e_clean})")
 
     # --- PHƯƠNG ÁN 1: CHẠY NGẦM HOÀN TOÀN QUA HTTP REQUEST (SIÊU TỐC) ---
     cookie_str = get_btools_cookie(driver)
@@ -195,9 +219,9 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
             with urllib.request.urlopen(req, timeout=12) as resp:
                 html = resp.read().decode("utf-8", errors="ignore")
                 
-            # Kiểm tra xem có bị hết hạn phiên (bị điều hướng về CAS login) không
-            if "CAS – Central Authentication Service" in html or "/cas/login" in html:
-                print("[BTools] Phien cookie da het han, dang lay lai cookie moi tu Chrome...")
+            valid, err_reason = is_valid_btools_html(html)
+            if not valid and ("CAS" in err_reason or "đăng nhập" in err_reason):
+                print("[BTools] Phiên cookie hết hạn, đang lấy lại cookie mới từ Chrome...")
                 cookie_str = get_btools_cookie(driver, force_refresh=True)
                 if cookie_str:
                     req = urllib.request.Request(
@@ -209,16 +233,19 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
                     )
                     with urllib.request.urlopen(req, timeout=12) as resp2:
                         html = resp2.read().decode("utf-8", errors="ignore")
+                        valid, err_reason = is_valid_btools_html(html)
 
-            if "CAS – Central Authentication Service" not in html and "SQLException" not in html:
+            if valid:
                 data_rows = parse_btools_table_html(html)
                 if data_rows:
-                    print(f"[BTools HTTP Ngam] Da cao thanh cong {len(data_rows)} dong du lieu.")
+                    print(f"[BTools HTTP Ngầm] Đã cào thành công {len(data_rows)} dòng dữ liệu.")
                 else:
-                    print(f"[BTools HTTP Ngam] Thue bao {target_phone} khong phat sinh phien du lieu BTools.")
+                    print(f"[BTools HTTP Ngầm] Thuê bao {target_phone} không phát sinh phiên dữ liệu BTools.")
                 return data_rows
+            else:
+                print(f"[BTools HTTP Ngầm] Phản hồi không hợp lệ: {err_reason}")
         except Exception as ex_http:
-            print(f"[BTools] Chay ngam HTTP gap loi ({ex_http}), chuyen sang phuong an du phong...")
+            print(f"[BTools] Chạy ngầm HTTP gặp lỗi ({ex_http}), chuyển sang phương án dự phòng...")
 
     # --- PHƯƠNG ÁN 2: SILENT FETCH QUA JAVASCRIPT TRÊN TAB BTOOLS (KHÔNG RELOAD TRANG) ---
     if driver:
@@ -246,22 +273,25 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
                 html = driver.execute_async_script(js_fetch)
                 driver.switch_to.window(orig_h)
                 
-                if html and "CAS – Central Authentication Service" not in html:
+                valid, err_reason = is_valid_btools_html(html)
+                if valid:
                     data_rows = parse_btools_table_html(html)
                     if data_rows:
-                        print(f"[BTools Silent Fetch] Da cao thanh cong {len(data_rows)} dong du lieu.")
+                        print(f"[BTools Silent Fetch] Đã cào thành công {len(data_rows)} dòng dữ liệu.")
                     else:
-                        print(f"[BTools Silent Fetch] Thue bao {target_phone} khong phat sinh phien du lieu.")
+                        print(f"[BTools Silent Fetch] Thuê bao {target_phone} không phát sinh phiên dữ liệu.")
                     return data_rows
+                else:
+                    print(f"[BTools Silent Fetch] Phản hồi không hợp lệ: {err_reason}")
             else:
                 driver.switch_to.window(orig_h)
         except Exception as ex_fetch:
-            print(f"[BTools] Silent Fetch gap loi: {ex_fetch}")
+            print(f"[BTools] Silent Fetch gặp lỗi: {ex_fetch}")
 
     # --- PHƯƠNG ÁN 3: DỰ PHÒNG CUỐI CÙNG (SELENIUM NAVIGATE TRỰC TIẾP) ---
     if driver:
         try:
-            print(f"[BTools] Su dung che do tai trang truyen thong cho: {target_phone}")
+            print(f"[BTools] Sử dụng chế độ tải trang truyền thống cho: {target_phone}")
             driver.get(query_url)
             table_loaded = False
             for _ in range(20):
@@ -276,10 +306,16 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
                     break
             if table_loaded:
                 html = driver.page_source
-                data_rows = parse_btools_table_html(html)
-                print(f"[BTools Legacy] Da cao thanh cong {len(data_rows)} dong du lieu.")
-                return data_rows
+                valid, err_reason = is_valid_btools_html(html)
+                if valid:
+                    data_rows = parse_btools_table_html(html)
+                    print(f"[BTools Legacy] Đã cào thành công {len(data_rows)} dòng dữ liệu.")
+                    return data_rows
+                else:
+                    print(f"[BTools Legacy] Phản hồi không hợp lệ: {err_reason}")
         except Exception as ex_nav:
-            print(f"[BTools Legacy] Loi tai trang truyen thong: {ex_nav}")
+            print(f"[BTools Legacy] Lỗi tải trang truyền thống: {ex_nav}")
 
-    return []
+    # BTOOLS LỖI HOẶC CHƯA ĐĂNG NHẬP -> TRẢ VỀ None ĐỂ BÁO LỖI VÀ KHÔNG TỰ ĐỘNG ĐÓNG PHIẾU
+    print(f"[BTools] ⚠️ CẢNH BÁO: Không thể truy cập dữ liệu BTools cho {target_phone} (Chưa đăng nhập hoặc lỗi máy chủ). Trả về None!")
+    return None

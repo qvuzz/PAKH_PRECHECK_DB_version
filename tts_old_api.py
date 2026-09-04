@@ -260,8 +260,42 @@ def close_tts_old_ticket_api(
     Trả về (success: bool, message: str).
     """
     phone = ticket.get("phone", "")
-    ticket_id = ticket.get("ticket_id")
-    id_yeu_cau = ticket.get("id_yeu_cau")
+    ticket_id = ticket.get("ticket_id") or ticket.get("Id")
+    id_yeu_cau = ticket.get("id_yeu_cau") or ticket.get("flow_id") or ticket.get("IdYeuCau")
+    ma_ccos = ticket.get("ma_ccos") or ticket.get("ticket_code") or ticket.get("MaCCOS") or ""
+    phan_hoi_ht = ticket.get("phan_hoi_he_thong") or ticket.get("PhanHoiHeThong") or 1
+    id_he_thong = ticket.get("id_he_thong") or ticket.get("IdHeThong") or 0
+
+    # Nếu vẫn chưa có ticket_id hoặc id_yeu_cau, tự động tra cứu từ danh sách phiếu trên TTS API
+    if (not ticket_id or not id_yeu_cau) and token:
+        try:
+            active_list = fetch_tts_old_tickets_api(token)
+            clean_p = phone.replace("+84", "0").replace("84", "0", 1) if phone.startswith("84") else phone
+            for at in active_list:
+                at_p = at.get("phone", "")
+                at_r = at.get("raw_phone", "")
+                if at_p == phone or at_r == phone or at_p == clean_p or at_r == clean_p or phone.endswith(at_r):
+                    ticket_id = at.get("ticket_id")
+                    id_yeu_cau = at.get("id_yeu_cau")
+                    ma_ccos = at.get("ma_ccos") or ma_ccos
+                    phan_hoi_ht = at.get("phan_hoi_he_thong") or phan_hoi_ht
+                    id_he_thong = at.get("id_he_thong") or id_he_thong
+                    ticket["ticket_id"] = ticket_id
+                    ticket["id_yeu_cau"] = id_yeu_cau
+                    ticket["flow_id"] = id_yeu_cau
+                    ticket["ma_ccos"] = ma_ccos
+                    # Cập nhật ngược lại vào DB
+                    try:
+                        from db_manager import update_ticket_field
+                        update_ticket_field(phone, "ticket_id", ticket_id)
+                        update_ticket_field(phone, "flow_id", str(id_yeu_cau))
+                        if ma_ccos:
+                            update_ticket_field(phone, "ticket_code", ma_ccos)
+                    except Exception:
+                        pass
+                    break
+        except Exception as ex_sync:
+            print(f"⚠️ Lỗi tự động tra cứu ticket_id cho {phone}: {ex_sync}")
 
     if not ticket_id or not id_yeu_cau:
         return False, f"Phiếu {phone} thiếu ticket_id hoặc id_yeu_cau để gọi API đóng."
@@ -310,7 +344,8 @@ def close_tts_old_ticket_api(
             if res2.status_code == 200:
                 data2 = res2.json()
                 if data2.get("codeField") == -1:
-                    return False, f"Đã cập nhật phiếu nhưng lỗi kết nối CCOS: {data2.get('messageField')}"
+                    print(f"⚠️ Cảnh báo CCOS cho {phone}: {data2.get('messageField')}")
+                    return True, f"✅ Đã đóng phiếu trên TTS thành công (Lưu ý CCOS: {data2.get('messageField')})."
         except Exception as ex2:
             print(f"⚠️ Cảnh báo phản hồi CCOS cho {phone}: {ex2}")
 

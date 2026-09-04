@@ -80,7 +80,8 @@ def execute_tts_old_api_voice_cycle(driver=None):
                 "source": "tts_old_api",
                 "created_time": t.get("created_time") or inc_time,
                 "ticket_id": t.get("ticket_id"),
-                "flow_id": str(t.get("id_yeu_cau") or "")
+                "flow_id": str(t.get("id_yeu_cau") or ""),
+                "ticket_code": t.get("ma_ccos") or t.get("MaCCOS") or ""
             }
             save_or_update_ticket(rec)
 

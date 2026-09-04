@@ -221,7 +221,7 @@ def execute_tts_old_data_cycle():
             state.log("INFO", f"   ↳ Nhận định: [{status}]")
 
             # Thu thập hạ tầng
-            rats = list(set(str(r.get("RAT_TYPE_NAME", "")) for r in clean_data if r.get("RAT_TYPE_NAME")))
+            rats = list(set(str(r.get("RAT_TYPE_NAME", "")) for r in (clean_data or []) if r.get("RAT_TYPE_NAME")))
             rat_types_string = ", ".join(rats) if rats else "Không có dữ liệu"
 
             # Lọc gói cước
@@ -232,7 +232,7 @@ def execute_tts_old_data_cycle():
                     ex_codes = set(json.load(cf).get("EXCLUDED_SYSTEM_CODES", []))
             
             real_pkgs = set()
-            for r in clean_data:
+            for r in (clean_data or []):
                 sc = str(r.get("SERVICE_ID_CODE", "")).strip()
                 sn = str(r.get("SERVICE_NAME", "")).strip()
                 if sc.lower() and sc.lower() not in ex_codes:

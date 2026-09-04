@@ -101,14 +101,15 @@ def check_ticket_can_close(t):
         }
 
         can_close = excel_reader.is_level_1_auto_close_candidate(rec)
+        can_close = excel_reader.is_level_1_auto_close_candidate(rec)
         if can_close:
-            return True, "Đủ điều kiện đóng"
+            return True, "Đủ điều kiện tự động đóng"
         else:
             if norm_status == excel_reader.LEVEL_1_STATUS:
                 return False, "Hoạt động bình thường nhưng khách báo không dùng được / cần đối chiếu"
             elif norm_status == excel_reader.LEVEL_LUU_LUONG_YEU_STATUS:
                 return False, "Lưu lượng yếu nhưng chưa xác định khu vực cụ thể"
-            return False, f"Trạng thái [{status}] chưa đủ điều kiện đóng"
+            return False, f"Trạng thái [{status}] chưa đủ điều kiện tự đóng (dành cho KTV kiểm tra xử lý)"
     except Exception as e:
         return False, f"Lỗi kiểm tra điều kiện: {e}"
 

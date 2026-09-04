@@ -24,6 +24,10 @@ STATUS_TO_NGUYEN_NHAN = {
     "GÓI CƯỚC ĐÃ HẾT HẠN": "Lỗi do gói cước",
     "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC": "Lỗi do gói cước",
     "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ": "Thông tin đầu vào chưa chính xác, trùng lặp",
+    "HSS CHƯA CÓ 5G": "Lỗi do VNPT-VinaPhone khai báo dịch vụ cho khách hàng",
+    "BỊ KHÓA GPRS": "Lỗi do VNPT-VinaPhone khai báo dịch vụ cho khách hàng",
+    "THIẾU SÓNG 5G / THIẾT BỊ": "Do thiết bị đầu cuối",
+    "ĐANG SỬ DỤNG VPN / 1.1.1.1": "Do thiết bị đầu cuối",
 }
 
 # Danh sách đầy đủ các lựa chọn có trong dropdown "Nguyên nhân sự cố" trên TTS
