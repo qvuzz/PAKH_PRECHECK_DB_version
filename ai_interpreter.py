@@ -367,8 +367,8 @@ def analyze_ticket_with_ai(json_file_path):
     except Exception:
         return "null"
 
-    package_title = data.get("package_title", "Không rõ")
-    ticket_content = data.get("ticket_content", "").strip()
+    package_title = data.get("package_title") or data.get("title") or "Không rõ"
+    ticket_content = str(data.get("ticket_content") or data.get("content") or "").strip().strip('"\'').strip()
     phone = data.get("phone", "").strip()
 
     # =========================

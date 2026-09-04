@@ -128,9 +128,12 @@ def execute_tts_new_data_cycle():
             with open(json_filename, "w", encoding="utf-8") as jf:
                 json.dump({
                     "phone": phone_84,
+                    "package_title": title,
+                    "ticket_content": content,
                     "title": title,
-                    "ticket_code": ticket_code,
                     "content": content,
+                    "ticket_code": ticket_code,
+                    "btools_technical_data": clean_data if clean_data is not None else [],
                     "data": clean_data
                 }, jf, ensure_ascii=False, indent=2)
 
