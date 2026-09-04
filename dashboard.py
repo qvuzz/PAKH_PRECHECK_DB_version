@@ -230,6 +230,40 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json({"success": False, "message": "Thiếu mã token"})
             return
 
+        # 0.1 Đăng nhập trực tiếp TTS từ Dashboard (Username & Password)
+        elif parsed.path == "/api/login":
+            username = body.get("username", "").strip()
+            password = body.get("password", "").strip()
+
+            from services.auth_tts import authenticate_tts
+            result = authenticate_tts(username, password)
+
+            if result.get("success"):
+                client_ip = self.client_address[0]
+                token = result.get("token", "")
+                user_info = result.get("user", {})
+                ACTIVE_LAN_SESSIONS[client_ip] = {
+                    "token": token,
+                    "user": user_info,
+                    "timestamp": time.time()
+                }
+                user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or username
+                try:
+                    state.log("SUCCESS", f"🔑 [XÁC THỰC] {user_display} (IP: {client_ip}) đã đăng nhập TTS thành công!")
+                except Exception:
+                    pass
+                self._send_json({
+                    "success": True,
+                    "token": token,
+                    "user": user_info
+                })
+            else:
+                self._send_json({
+                    "success": False,
+                    "error": result.get("error", "Đăng nhập thất bại. Vui lòng kiểm tra lại tài khoản hoặc mật khẩu.")
+                })
+            return
+
         # 1. Bật tự động
         elif parsed.path == "/api/start":
             state.is_running = True
