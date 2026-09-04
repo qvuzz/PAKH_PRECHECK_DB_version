@@ -119,7 +119,7 @@ def run_update_tts(excel_path=None, dry_run=False, observe=False):
                 fail_count += 1
             time.sleep(1)  # đệm nhẹ giữa các lần thao tác
 
-        # Đồng bộ trạng thái 'Đã đóng' vào Cột J trong file Excel kết quả
+        # Đồng bộ trạng thái 'Đã đóng' vào Cột J trong file Excel kết quả & Database SQLite
         if success_count > 0 and not dry_run:
             try:
                 import openpyxl
@@ -139,6 +139,14 @@ def run_update_tts(excel_path=None, dry_run=False, observe=False):
             except Exception as ex_sync:
                 print(f"⚠️ Không thể cập nhật trạng thái Excel: {ex_sync}")
 
+            try:
+                from db_manager import update_ticket_field
+                for r in records:
+                    if r.get("ticket_status") == "Đã đóng":
+                        update_ticket_field(r["phone"], "ticket_status", "Đã đóng")
+            except Exception as ex_db:
+                print(f"⚠️ Không thể cập nhật trạng thái Database: {ex_db}")
+
         print("\n===================================")
         print(f"✅ Thành công: {success_count}")
         print(f"⏭️  Bỏ qua (chưa có mapping / phiếu mở lại): {skip_count}")
@@ -157,6 +165,85 @@ def run_update_tts(excel_path=None, dry_run=False, observe=False):
         return True
 
 
+def close_single_ticket_from_db(phone, incident_time=None, dry_run=False, observe=False):
+    """
+    Đóng 1 phiếu cụ thể từ database trên hệ thống TTS qua Chrome Debugging (Port 9222).
+    Trả về (success: bool, message: str)
+    """
+    from db_manager import get_all_tickets, update_ticket_field
+
+    tickets = get_all_tickets()
+    target_ticket = None
+    clean_p = "".join(filter(str.isdigit, str(phone or "")))
+    
+    # 1. Tìm chính xác theo phone và incident_time (nếu có)
+    for t in tickets:
+        t_p = "".join(filter(str.isdigit, str(t.get("phone", ""))))
+        if t_p == clean_p or (len(t_p) >= 9 and len(clean_p) >= 9 and (t_p.endswith(clean_p[-9:]) or clean_p.endswith(t_p[-9:]))):
+            if incident_time and incident_time != "--" and str(t.get("incident_time", "")).strip():
+                if str(t.get("incident_time", "")).strip() == str(incident_time).strip():
+                    target_ticket = t
+                    break
+            else:
+                target_ticket = t
+                break
+
+    # 2. Dự phòng: Tìm theo phone nếu chưa khớp incident_time
+    if not target_ticket:
+        for t in tickets:
+            t_p = "".join(filter(str.isdigit, str(t.get("phone", ""))))
+            if t_p == clean_p or (len(t_p) >= 9 and len(clean_p) >= 9 and (t_p.endswith(clean_p[-9:]) or clean_p.endswith(t_p[-9:]))):
+                target_ticket = t
+                break
+
+    if not target_ticket:
+        return False, f"Không tìm thấy phiếu của SĐT {phone} trong cơ sở dữ liệu."
+
+    status = target_ticket.get("status", "")
+    comment = target_ticket.get("comment", "")
+    action_plan = target_ticket.get("action_plan", "")
+
+    step_delay_ms = OBSERVE_STEP_DELAY_MS if observe else 0
+
+    with sync_playwright() as p:
+        try:
+            browser = browser_utils.connect_to_chrome(p)
+        except Exception as ex:
+            return False, f"Không kết nối được Chrome Debugging Port 9222: {ex}"
+
+        context = browser_utils.get_context(browser)
+        page = browser_utils.find_tts_page(context)
+
+        if page is None:
+            browser.close()
+            return False, "Không tìm thấy tab TTS đang mở trên Chrome."
+
+        result = ticket_actions.close_ticket(
+            page,
+            phone,
+            status,
+            comment,
+            action_plan,
+            dry_run=dry_run,
+            step_delay_ms=step_delay_ms
+        )
+
+        browser.close()
+
+        if result is True:
+            if not dry_run:
+                update_ticket_field(phone, "ticket_status", "Đã đóng", incident_time=incident_time)
+                try:
+                    clear_cache()
+                except Exception:
+                    pass
+            return True, f"Đã đóng thành công phiếu cho SĐT {phone} trên TTS."
+        elif result is None:
+            return False, f"Bỏ qua: Phiếu SĐT {phone} có thể là 'Phiếu mở lại' hoặc trạng thái '{status}' chưa có mapping nguyên nhân."
+        else:
+            return False, f"Thao tác đóng phiếu thất bại cho SĐT {phone}. Vui lòng kiểm tra lại tab TTS."
+
+
 def main():
     args = sys.argv[1:]
     observe = "--observe" in args
@@ -169,4 +256,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main()
+

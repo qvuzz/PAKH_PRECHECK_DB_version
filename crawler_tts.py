@@ -2,7 +2,7 @@
 import time
 from tab_cleaner import close_blank_tabs
 
-def get_vnpt_tickets(driver):
+def get_vnpt_tickets(driver, service_type=None):
     # Dọn dẹp các tab trống rác trước khi bắt đầu
     close_blank_tabs(driver)
 
@@ -36,6 +36,28 @@ def get_vnpt_tickets(driver):
     except Exception:
         pass
 
+    # 3. Tự động làm mới dữ liệu danh sách phiếu trên TTS vào đầu chu kỳ
+    try:
+        refreshed = driver.execute_script("""
+            var btn = Array.from(document.querySelectorAll('button, input[type="button"], a')).find(function(el) {
+                return (el.innerText || el.value || '').trim().toLowerCase() === 'tìm kiếm';
+            });
+            if (btn) {
+                btn.click();
+                return true;
+            }
+            return false;
+        """)
+        if refreshed:
+            print("🔄 Đã bấm nút [Tìm kiếm] trên TTS để nạp mới dữ liệu phiếu cho chu kỳ...")
+            time.sleep(1.5)
+        else:
+            print("🔄 Không thấy nút [Tìm kiếm], tải lại URL trang sự cố TTS...")
+            driver.get("https://tts.vnpt.vn/#/xl-xu-ly-su-co/xu-ly-su-co-new")
+            time.sleep(2.0)
+    except Exception as ex_ref:
+        print(f"⚠️ Lưu ý khi làm mới bảng TTS: {ex_ref}")
+
     # Chờ bảng #myTable xuất hiện động (tối đa 8s, xong ngay khi bảng xuất hiện)
     for _ in range(25):
         has_table = driver.execute_script("return !!(document.getElementById('myTable') || document.querySelector('table[class*=\"dataTable\"]'));")
@@ -62,20 +84,30 @@ def get_vnpt_tickets(driver):
         var targetTable = document.getElementById('myTable') || document.querySelector('table[class*="dataTable"]');
         if (!targetTable) return callback([]);
 
-        // 1. DÒ TÌM CHÍNH XÁC VỊ TRÍ CỘT NỘI DUNG VÀ NGÀY YÊU CẦU TỪ HEADER
+        // 1. DÒ TÌM CHÍNH XÁC VỊ TRÍ CÁC CỘT TỪ HEADER
+        var title_column_idx = -1;
+        var phone_column_idx = -1;
         var content_column_idx = -1;
         var created_time_column_idx = -1;
         var headers = targetTable.querySelectorAll('thead th');
         headers.forEach(function(th, idx) {
             var thText = (th.innerText || th.textContent || "").trim().toLowerCase();
+            if (thText.includes('tiêu đề') || thText.includes('tieu de')) {
+                title_column_idx = idx;
+            }
+            if (thText.includes('điện thoại') || thText.includes('dien thoai') || thText.includes('sđt') || thText.includes('sdt')) {
+                phone_column_idx = idx;
+            }
             if (thText.includes('nội dung') || thText.includes('noidung')) {
-                content_column_idx = idx; // Khóa vị trí cột nội dung
+                content_column_idx = idx;
             }
             if (thText.includes('ngày yêu cầu') || thText.includes('ngay yeu cau') || thText.includes('thời gian') || thText.includes('ngay tao')) {
-                created_time_column_idx = idx; // Khóa vị trí cột ngày yêu cầu
+                created_time_column_idx = idx;
             }
         });
 
+        if (title_column_idx === -1) title_column_idx = 2;
+        if (phone_column_idx === -1) phone_column_idx = 3;
         if (content_column_idx === -1) content_column_idx = 4;
         if (created_time_column_idx === -1) created_time_column_idx = 5;
 
@@ -83,22 +115,34 @@ def get_vnpt_tickets(driver):
         var rows = targetTable.querySelectorAll('tbody tr');
 
         function closeModalSafely() {
-            var closeButtons = document.querySelectorAll('xl-xu-ly-lich-su .close, xl-xu-ly-lich-su .btn-close, xl-xu-ly-lich-su button, .modal.show .close, .modal.show .btn-close, .modal.in .close, .modal.in .btn-close');
+            var closeButtons = document.querySelectorAll('.modal.in .close, .modal.in .btn-close, .modal.in button, xl-xu-ly-lich-su .close, xl-xu-ly-lich-su .btn-close, xl-xu-ly-lich-su button');
             closeButtons.forEach(function(b) {
                 var t = (b.innerText || b.textContent || "").trim();
                 if (t === '×' || t === 'Đóng' || t === 'Thoát' || b.classList.contains('close') || b.classList.contains('btn-close')) {
-                    b.click();
+                    try { b.click(); } catch(e) {}
                 }
             });
             if (window.jQuery) {
                 try {
-                    jQuery('.modal').modal('hide');
-                    jQuery('xl-xu-ly-lich-su').closest('.modal').modal('hide');
-                    jQuery('.modal-backdrop').remove();
-                    jQuery('body').removeClass('modal-open');
+                    window.jQuery('.modal.in').modal('hide');
+                    window.jQuery('.modal-backdrop').remove();
+                    window.jQuery('body').removeClass('modal-open');
                 } catch(e) {}
             }
+            document.querySelectorAll('.modal.in').forEach(function(m) {
+                m.classList.remove('in');
+                m.style.display = 'none';
+            });
+            document.querySelectorAll('.modal-backdrop').forEach(function(el) { el.remove(); });
+            document.body.classList.remove('modal-open');
         }
+
+        closeModalSafely();
+        await new Promise(r => setTimeout(r, 300));
+
+        var rows = Array.from(targetTable.querySelectorAll('tbody > tr')).filter(function(r) {
+            return r.querySelectorAll('td').length >= 4;
+        });
 
         for (var i = 0; i < rows.length; i++) {
             var row = rows[i];
@@ -109,86 +153,84 @@ def get_vnpt_tickets(driver):
             var title = "";
             var content = ""; 
             var grid_date = "";
-            var phone_index = -1;
 
-            // Dò tìm vị trí cột số điện thoại thực tế của hàng này
-            cells.forEach(function(cell, idx) {
-                var cellText = (cell.innerText || cell.textContent || "").trim();
-                var cleanText = cellText.replace(/\\s+/g, '');
-                if (/^\\d{9,11}$/.test(cleanText) && phone_index === -1) {
-                    phone = cleanText;
-                    phone_index = idx;
+            // Lấy số điện thoại từ cột phone_column_idx hoặc tìm ô có định dạng SĐT
+            if (cells.length > phone_column_idx) {
+                var rawPhone = (cells[phone_column_idx].innerText || cells[phone_column_idx].textContent || "").trim().replace(/\\s+/g, '');
+                if (/^\\d{9,11}$/.test(rawPhone)) {
+                    phone = rawPhone;
                 }
-            });
+            }
+            if (!phone) {
+                cells.forEach(function(cell, idx) {
+                    var cellText = (cell.innerText || cell.textContent || "").trim().replace(/\\s+/g, '');
+                    if (/^\\d{9,11}$/.test(cellText) && !phone) {
+                        phone = cellText;
+                    }
+                });
+            }
 
-            if (phone_index !== -1) {
-                var title_cell_idx = phone_index > 0 ? phone_index - 1 : 0;
-                title = (cells[title_cell_idx].innerText || cells[title_cell_idx].textContent || "").trim();
+            // Lấy tiêu đề dịch vụ thực tế từ cột title_column_idx
+            if (cells.length > title_column_idx) {
+                title = (cells[title_column_idx].innerText || cells[title_column_idx].textContent || "").trim();
+            }
 
-                if (cells.length > content_column_idx) {
-                    var contentCell = cells[content_column_idx];
-                    content = (contentCell.textContent || contentCell.innerText || "").trim();
-                    content = content.replace(/\\s*👁\\s*Xem thêm/gi, "").replace(/\\s*Xem thêm/gi, "");
-                    content = content.replace(/\\n{2,}/g, ' ').replace(/\\s+/g, ' ').trim();
-                }
+            if (cells.length > content_column_idx) {
+                var contentCell = cells[content_column_idx];
+                content = (contentCell.textContent || contentCell.innerText || "").trim();
+                content = content.replace(/\\s*👁\\s*Xem thêm/gi, "").replace(/\\s*Xem thêm/gi, "");
+                content = content.replace(/\\n{2,}/g, ' ').replace(/\\s+/g, ' ').trim();
+            }
 
-                if (created_time_column_idx !== -1 && cells.length > created_time_column_idx) {
-                    grid_date = (cells[created_time_column_idx].innerText || cells[created_time_column_idx].textContent || "").trim();
-                }
+            if (created_time_column_idx !== -1 && cells.length > created_time_column_idx) {
+                grid_date = (cells[created_time_column_idx].innerText || cells[created_time_column_idx].textContent || "").trim();
             }
 
             if (!phone) continue;
 
-            // 🛡️ BỘ LỌC DỊCH VỤ NGAY TẠI TẦNG CÀO:
-            // Chỉ xử lý Mobile Internet, LOẠI BỎ 'Gói cước Mobile Internet' và các dịch vụ khác (Cố định, MyTV, Spam...)
-            // Không mở popup Lịch sử xử lý cho các dòng không liên quan!
-            var titleLower = title.toLowerCase();
-            if (titleLower.includes('gói cước mobile internet') || titleLower.includes('goi cuoc mobile internet')) {
-                continue;
-            }
-            if (!titleLower.includes('mobile internet')) {
-                continue;
-            }
-
-            // 🎯 MỞ MODAL LỊCH SỬ XỬ LÝ ĐỂ LẤY THỜI ĐIỂM SỰ CỐ CHÍNH XÁC (23/08/2026 16:51)
+            // 🎯 MỞ MODAL LỊCH SỬ XỬ LÝ ĐỂ LẤY CHÍNH XÁC NGÀY TIẾP NHẬN & THỜI ĐIỂM SỰ CỐ BƯỚC 1.1
             var incident_time = "";
-            var historyBtn = Array.from(row.querySelectorAll('a, button, span')).find(function(el){
-                var t = (el.innerText || '').toLowerCase();
+            var reception_time = "";
+            var historyLink = Array.from(row.querySelectorAll('a')).find(function(el){
+                var t = (el.textContent || el.innerText || '').toLowerCase().replace(/\\s+/g, ' ');
                 return t.includes('lịch sử xử lý') && t.includes('yêu cầu');
             });
 
-            if (historyBtn) {
+            if (historyLink) {
                 try {
-                    historyBtn.click();
-                    for (var w = 0; w < 10; w++) {
-                        await new Promise(r => setTimeout(r, 45));
-                        var modal = document.querySelector('xl-xu-ly-lich-su');
-                        if (modal && modal.innerText && modal.innerText.length > 20) {
-                            var m = modal.innerText.match(/THỜI ĐIỂM XẢY RA SỰ CỐ:\\s*([\\d/\\-\\s:]+)/i);
-                            if (m) {
-                                incident_time = m[1].trim();
-                                break;
-                            }
-                            var m2 = modal.innerText.match(/Ngày tiếp nhận[\\s\\t:]+([\\d/\\-\\s:]+)/i);
-                            if (m2 && !incident_time) {
-                                incident_time = m2[1].trim();
-                            }
+                    closeModalSafely();
+                    await new Promise(r => setTimeout(r, 120));
+                    historyLink.scrollIntoView({block: 'center'});
+                    await new Promise(r => setTimeout(r, 100));
+                    historyLink.click();
+                    for (var w = 0; w < 35; w++) {
+                        await new Promise(r => setTimeout(r, 100));
+                        var modal = document.querySelector('.modal.in xl-xu-ly-lich-su') || document.querySelector('xl-xu-ly-lich-su');
+                        if (modal && modal.innerText && modal.innerText.length > 50) {
+                            var text = modal.innerText;
+                            var mInc = text.match(/THỜI\\s*ĐIỂM\\s*XẢY\\s*RA\\s*SỰ\\s*CỐ[:\\s]*([\\d]{1,2}[/-][\\d]{1,2}[/-][\\d]{2,4}(?:\\s+[\\d]{1,2}:[\\d]{1,2}(?::[\\d]{1,2})?)?)/i);
+                            if (mInc) incident_time = mInc[1].trim();
+                            var mStep1 = text.match(/Bước\\s*1(?:\\.1)?[\\s\\S]*?(\\d{1,2}\\/\\d{1,2}\\/\\d{4}\\s+\\d{1,2}:\\d{1,2})/i);
+                            if (mStep1) reception_time = mStep1[1].trim();
                             break;
                         }
                     }
                     closeModalSafely();
-                    await new Promise(r => setTimeout(r, 50));
+                    await new Promise(r => setTimeout(r, 150));
                 } catch(e) {
                     closeModalSafely();
                 }
             }
 
+            var final_incident_time = incident_time || reception_time || grid_date;
+            var final_created_time = reception_time || incident_time || grid_date;
+
             data_rows.push({ 
                 "title": title, 
                 "phone": phone, 
                 "content": content,
-                "created_time": incident_time || grid_date,
-                "incident_time": incident_time || grid_date
+                "created_time": final_created_time,
+                "incident_time": final_incident_time
             });
         }
 
@@ -199,9 +241,11 @@ def get_vnpt_tickets(driver):
 
     crawlTableWithAccurateIncidentTime();
     """
-    # 🎯 JS: LẤY DANH SÁCH SỐ TRANG THỰC TẾ TRÊN TẤT CẢ CÁC THANH PAGINATION
+    # 🎯 JS: LẤY DANH SÁCH SỐ TRANG THỰC TẾ TRÊN TẤT CẢ CÁC THANH PAGINATION ĐANG HIỂN THỊ
     get_page_numbers_js = """
-    var allUls = Array.from(document.querySelectorAll('ul.pagination, .pagination'));
+    var allUls = Array.from(document.querySelectorAll('ul.pagination, .pagination, [class*="pagination"]')).filter(function(el) {
+        return el.offsetParent !== null;
+    });
     var maxNums = [];
     allUls.forEach(function(ul) {
         var links = Array.from(ul.querySelectorAll('a, button, li'));
@@ -223,10 +267,12 @@ def get_vnpt_tickets(driver):
 
     click_page_number_js = """
     var targetPage = arguments[0];
-    var allUls = Array.from(document.querySelectorAll('ul.pagination, .pagination'));
+    var allUls = Array.from(document.querySelectorAll('ul.pagination, .pagination, [class*="pagination"]')).filter(function(el) {
+        return el.offsetParent !== null;
+    });
     for (var i = 0; i < allUls.length; i++) {
         var ul = allUls[i];
-        var links = Array.from(ul.querySelectorAll('li, a'));
+        var links = Array.from(ul.querySelectorAll('li, a, button'));
         var target = links.find(function(a) {
             var t = (a.textContent || '').trim();
             var m = t.match(/^(\\d+)/);
@@ -296,7 +342,7 @@ def get_vnpt_tickets(driver):
 
         # Bung "Xem thêm" trước khi cào (áp dụng cho từng trang)
         driver.execute_script(click_js)
-        time.sleep(0.6)
+        time.sleep(1.0)
 
         page_data = driver.execute_async_script(vnpt_js_script)
         if page_data:
@@ -311,5 +357,10 @@ def get_vnpt_tickets(driver):
             seen.add(row["phone"])
             dedup_rows.append(row)
 
-    print(f"📊 Tổng cộng {len(dedup_rows)} thuê bao độc nhất sau khi quét toàn bộ {total_pages} trang.")
+    if service_type == "data":
+        dedup_rows = [r for r in dedup_rows if "mobile internet" in str(r.get("title", "")).lower() and "gói cước" not in str(r.get("title", "")).lower()]
+    elif service_type == "voice_sms":
+        dedup_rows = [r for r in dedup_rows if not ("mobile internet" in str(r.get("title", "")).lower() and "gói cước" not in str(r.get("title", "")).lower())]
+
+    print(f"📊 Tổng cộng {len(dedup_rows)} thuê bao sau khi lọc (service_type={service_type}).")
     return dedup_rows, tts_tab_handle

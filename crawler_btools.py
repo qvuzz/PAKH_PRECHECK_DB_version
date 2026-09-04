@@ -1,74 +1,233 @@
 import time
+import urllib.request
+import re
 
-def extract_btools_single_phone(driver, phone_84, start_d, end_d):
-    query_url = (
-        f"http://10.159.21.241:9267/B_tools_v2/data_view.jsp?"
-        f"name={phone_84}&start_d={start_d}&end_d={end_d}&submit=T%C3%ACm+Ki%E1%BA%BFm"
-    )
-    
-    print(f"🌐 Đang chuyển hướng dữ liệu BTools đến mục tiêu: {phone_84}")
-    driver.get(query_url) # Thay thế hoàn toàn window.open giúp khóa cứng luồng xử lý
-    
-    # Chờ trang tải bảng dữ liệu (Tối đa 8 giây)
-    table_loaded = False
-    for _ in range(30):
-        time.sleep(0.5)
-        # Kiểm tra sự xuất hiện của bảng BTools đích thực
-        has_table = driver.execute_script("""
-            var tbl = document.querySelector('table');
-            if(!tbl) return false;
-            return tbl.innerText.toUpperCase().includes("RAT_TYPE") || tbl.innerText.toUpperCase().includes("MSISDN");
-        """)
-        if has_table:
-            table_loaded = True
-            break
-            
-    if not table_loaded:
-        print(f"⚠️ Không tìm thấy bảng dữ liệu kỹ thuật hoặc thuê bao {phone_84} không có dữ liệu trên hệ thống.")
+# Global cache cho session cookie BTools
+_BTOOLS_COOKIE_CACHE = None
+
+
+def _normalize_phone(phone_84):
+    clean_p = "".join(filter(str.isdigit, str(phone_84 or "").strip()))
+    if clean_p.startswith("84") and len(clean_p) == 11:
+        return clean_p
+    elif clean_p.startswith("0") and len(clean_p) == 10:
+        return "84" + clean_p[1:]
+    elif len(clean_p) == 9:
+        return "84" + clean_p
+    elif clean_p.startswith("0"):
+        return "84" + clean_p[1:]
+    elif not clean_p.startswith("84"):
+        return "84" + clean_p
+    return clean_p
+
+
+def get_btools_cookie(driver=None, force_refresh=False):
+    """
+    Lấy cookie JSESSIONID từ Chrome tab BTools và cache lại.
+    Nếu chưa có, quét các tab của driver để lấy cookie.
+    """
+    global _BTOOLS_COOKIE_CACHE
+    if _BTOOLS_COOKIE_CACHE and not force_refresh:
+        return _BTOOLS_COOKIE_CACHE
+
+    if not driver:
+        return _BTOOLS_COOKIE_CACHE
+
+    orig_handle = None
+    try:
+        orig_handle = driver.current_window_handle
+    except Exception:
+        pass
+
+    cookie_val = None
+    try:
+        for handle in driver.window_handles:
+            try:
+                driver.switch_to.window(handle)
+                if "10.159.21.241" in driver.current_url:
+                    cookies = driver.get_cookies()
+                    cookie_parts = [f"{c['name']}={c['value']}" for c in cookies]
+                    if cookie_parts:
+                        cookie_val = "; ".join(cookie_parts)
+                        break
+            except Exception:
+                continue
+    finally:
+        if orig_handle:
+            try:
+                driver.switch_to.window(orig_handle)
+            except Exception:
+                pass
+
+    if cookie_val:
+        _BTOOLS_COOKIE_CACHE = cookie_val
+    return _BTOOLS_COOKIE_CACHE
+
+
+def parse_btools_table_html(html):
+    """
+    Bóc tách bảng dữ liệu BTools từ mã nguồn HTML.
+    Trả về danh sách dict tương thích 100% với cấu trúc dữ liệu cũ.
+    """
+    if not html:
         return []
 
-    # Script JS bóc tách chuẩn xác tuyệt đối các cột dữ liệu theo tiêu đề bảng
-    btools_js_script = """
-    var table = document.querySelector('table');
-    if (!table) return null;
+    # 1. Tìm danh sách tiêu đề th
+    ths = [
+        re.sub(r'<[^>]+>', '', th).strip().upper() 
+        for th in re.findall(r'<th[^>]*>(.*?)</th>', html, re.DOTALL | re.IGNORECASE)
+    ]
     
-    var headers = table.querySelectorAll('thead th, tr:first-child th, tr:first-child td, tr th');
-    var colIndices = { msisdn: -1, rat_type: -1, uplink: -1, downlink: -1, time: -1, service_id: -1 };
+    col_idx = {
+        name: ths.index(name) if name in ths else -1
+        for name in [
+            'MSISDN', 
+            'RAT_TYPE', 
+            'DATA_VOLUME_UPLINK', 
+            'DATA_VOLUME_DOWNLINK', 
+            'RECORD_OPENING_TIME', 
+            'SERVICE_ID'
+        ]
+    }
     
-    headers.forEach(function(th, idx) {
-        var text = (th.innerText || th.textContent || "").trim().toUpperCase();
-        if (text === "MSISDN") colIndices.msisdn = idx;
-        if (text === "RAT_TYPE") colIndices.rat_type = idx;
-        if (text === "DATA_VOLUME_UPLINK") colIndices.uplink = idx;
-        if (text === "DATA_VOLUME_DOWNLINK") colIndices.downlink = idx;
-        if (text === "RECORD_OPENING_TIME") colIndices.time = idx;
-        if (text === "SERVICE_ID") colIndices.service_id = idx;
-    });
+    # Kiểm tra xem có cột tối thiểu không
+    if col_idx['MSISDN'] == -1 and col_idx['RAT_TYPE'] == -1:
+        return []
 
-    var data_rows = [];
-    var rows = table.querySelectorAll('tbody tr, tr');
-    rows.forEach(function(row) {
-        var cells = row.querySelectorAll('td');
-        if (cells.length === 0 || cells.length <= Math.max(colIndices.msisdn, colIndices.time)) return;
-        
-        var firstCellText = (cells[0].innerText || cells[0].textContent || "").trim().toUpperCase();
-        if (firstCellText === "MSISDN" || firstCellText.includes("DANH SÁCH") || firstCellText.includes("BƯỚC")) return;
+    max_idx = max(col_idx.values())
+    trs = re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.DOTALL | re.IGNORECASE)
+    data_rows = []
 
-        data_rows.push({
-            "MSISDN": colIndices.msisdn !== -1 ? (cells[colIndices.msisdn].innerText || cells[colIndices.msisdn].textContent || "").trim() : "",
-            "RAT_TYPE": colIndices.rat_type !== -1 ? (cells[colIndices.rat_type].innerText || cells[colIndices.rat_type].textContent || "").trim() : "",
-            "DATA_VOLUME_UPLINK": colIndices.uplink !== -1 ? (cells[colIndices.uplink].innerText || cells[colIndices.uplink].textContent || "").trim() : "",
-            "DATA_VOLUME_DOWNLINK": colIndices.downlink !== -1 ? (cells[colIndices.downlink].innerText || cells[colIndices.downlink].textContent || "").trim() : "",
-            "RECORD_OPENING_TIME": colIndices.time !== -1 ? (cells[colIndices.time].innerText || cells[colIndices.time].textContent || "").trim() : "",
-            "SERVICE_ID": colIndices.service_id !== -1 ? (cells[colIndices.service_id].innerText || cells[colIndices.service_id].textContent || "").trim() : ""
-        });
-    });
-    return data_rows;
+    for tr in trs:
+        tds = [
+            re.sub(r'<[^>]+>', '', td).strip() 
+            for td in re.findall(r'<td[^>]*>(.*?)</td>', tr, re.DOTALL | re.IGNORECASE)
+        ]
+        if len(tds) > max_idx:
+            first_cell = tds[0].upper()
+            if first_cell == 'MSISDN' or 'DANH SÁCH' in first_cell or 'BƯỚC' in first_cell:
+                continue
+            data_rows.append({
+                k: tds[v] if v != -1 and v < len(tds) else '' 
+                for k, v in col_idx.items()
+            })
+
+    return data_rows
+
+
+def extract_btools_single_phone(driver, phone_84, start_d, end_d):
     """
-    btools_data = driver.execute_script(btools_js_script)
-    
-    if btools_data:
-        print(f"✅ Đã cào thành công {len(btools_data)} dòng dữ liệu kỹ thuật.")
-    else:
-        btools_data = []
-    return btools_data
+    Tra cứu dữ liệu kỹ thuật BTools của một thuê bao.
+    Tự động ưu tiên CHẠY NGẦM qua HTTP Request (0.5s) mà không chuyển hướng tab trình duyệt.
+    Nếu thất bại sẽ tự động fallback sang Chrome.
+    """
+    target_phone = _normalize_phone(phone_84)
+    query_url = (
+        f"http://10.159.21.241:9267/B_tools_v2/data_view.jsp?"
+        f"name={target_phone}&start_d={start_d}&end_d={end_d}&submit=T%C3%ACm+Ki%E1%BA%BFm"
+    )
+
+    print(f"[BTools] Tra cuu ngam cho thue bao: {target_phone} ({start_d} -> {end_d})")
+
+    # --- PHƯƠNG ÁN 1: CHẠY NGẦM HOÀN TOÀN QUA HTTP REQUEST (SIÊU TỐC) ---
+    cookie_str = get_btools_cookie(driver)
+    if cookie_str:
+        try:
+            req = urllib.request.Request(
+                query_url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Cookie": cookie_str
+                }
+            )
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+                
+            # Kiểm tra xem có bị hết hạn phiên (bị điều hướng về CAS login) không
+            if "CAS – Central Authentication Service" in html or "/cas/login" in html:
+                print("[BTools] Phien cookie da het han, dang lay lai cookie moi tu Chrome...")
+                cookie_str = get_btools_cookie(driver, force_refresh=True)
+                if cookie_str:
+                    req = urllib.request.Request(
+                        query_url,
+                        headers={
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                            "Cookie": cookie_str
+                        }
+                    )
+                    with urllib.request.urlopen(req, timeout=12) as resp2:
+                        html = resp2.read().decode("utf-8", errors="ignore")
+
+            if "CAS – Central Authentication Service" not in html:
+                data_rows = parse_btools_table_html(html)
+                if data_rows:
+                    print(f"[BTools HTTP Ngam] Da cao thanh cong {len(data_rows)} dong du lieu.")
+                else:
+                    print(f"[BTools HTTP Ngam] Thue bao {target_phone} khong phat sinh phien du lieu BTools.")
+                return data_rows
+        except Exception as ex_http:
+            print(f"[BTools] Chay ngam HTTP gap loi ({ex_http}), chuyen sang phuong an du phong...")
+
+    # --- PHƯƠNG ÁN 2: SILENT FETCH QUA JAVASCRIPT TRÊN TAB BTOOLS (KHÔNG RELOAD TRANG) ---
+    if driver:
+        try:
+            btools_handle = None
+            orig_h = driver.current_window_handle
+            for h in driver.window_handles:
+                try:
+                    driver.switch_to.window(h)
+                    if "10.159.21.241" in driver.current_url:
+                        btools_handle = h
+                        break
+                except Exception:
+                    continue
+
+            if btools_handle:
+                driver.switch_to.window(btools_handle)
+                js_fetch = f"""
+                var done = arguments[arguments.length - 1];
+                fetch('{query_url}')
+                    .then(r => r.text())
+                    .then(html => done(html))
+                    .catch(err => done(''));
+                """
+                html = driver.execute_async_script(js_fetch)
+                driver.switch_to.window(orig_h)
+                
+                if html and "CAS – Central Authentication Service" not in html:
+                    data_rows = parse_btools_table_html(html)
+                    if data_rows:
+                        print(f"[BTools Silent Fetch] Da cao thanh cong {len(data_rows)} dong du lieu.")
+                    else:
+                        print(f"[BTools Silent Fetch] Thue bao {target_phone} khong phat sinh phien du lieu.")
+                    return data_rows
+            else:
+                driver.switch_to.window(orig_h)
+        except Exception as ex_fetch:
+            print(f"[BTools] Silent Fetch gap loi: {ex_fetch}")
+
+    # --- PHƯƠNG ÁN 3: DỰ PHÒNG CUỐI CÙNG (SELENIUM NAVIGATE TRỰC TIẾP) ---
+    if driver:
+        try:
+            print(f"[BTools] Su dung che do tai trang truyen thong cho: {target_phone}")
+            driver.get(query_url)
+            table_loaded = False
+            for _ in range(20):
+                time.sleep(0.4)
+                has_table = driver.execute_script("""
+                    var tbl = document.querySelector('table');
+                    if(!tbl) return false;
+                    return tbl.innerText.toUpperCase().includes("RAT_TYPE") || tbl.innerText.toUpperCase().includes("MSISDN");
+                """)
+                if has_table:
+                    table_loaded = True
+                    break
+            if table_loaded:
+                html = driver.page_source
+                data_rows = parse_btools_table_html(html)
+                print(f"[BTools Legacy] Da cao thanh cong {len(data_rows)} dong du lieu.")
+                return data_rows
+        except Exception as ex_nav:
+            print(f"[BTools Legacy] Loi tai trang truyen thong: {ex_nav}")
+
+    return []

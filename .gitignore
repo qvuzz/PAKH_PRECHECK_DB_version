@@ -42,6 +42,11 @@ temp.txt
 # Cấu hình bí mật - KHÔNG BAO GIỜ commit file này
 .env
 
+# Scratch & Token cache
+scratch_*
+ttsnew_token_cache.json
+screenshot_*.png
+
 # OS / editor artifacts
 .DS_Store
 Thumbs.db

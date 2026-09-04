@@ -44,11 +44,15 @@ def normalize_phone_vn(phone_raw):
     clean = "".join(filter(str.isdigit, str(phone_raw or "").strip()))
     if not clean:
         return ""
-    if clean.startswith("84"):
+    if clean.startswith("84") and len(clean) == 11:
         return clean
-    if clean.startswith("0"):
+    if clean.startswith("0") and len(clean) == 10:
         return "84" + clean[1:]
     if len(clean) == 9:
+        return "84" + clean
+    if clean.startswith("0"):
+        return "84" + clean[1:]
+    if not clean.startswith("84"):
         return "84" + clean
     return clean
 
@@ -180,8 +184,7 @@ def main():
         # Chuẩn hóa số điện thoại chuẩn 84
         phone_84 = normalize_phone_vn(phone)
 
-        # Chuyển sang tab BTools để cào dữ liệu
-        driver.switch_to.window(btools_tab_handle)
+        # Tra cứu BTools (chạy ngầm tự động)
         raw_btools_data = extract_btools_single_phone(driver, phone_84, start_d, end_d)
         clean_data = standardize_btools_data(raw_btools_data)
 
@@ -241,7 +244,8 @@ def main():
             cem_data_string = f"Lỗi CEM: {e}"
         # 🎯 BÓC TÁCH THỜI ĐIỂM SỰ CỐ / TIẾP NHẬN
         from report_bot import extract_incident_time
-        incident_time_string = extract_incident_time(content, ticket.get("created_time", ""))
+        incident_time_string = ticket.get("incident_time") or extract_incident_time(content, ticket.get("created_time", ""))
+        created_time_string = ticket.get("created_time") or incident_time_string
 
         # Phân tích kỹ thuật & chuẩn đoán lỗi (kết hợp BTools + SAPC + CEM + App Usage + Mốc thời gian tiếp nhận)
         status, comment, action_plan, color = analyze_subscriber_status(
@@ -283,7 +287,7 @@ def main():
             "package_title": title,
             "incident_time": incident_time_string,
             "ticket_content": content,
-            "created_time": ticket.get("created_time", ""),
+            "created_time": created_time_string,
             "real_packages": final_packages_string,
             "rat_types": rat_types_string,
             "cem_data": cem_data_string,

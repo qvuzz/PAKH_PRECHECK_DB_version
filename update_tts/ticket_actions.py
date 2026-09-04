@@ -24,9 +24,11 @@ def normalize_phone_for_search(phone):
     Bỏ tiền tố "84" để lấy phần số lõi, dùng để so khớp dạng "chứa chuỗi con" - vẫn tìm đúng
     dù TTS hiển thị có/không có số 0 ở đầu.
     """
-    p = phone.strip()
-    if p.startswith("84"):
+    p = "".join(filter(str.isdigit, str(phone or "").strip()))
+    if p.startswith("84") and len(p) >= 11:
         return p[2:]
+    if p.startswith("0") and len(p) >= 10:
+        return p[1:]
     return p
 
 
@@ -169,8 +171,10 @@ def fill_nguyen_nhan(modal, nguyen_nhan_text, phone, step_delay_ms=0):
     try:
         # ngx-bootstrap TypeaheadContainerComponent render <ul class="dropdown-menu"><li><a>...</a></li></ul>
         # Handler click gắn ở từng <li>/<a>, không phải ở cả khối .dropdown-menu -> phải nhắm đúng item.
-        # Tìm item có chứa FULL text (không chỉ prefix) để tránh chọn nhầm khi nhiều gợi ý cùng prefix.
-        suggestion = modal.page.locator(".dropdown-menu:visible li", has_text=nguyen_nhan_text).first
+        suggestion = modal.page.locator(
+            ".dropdown-menu:visible li, .typeahead-container li, typeahead-container li, [role='listbox'] li, .dropdown-menu:visible a, [role='option']",
+            has_text=nguyen_nhan_text
+        ).first
         suggestion.wait_for(state="visible", timeout=4000)
         suggestion.click(timeout=3000)
         print(f"   ↳ [4/6] Đã chọn nguyên nhân: '{nguyen_nhan_text}'.")

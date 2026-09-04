@@ -1,232 +1,144 @@
-# 🛡️ PAKH Precheck — Hệ thống Phân tích Sự cố Mạng VNPT
+# 🛡️ VNPT TTS Precheck — Hệ Thống Tiền Kiểm Phản Ánh Khách Hàng
 
-> **Tự động hóa quy trình kiểm tra, phân tích và báo cáo sự cố mạng di động Vinaphone/VNPT**
-> Kết hợp Selenium crawling + Rule-based Engine + Groq AI (Qwen 3.6 27B reasoning model) + Auto Update TTS
+> **Nền tảng tự động hóa tiền kiểm tra, phân tích hạ tầng Core và đóng phiếu sự cố mạng di động VNPT / VinaPhone.**  
+> Hỗ trợ song song cả **Hệ thống TTS Cũ** (`tts.vnpt.vn`) và **Hệ thống TTS Mới** (`tts.vnptnet.vn`), tích hợp phân tích AI, tra cứu hạ tầng Core (HSS/HLR/Cell ID/SAPC), BTools và Dashboard điều hành tập trung.
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://python.org)
-[![Groq AI](https://img.shields.io/badge/AI-Groq%20%7C%20Qwen3.6--27B-orange)](https://groq.com)
+[![VNPT](https://img.shields.io/badge/VNPT-Brand%20Blue-005baa)](https://vnpt.vn)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ---
 
-## 📋 Tổng quan
+## 📋 Mục Lục
 
-**PAKH Precheck** là công cụ nội bộ tự động hóa toàn bộ pipeline xử lý phiếu sự cố mạng di động, từ việc **cào dữ liệu thực tế** từ hệ thống VNPT TTS & BTools, **phân tích kỹ thuật**, **xuất báo cáo Excel màu**, đến **tự động điền kết quả và đóng phiếu trên hệ thống TTS**.
-
-### ✨ Tính năng chính
-
-| Tính năng | Mô tả |
-|-----------|-------|
-| 🕷️ **Auto Crawler** | Tự động cào danh sách vé sự cố từ VNPT TTS qua Selenium |
-| 📡 **BTools Integration** | Trích xuất dữ liệu kỹ thuật (RAT, Downlink, Service ID) theo thuê bao |
-| 🧠 **Rule Engine** | 6 kịch bản chuẩn đoán lỗi mạng (4G yếu, bóp BW, VPN, treo gói...) |
-| 🤖 **Groq AI** | Tóm tắt thông minh nội dung phản ánh KH bằng Qwen3.6-27B |
-| 🔌 **Offline Fallback** | Tự động lùi về thuật toán NLP + Fuzzy Match khi không có API |
-| 📊 **Excel Report** | Xuất báo cáo màu tự động, phân loại trạng thái từng thuê bao |
-| 🔄 **Update TTS Auto** | Tự động đọc file Excel kết quả, khớp nguyên nhân và cập nhật/đóng phiếu TTS |
-| 🌐 **SAPC Check** | Tra cứu thông tin thuê bao, gói cước và policy từ SAPC API |
+1. [Tổng quan hệ thống](#-tổng-quan-hệ-thống)
+2. [Các tính năng nổi bật](#-các-tính-năng-nổi-bật)
+3. [Kiến trúc phân tầng (Modular Architecture)](#-kiến-trúc-phân-tầng-modular-architecture)
+4. [Cấu trúc mã nguồn](#-cấu-trúc-mã-nguồn)
+5. [Quy trình tiền kiểm & Đóng phiếu](#-quy-trình-tiền-kiểm--đóng-phiếu)
+6. [Cài đặt & Khởi chạy](#-cài-đặt--khởi-chạy)
+7. [Chế độ đóng phiếu (Tự động vs Thủ công)](#-chế-độ-đóng-phiếu-tự-động-vs-thủ-công)
+8. [Bảo mật & Phân quyền](#-bảo-mật--phân-quyền)
 
 ---
 
-## 🏗️ Kiến trúc hệ thống
+## 🌐 Tổng Quan Hệ Thống
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                        main.py                          │
-│              (Pipeline điều phối chính)                 │
-└────────┬────────────┬────────────┬───────────────────────┘
-         │            │            │
-    ┌────▼────┐  ┌────▼────┐  ┌───▼──────────────────┐
-    │crawler  │  │crawler  │  │    ai_interpreter.py  │
-    │_tts.py  │  │_btools  │  │  ┌──────────────────┐ │
-    │(VNPT    │  │.py      │  │  │ Groq AI (Online) │ │
-    │ TTS)    │  │(BTools) │  │  │ qwen/qwen3.6-27b │ │
-    └────┬────┘  └────┬────┘  │  └────────┬─────────┘ │
-         │            │       │           │ Fallback   │
-    ┌────▼────────────▼────┐  │  ┌────────▼─────────┐ │
-    │   data_processor.py  │  │  │ Offline NLP      │ │
-    │  (Chuẩn hóa JSON)    │  │  │ + Fuzzy Match    │ │
-    └────────────┬─────────┘  │  └──────────────────┘ │
-                 │            └──────────────────────────┘
-    ┌────────────▼─────────────────────────────────────┐
-    │              report_bot.py                        │
-    │  scenarios_engine.py (6 kịch bản chuẩn đoán)     │
-    │           → Excel Report (.xlsx)                  │
-    └────────────────────┬──────────────────────────────┘
-                         │
-    ┌────────────────────▼──────────────────────────────┐
-    │                update_tts/                        │
-    │  Tự động cập nhật + đóng phiếu trên VNPT TTS      │
-    └───────────────────────────────────────────────────┘
-```
+**VNPT TTS Precheck** giải quyết bài toán xử lý hàng nghìn phiếu phản ánh sự cố mạng di động (Mobile Internet, Cuộc gọi, Tin nhắn SMS, Gói cước...) mỗi ngày bằng cách:
+* **Tự động trích xuất danh sách phiếu sự cố**: Cào giao diện qua Selenium (TTS Cũ) và gọi REST API ngầm siêu tốc (TTS Mới).
+* **Tiền kiểm tra tức thì hạ tầng Core**:
+  * Tra cứu thông tin hồ sơ thuê bao HSS/HLR (Radio 2G/3G/4G/5G, IP, trạng thái NAM/Khóa GPRS).
+  * Tra cứu trạm phát sóng (Cell ID / ECGI) phục vụ tại thời điểm xảy ra sự cố.
+  * Phân tích chính sách gói cước thực tế từ hệ thống SAPC.
+  * Trích xuất lịch sử phiên truy cập dữ liệu kỹ thuật từ BTools.
+* **Tóm tắt thông minh**:
+  * **Phiếu Mobile Internet**: Ứng dụng mô hình AI tóm tắt ngắn gọn 6 trường thông tin phản ánh cốt lõi.
+  * **Phiếu Thoại / SMS / Gói cước**: Giữ nguyên vẹn toàn bộ nội dung phản ánh gốc để nhân viên kỹ thuật nắm bắt chính xác hiện tượng.
+* **Tự động đóng phiếu chuẩn xác**: Áp dụng bộ 6 kịch bản chuẩn đoán và phân loại lỗi để tự động đóng phiếu đúng nguyên nhân, hoặc hỗ trợ mở tab chi tiết để đóng thủ công an toàn.
 
 ---
 
-## 📁 Cấu trúc thư mục
+## ✨ Các Tính Năng Nổi Bật
+
+| Nhóm chức năng | Chi tiết |
+|---|---|
+| 🏢 **Hệ Thống TTS Cũ** | Tự động đọc bảng phiếu, tiền kiểm tra hạ tầng Core & BTools, tự động click đóng phiếu qua Chrome CDP. |
+| ⚡ **Hệ Thống TTS Mới** | Tích hợp sâu REST API (`/ticket-mobile/search`, `/ticket-mobile/finish-ticket`), tự động trích xuất token đăng nhập từ trình duyệt, tiền kiểm hàng trăm phiếu chỉ trong vài giây. |
+| 📶 **Mobile Internet** | Đối soát dung lượng, chặn bóp băng thông, treo gói, lỗi sóng 4G/3G, tóm tắt AI chuyên sâu. |
+| 📞 **Thoại / SMS / Gói** | Quét riêng biệt danh mục sự cố ngoài Data (Gọi đi/đến, SMS, Spam, Khóa cước...), tra cứu HLR/HSS và Cell ID. |
+| 🎛️ **Dashboard Hiện Đại** | Giao diện chuẩn màu xanh VNPT (`#005baa`), phẳng, chuyên nghiệp, hiển thị Live Log thời gian thực, bộ lọc trạng thái và thống kê tự động. |
+| 🎯 **Đóng Thủ Công 1-Click** | Nút chuyển thẳng sang tab chi tiết phiếu (`chi-tiet-phieu-pakh`) trên TTS Mới, sẵn sàng để người dùng nghiệm thu và đóng phiếu. |
+| 📊 **Xuất Báo Cáo Excel** | Xuất bảng tổng hợp 12 cột chuẩn quy chuẩn VNPT kèm tô màu phân loại nhận định. |
+
+---
+
+## 🏗️ Kiến Trúc Phân Tầng (Modular Architecture)
+
+Mã nguồn được tái cấu trúc thành các module độc lập, tách biệt rõ ràng giữa điều phối máy chủ, dịch vụ nghiệp vụ và giao diện người dùng:
 
 ```
-pakh-precheck/
-├── main.py                    # Pipeline chính, điều phối toàn bộ luồng
-├── crawler_tts.py             # Crawl danh sách vé từ VNPT TTS (Selenium)
-├── crawler_btools.py          # Cào dữ liệu kỹ thuật từ BTools
-├── data_processor.py          # Chuẩn hóa và làm sạch dữ liệu BTools
-├── ai_interpreter.py          # Tóm tắt phản ánh KH (Groq AI + Offline)
-├── ai_cache.py                # Quản lý cache kết quả AI tóm tắt
-├── ai_cache.json              # File lưu cache kết quả AI
-├── report_bot.py              # Phân tích trạng thái + xuất Excel
-├── scenarios_engine.py        # Engine 6 kịch bản chuẩn đoán lỗi mạng
-├── refresh_chrome.py          # Tự động dọn dẹp và khởi động lại Chrome Debug
-├── update_tts/                # Module tự động cập nhật & đóng phiếu TTS
-│   ├── run.py                 # Script điều phối chính cho update_tts
-│   ├── excel_reader.py        # Đọc dữ liệu báo cáo Excel & lọc phiếu đóng tự động
-│   ├── ticket_actions.py      # Thao tác Selenium điền form & bấm đóng phiếu
-│   ├── config.py              # Mapping trạng thái Excel -> Nguyên nhân sự cố TTS
-│   └── pagination.py          # Xử lý chuyển trang danh sách phiếu TTS
-├── sapccheck/                 # Module tra cứu SAPC API / Policy
-│   ├── sapccheck.py           # Phân tích & hiển thị thông tin gói SAPC
-│   └── sapc_client.py         # Kết nối SOAP/HTTP SAPC
-├── diagnostic_scenarios.json  # Cấu hình kịch bản và mô tả hành động
-├── diagnostic_config.json     # Mã gói hệ thống loại trừ
-├── serviceid.json             # Ánh xạ Service ID → Tên dịch vụ
-├── nguyennhansuco.json        # Danh mục nguyên nhân sự cố
-├── n8n.ps1                    # Script tự động hóa với n8n workflow
-├── open_chrome.bat            # Mở Chrome ở debug port 9222
-├── .env.example               # Mẫu biến môi trường (copy thành .env)
-├── .gitignore
-└── README.md
+PAKH_PRECHECK/
+├── dashboard.py                     # HTTP Server Router & Điều phối trung tâm (~500 dòng)
+├── templates/
+│   └── dashboard.html               # Giao diện Web HTML, CSS phẳng chuyên nghiệp & Client JS
+├── services/
+│   ├── __init__.py                  # Package marker
+│   ├── state.py                     # Singleton AutomationState quản lý tiến trình & logs
+│   ├── tts_old_data.py              # Logic tiền kiểm & chu kỳ quét Mobile Internet (TTS Cũ)
+│   ├── tts_old_voice.py             # Logic tiền kiểm & chu kỳ quét Thoại / SMS / Gói (TTS Cũ)
+│   ├── tts_new_data.py              # Logic gọi REST API & tiền kiểm Mobile Internet (TTS Mới)
+│   ├── tts_new_voice.py             # Logic gọi REST API & tiền kiểm Thoại / SMS / Gói (TTS Mới)
+│   └── automation_worker.py         # Worker luồng ngầm chạy chu kỳ quét tự động định kỳ
+├── ttsnew_api.py                    # Module giao tiếp REST API TTS Mới & trích xuất Bearer Token
+├── update_tts/                      # Bộ điều khiển đóng phiếu trên TTS Cũ
+├── sapccheck/                       # Module tra cứu SAPC và thông tin thuê bao
+└── open_dashboard.bat               # File khởi chạy 1-click cho người dùng Windows
 ```
 
 ---
 
-## ⚙️ Cài đặt và Chạy
+## 📁 Cấu Trúc Mã Nguồn Chi Tiết
 
-### 1. Yêu cầu hệ thống
+* **`dashboard.py`**: Khởi chạy `ThreadingHTTPServer` cổng `1234`, tiếp nhận các yêu cầu API điều khiển (`/api/start`, `/api/stop`, `/api/run-now`, `/api/tickets`, `/api/ttsnew/open_detail`...).
+* **`templates/dashboard.html`**: Nạp giao diện người dùng động. Có thể chỉnh sửa giao diện mà không cần khởi động lại tiến trình Python.
+* **`services/tts_old_data.py` & `services/tts_old_voice.py`**: Tương tác với Chrome đang mở (cổng 9222), đọc DOM của `tts.vnpt.vn`, bóc tách dữ liệu và lưu vào cơ sở dữ liệu SQLite `tickets.db`.
+* **`services/tts_new_data.py` & `services/tts_new_voice.py`**: Gọi trực tiếp REST API `https://tts.vnptnet.vn` với Bearer Token được đọc tự động từ trình duyệt, phân loại danh sách phiếu Mobile Internet và ngoài Mobile Internet.
+* **`ai_interpreter.py`**: Tóm tắt phản ánh khách hàng bằng AI (Qwen/Groq hoặc Gemini) kèm cơ chế offline fallback (Fuzzy/NLP).
+* **`report_bot.py`**: Engine phân loại trạng thái theo 6 kịch bản chuẩn đoán và xuất báo cáo Excel định dạng chuẩn.
 
-- Python **3.10+**
-- Google Chrome + ChromeDriver (phải khớp phiên bản)
-- Tài khoản Groq AI (miễn phí tại [console.groq.com](https://console.groq.com))
+---
 
-### 2. Cài đặt dependencies
+## 🚀 Cài Đặt & Khởi Chạy
 
+### 1. Yêu cầu tiên quyết
+- **Hệ điều hành**: Windows 10/11.
+- **Python**: Phiên bản 3.10 trở lên.
+- **Google Chrome**: Cài đặt sẵn trên máy.
+
+### 2. Cài đặt các thư viện cần thiết
 ```bash
-pip install selenium groq python-dotenv openpyxl rapidfuzz requests
+pip install -r requirements.txt
 ```
+*(Nếu chưa có file `requirements.txt`: `pip install selenium requests openpyxl rapidfuzz google-generativeai python-dotenv`)*
 
-### 3. Cấu hình biến môi trường
-
-Tạo file `.env` từ mẫu:
-
+### 3. Khởi chạy 1-Click (Khuyến nghị)
+Nhấp đúp chuột vào file:
 ```bash
-cp .env.example .env
+open_dashboard.bat
 ```
-
-Chỉnh sửa `.env`:
-
-```env
-GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxx
-GROQ_MODEL=qwen/qwen3.6-27b
-```
-
-### 4. Cấu hình đường dẫn ChromeDriver
-
-Mở `main.py` và sửa dòng:
-
-```python
-CHROMEDRIVER_PATH = r"C:\chromedriver\chromedriver.exe"
-```
-
-> 📥 Tải ChromeDriver tại: https://googlechromelabs.github.io/chrome-for-testing/
-
-### 5. Khởi động Chrome ở Debug Mode
-
-```bash
-# Chạy file batch có sẵn
-open_chrome.bat
-```
-
-Hoặc sử dụng script Python refresh Chrome:
-
-```bash
-python refresh_chrome.py
-```
-
-### 6. Chạy chương trình chính (Phân tích & Xuất Excel)
-
-```bash
-python main.py
-```
-
-### 7. Tự động Cập nhật & Đóng phiếu trên VNPT TTS
-
-Sau khi kiểm tra file Excel kết quả, chạy lệnh sau để tự động điền form và đóng các phiếu đủ điều kiện:
-
-```bash
-python -m update_tts.run
-```
+Script sẽ tự động:
+1. Mở Google Chrome ở chế độ Remote Debugging (cổng 9222).
+2. Khởi động Web Server Python tại `http://localhost:1234`.
+3. Tự động mở giao diện Dashboard trên trình duyệt của bạn.
 
 ---
 
-## 🧠 Groq AI — Cơ chế tóm tắt thông minh
+## ⚙️ Chế Độ Đóng Phiếu (Tự Động vs Thủ Công)
 
-Hệ thống sử dụng model **`qwen/qwen3.6-27b`** (reasoning model của Alibaba Cloud chạy trên hạ tầng Groq) để trích xuất 6 trường thông tin từ nội dung phản ánh KH:
+Hệ thống cung cấp công tắc chuyển đổi linh hoạt:
 
-```
-1. Gói cước sử dụng
-2. Tình trạng truy cập
-3. Tình trạng dung lượng
-4. Thiết bị sử dụng
-5. Khu vực xảy ra lỗi
-6. Tóm tắt hành động đã thử
-```
+1. **Chế độ Tự Động Đóng (`Auto Close = ON`)**:
+   - Khi chạy chu kỳ quét (định kỳ hoặc bấm nút Quét), hệ thống tự động kiểm tra điều kiện đóng mức 1 (Level 1 Auto-Close Candidate).
+   - Nếu đủ điều kiện (Mạng lưới bình thường, cấu hình đúng), hệ thống sẽ gửi lệnh đóng phiếu lên TTS.
+   - Các phiếu chưa đủ điều kiện sẽ được gán nhãn `Chưa đóng được` kèm lý do chi tiết.
 
-**Fallback tự động**: Nếu không có API key hoặc gặp lỗi rate-limit, hệ thống tự chuyển sang chế độ **Offline** dùng Regex + Fuzzy Matching (rapidfuzz) — không phụ thuộc internet.
-
----
-
-## 📊 Các kịch bản chuẩn đoán lỗi & Tự động đóng phiếu
-
-| Mã kịch bản | Tên | Điều kiện kỹ thuật | Cơ chế tự động đóng TTS |
-|-------------|-----|--------------------|-------------------------|
-| `KC_01_NO_4G` | Không bắt được sóng 4G | RAT chỉ có 0/1/2 (2G/3G) | 🟢 Đóng tự động |
-| `KC_02_WEAK_4G` | Bắt sóng 4G kém | Tỷ lệ RAT 4G thấp hơn 2G/3G | 🟢 Đóng tự động |
-| `KC_03_THROTTLED` | Bóp băng thông | Service ID `0000010002` xuất hiện | 🟢 Đóng tự động |
-| `KC_04_PACKAGE_OR_DEVICE_HANG` | Treo gói / Thiết bị treo | Chỉ có mã hệ thống rỗng 3 ngày | 🟡 Cần kiểm tra thêm |
-| `KC_05_LOW_DOWNLINK_BURST` | Sóng chập chờn, mật độ phiên cao | ≥70% phiên RAT thấp trong ≥3 phiên | 🟡 Cần kiểm tra thêm |
-| `KC_06_VPN_OR_DEVICE_ISSUE` | Nghi vấn VPN / lỗi thiết bị | Downlink bị chặn 5-10MB đều nhau | 🟡 Cần kiểm tra thêm |
-| `KC_07_NO_4G_PROFILE` | Chưa khai báo Profile 4G | Thiếu profile HSS 4G | 🟢 Đóng tự động |
-| `NORMAL` | Hoạt động bình thường | Mạng lưới đảm bảo | 🟢 Đóng tự động (nếu khớp phản ánh) |
+2. **Chế độ Đóng Thủ Công (`Auto Close = OFF`)**:
+   - Hệ thống chỉ thực hiện cào dữ liệu, đối soát Core/SAPC/BTools và phân loại nhận định.
+   - Nhân viên chủ động bấm nút:
+     - **Đóng Phiếu** (trên TTS Cũ): Gửi lệnh đóng riêng cho từng phiếu đã chọn.
+     - **Đóng thủ công** (trên TTS Mới): Chuyển tab Chrome tới trang chi tiết phiếu (`chi-tiet-phieu-pakh`) để người dùng xem lại thông tin và xác nhận hoàn tất.
 
 ---
 
-## 📈 Output
+## 🔒 Bảo Mật & Phân Quyền Sử Dụng
 
-Sau khi chạy xong, file Excel được tự động lưu và mở tại:
-
-```
-result/Bao_Cao_Su_Co_Mang_YYYYMMDD.xlsx
-```
-
-Mỗi hàng là 1 thuê bao, có màu theo trạng thái:
-- 🟢 **Xanh lá** — Bình thường / Tín hiệu ổn
-- 🟡 **Vàng** — Cần kiểm tra thêm
-- 🔴 **Đỏ** — Lỗi nghiêm trọng / Cần can thiệp ngay
-- ⬜ **Trắng** — Chưa phân loại
+> [!IMPORTANT]
+> - Khi khởi chạy trên máy tính cá nhân, hệ thống sử dụng phiên đăng nhập (Cookie / Token) trên trình duyệt Chrome của chính máy tính đó.
+> - **Nếu chia sẻ cho đồng nghiệp**: Khuyến nghị gửi toàn bộ thư mục cho đồng nghiệp để họ chạy file `open_dashboard.bat` trên máy của họ. Việc này đảm bảo các thao tác xử lý phiếu luôn ghi nhận đúng tài khoản và danh tính của người thực hiện.
+> - Tuyệt đối không commit file `.env`, file cấu hình chứa mật khẩu hoặc database khách hàng lên kho chứa mã nguồn công khai.
 
 ---
 
-## 🔒 Bảo mật
-
-> ⚠️ **QUAN TRỌNG**: File `.env` chứa API key **đã được thêm vào `.gitignore`** và sẽ không bao giờ được commit lên GitHub.
-
-Chỉ commit file `.env.example` (không chứa key thật) để làm mẫu cho người dùng mới.
-
----
-
-## 📄 License
-
-MIT License
-
----
-
-*Được phát triển bởi [@qvuzz](https://github.com/qvuzz) · VNPT khu vực*
-
+## 📄 Bản Quyền & Phát Triển
+* Được xây dựng và tối ưu bởi đội ngũ kỹ thuật VNPT.
+* Giấy phép sử dụng: **MIT License**.

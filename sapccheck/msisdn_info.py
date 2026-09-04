@@ -78,6 +78,15 @@ def _parse_loc_response(data):
 
     result["VLR Addr"] = location_data.get('vlrAddress', '')
 
+    # NAM: 0 = Mở GPRS, 1 = Bị khóa GPRS
+    sud = hlr_sub.get('sud', {})
+    if not isinstance(sud, dict):
+        sud = {}
+    nam_val = hlr_sub.get('nam')
+    if nam_val is None:
+        nam_val = sud.get('NAM')
+    result["NAM"] = str(nam_val).strip() if nam_val is not None else ""
+
     # ==========================================================
     # BỔ SUNG THÔNG TIN CELL
     # ==========================================================

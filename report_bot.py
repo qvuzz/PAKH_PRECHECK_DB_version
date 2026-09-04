@@ -35,17 +35,44 @@ def get_has_4g_profile(phone_84):
 
 def get_formatted_sapc_packages(phone_84, fallback_btools=""):
     """
-    Đọc toàn bộ gói cước từ file output/{phone_84}.json (SAPC API)
+    Đọc toàn bộ hồ sơ thuê bao (Radio, HSS Profile, IPv4), gói cước từ SAPC
     và kết hợp với gói thực tế từ BTools.
-    Hiển thị cả 2 nguồn rõ ràng trong ô Excel.
+    Hiển thị đầy đủ cả hồ sơ Core và gói cước trong bảng.
     """
     file_path = os.path.join(HSS_PROFILE_DIR, f"{phone_84}.json")
     sapc_lines = []
+    profile_parts = []
     
     if os.path.exists(file_path):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+
+            # 1. Trích xuất thông tin Hồ sơ thuê bao từ msisdn_info: Radio, HSS Profile, IPv4, NAM
+            sub_info = data.get("subscriber_info", {})
+            if isinstance(sub_info, dict) and sub_info:
+                radio = str(sub_info.get("Radio") or "").strip()
+                hss_prof = str(sub_info.get("HSS Profile") or "").strip()
+                ipv4 = str(sub_info.get("IPv4") or "").strip()
+                nam_val = str(sub_info.get("NAM") if sub_info.get("NAM") is not None else "").strip()
+
+                sub_tags = []
+                if radio and radio.lower() != "none":
+                    sub_tags.append(f"Radio: {radio}")
+                if hss_prof:
+                    sub_tags.append(f"HSS: {hss_prof}")
+                if ipv4:
+                    sub_tags.append(f"IP: {ipv4}")
+                if nam_val == "1":
+                    sub_tags.append("NAM: 1 (Khóa GPRS)")
+                elif nam_val == "0":
+                    sub_tags.append("NAM: 0 (Mở GPRS)")
+                elif nam_val != "":
+                    sub_tags.append(f"NAM: {nam_val}")
+                
+                if sub_tags:
+                    profile_parts.append("Hồ sơ: " + " | ".join(sub_tags))
+
             packages = data.get("packages", [])
             if isinstance(packages, list) and packages:
                 for pkg in packages:
@@ -70,8 +97,11 @@ def get_formatted_sapc_packages(phone_84, fallback_btools=""):
         except Exception as e:
             print(f"⚠️ Lỗi đọc file SAPC packages ({file_path}): {e}")
 
-    # Xây dựng chuỗi hiển thị kết hợp cả 2 nguồn
+    # Xây dựng chuỗi hiển thị kết hợp cả hồ sơ và gói cước
     result_parts = []
+    if profile_parts:
+        result_parts.extend(profile_parts)
+
     if sapc_lines:
         result_parts.append("SAPC:\n" + "\n".join(sapc_lines))
     else:
@@ -247,6 +277,31 @@ def detect_vpn_application(app_events):
                 return app.title()
     return None
 
+def extract_site_name_from_cell(cell_name):
+    """
+    Trích xuất mã Trạm (Site/eNodeB/BTS) từ tên Cell.
+    Ví dụ: '4G-VTH008M32-KGG' -> 'VTH008-KGG'
+           '4G-VTH008M12-KGG' -> 'VTH008-KGG'
+           '3G-HNI012A-HNI'   -> 'HNI012-HNI'
+    """
+    if not cell_name:
+        return ""
+    c_name = str(cell_name).strip()
+    clean = re.sub(r"^(4G|3G|2G|5G|LTE|NR)[-_]", "", c_name, flags=re.IGNORECASE)
+    
+    # 1. Tìm mẫu mã trạm chuẩn VNPT: [2-5 chữ cái][2-6 chữ số] (ví dụ: VTH008, HNI012, KGG008, HCM1234)
+    m = re.search(r"([A-Za-z]{2,5}\d{2,6})", clean)
+    if m:
+        site_code = m.group(1).upper()
+        prov_m = re.search(r"[-_]([A-Za-z]{2,4})$", clean)
+        if prov_m and prov_m.group(1).upper() != site_code:
+            return f"{site_code}-{prov_m.group(1).upper()}"
+        return site_code
+        
+    # 2. Dự phòng: Cắt bỏ đuôi sector như _1, _2, -1, -2, _A, _B, M12, M32...
+    base = clean.split("-")[0].split("_")[0]
+    return base if base else c_name
+
 def parse_dt_safe(val):
     if not val:
         return None
@@ -280,11 +335,64 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     """
     default_status = "CHƯA PHÂN LOẠI"
     default_comment = "Chưa xác định được nguyên nhân đặc thù. Cần kỹ thuật viên kiểm tra trực tiếp."
-    default_plan = "Kiểm tra lịch sử trên các hệ thống core khác."
     default_color = "FFFFFF"
 
     ALERT_COMMENT = "\nLưu ý: 2 ngày gần nhất không thấy phát sinh data, nghi ngờ gói cước đã hết hạn, khách hàng off data hoặc đã tắt máy."
     ALERT_ACTION = "\nCần kiểm tra tình trạng thuê bao, thiết bị, sim và gói cước"
+    comment_suffix = ""
+    action_suffix = ""
+
+    # 🎯 KỊCH BẢN ĐẶC THÙ 0: ĐỌC THÔNG TIN CORE (NAM, HSS PROFILE) TỪ OUTPUT JSON
+    sub_info = {}
+    if phone_84:
+        out_json_file = os.path.join(HSS_PROFILE_DIR, f"{phone_84}.json")
+        if os.path.exists(out_json_file):
+            try:
+                with open(out_json_file, "r", encoding="utf-8") as f_sub:
+                    d_sub = json.load(f_sub)
+                    sub_info = d_sub.get("subscriber_info", {})
+            except Exception:
+                pass
+
+    # 1. KỊCH BẢN NAM: NAM = 1 (BỊ KHÓA GPRS)
+    nam_val = str(sub_info.get("NAM") if sub_info.get("NAM") is not None else "").strip()
+    if nam_val == "1":
+        return (
+            "BỊ KHÓA GPRS",
+            "Thuê bao đang bị khóa GPRS.",
+            "Nhờ VNP khai báo lại GPRS cho Khách hàng.",
+            "FFF2CC"
+        )
+
+    # 2. KỊCH BẢN MOBILE INTERNET 5G
+    combined_report_text = f"{package_title} {ticket_content}".lower()
+    is_5g_reported = "5g" in combined_report_text
+    if is_5g_reported:
+        hss_profile = str(sub_info.get("HSS Profile") or "").strip()
+        valid_5g_profiles = {"55", "56", "65", "66", "67"}
+        if hss_profile and hss_profile not in valid_5g_profiles:
+            return (
+                "HSS CHƯA CÓ 5G",
+                "HSS Profile của KH không phải là 5G.",
+                "Nhờ VNP đăng ký 5G cho KH hoặc nhờ IT hỗ trợ thêm.",
+                "FFF2CC"
+            )
+        elif hss_profile in valid_5g_profiles:
+            # HSS Profile có 5G, kiểm tra xem BTools RAT TYPE có số 7 nào không
+            has_rat_7 = False
+            for r in (clean_data or []):
+                r_type = str(r.get("RAT_TYPE") or "").strip()
+                r_name = str(r.get("RAT_TYPE_NAME") or "").upper()
+                if r_type == "7" or "5G" in r_name or "NR" in r_name:
+                    has_rat_7 = True
+                    break
+            if not has_rat_7:
+                return (
+                    "THIẾU SÓNG 5G / THIẾT BỊ",
+                    "HSS Profile có 5G nhưng btool RAT TYPE không có số 7 nào thì có thể do thiết bị của KH hoặc khu vực của KH không có sóng 5G.",
+                    "Nhờ VNP hướng dẫn KH kiểm tra thiết bị có hỗ trợ/bật 5G hoặc kiểm tra vùng phủ sóng 5G tại khu vực của KH.",
+                    "FFF2CC"
+                )
 
     # 🎯 KỊCH BẢN ĐẶC THÙ 1: Kiểm tra App Usage có xuất hiện ứng dụng VPN / 1.1.1.1 / Cloudflare
     detected_vpn = detect_vpn_application(app_events)
@@ -321,8 +429,8 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             exp_note = f" (trước/vào thời điểm tiếp nhận phản ánh {incident_time_str})" if incident_time_str else ""
             return (
                 "GÓI CƯỚC ĐÃ HẾT HẠN",
-                f"Thuê bao hoàn toàn không phát sinh dữ liệu trong 5 ngày qua do gói cước {exp_names} của khách hàng đã hết hạn vào ngày {exp_dates}{exp_note}.",
-                f"Gói cước của Khách hàng ({exp_names}) đã hết hạn vào ngày {exp_dates}. Nhờ VNP kiểm tra lại, chuyển IT hỗ trợ giúp.",
+                f"Thuê bao hoàn toàn không phát sinh dữ liệu trong các ngày qua do gói cước {exp_names} của khách hàng đã hết hạn vào ngày {exp_dates}{exp_note}.",
+                f"Gói cước của Khách hàng ({exp_names}) đã hết hạn vào ngày {exp_dates}. Nhờ VNP kiểm tra lại, tư vấn khách hàng gia hạn/đăng ký gói cước mới.",
                 "FFF2CC"
             )
         
@@ -332,8 +440,8 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             if all(p.get("is_paygo") for p in active_pkgs):
                 return (
                     "CHỈ CÓ GÓI PAYGO",
-                    "Thuê bao hiện chỉ có gói cước mặc định PAYGO (tính cước theo dung lượng, không có ưu đãi data), không đăng ký gói cước thương mại Data.",
-                    "Hướng dẫn khách hàng kiểm tra số dư tài khoản chính hoặc tư vấn đăng ký các gói cước Data thương mại ưu đãi để sử dụng.",
+                    "Thuê bao hiện chỉ có gói cước mặc định (PAYGO/M0), không có gói data ưu đãi và tài khoản chính không đủ để trừ cước truy cập ngoài gói.",
+                    "Hướng dẫn khách hàng kiểm tra số dư tài khoản chính, đồng thời tư vấn đăng ký các gói cước Data VinaPhone ưu đãi để sử dụng.",
                     "FFF2CC"
                 )
 
@@ -354,8 +462,8 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             # Vì clean_data = 0 nên chắc chắn từ ngày ĐK đến nay không phát sinh data
             return (
                 "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
-                f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay hoàn toàn không phát sinh dữ liệu trên hệ thống.",
-                f"Kiểm tra lại gói cước ({act_names}), đăng ký ngày {act_reg_dates} còn hạn nhưng không sử dụng được từ khi đăng ký. Chuyển IT hỗ trợ giúp.",
+                f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay hoàn toàn không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
+                f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                 "FFF2CC"
             )
 
@@ -523,30 +631,31 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             for r in target_records if (r.get("cell_name") or r.get("cellName") or r.get("cell_id"))
         ]
         if cell_names:
+            total_samples = len(cell_names)
             c_counter = Counter(cell_names)
             top_c, top_cnt = c_counter.most_common(1)[0]
-            pct = (top_cnt / len(cell_names)) * 100
-            if pct >= 50.0:
+            cell_pct = (top_cnt / total_samples) * 100
+
+            # 📡 Gom nhóm nhận diện theo TRẠM (Site/eNodeB/BTS)
+            site_names = [extract_site_name_from_cell(c) for c in cell_names]
+            s_counter = Counter(site_names)
+            top_s, top_s_cnt = s_counter.most_common(1)[0]
+            site_pct = (top_s_cnt / total_samples) * 100
+
+            if site_pct >= 50.0:
+                dominant_pct = site_pct
+                # Đếm các cell cụ thể thuộc trạm này
+                sub_cells = [c for c in cell_names if extract_site_name_from_cell(c) == top_s]
+                sub_counter = Counter(sub_cells)
+                top_sub_cells = [f"{c} ({cnt*100/total_samples:.0f}%)" for c, cnt in sub_counter.most_common(3)]
+                
+                if len(sub_counter) > 1:
+                    dominant_cell = f"{top_s} (gồm {len(sub_counter)} cell: {', '.join(top_sub_cells)})"
+                else:
+                    dominant_cell = top_c
+            elif cell_pct >= 50.0:
                 dominant_cell = top_c
-                dominant_pct = pct
-
-    # 🔥 KỊCH BẢN 1: BÁO ĐI NHIỀU NƠI / LƯU LƯỢNG YẾU NHƯNG CEM CHO THẤY TẬP TRUNG 1 CELL (> 50%) -> Chuyển KT địa bàn + Đóng phiếu
-    if dominant_cell and (is_reported_multiple_places or is_weak_traffic or is_reported_slow or not has_session_over_10mb):
-        return (
-            "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
-            f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng). Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
-            f"Đã chuyển phiếu cho Kỹ thuật địa bàn kiểm tra, bảo dưỡng và tối ưu trạm phát sóng {dominant_cell} theo phản ánh của khách hàng." + action_suffix,
-            "FFF2CC"
-        )
-
-    # 🔥 KỊCH BẢN 2: BÁO ĐI NHIỀU NƠI / ĐI ĐÂU CŨNG VẬY VÀ CEM CŨNG KHÔNG XÁC ĐỊNH ĐƯỢC CELL > 50% -> Lỗi thiết bị + Đóng phiếu
-    if is_reported_multiple_places and not dominant_cell:
-        return (
-            "LỖI THIẾT BỊ / ĐI NHIỀU NƠI BỊ LỖI",
-            "Khách hàng phản ánh đi nhiều nơi đều bị lỗi, dữ liệu mạng ghi nhận thuê bao đổi trạm liên tục qua nhiều khu vực khác nhau nhưng đều không load được. Nguyên nhân do xung đột cài đặt mạng, lỗi SIM hoặc thiết bị đầu cuối của khách hàng.",
-            "Hướng dẫn khách hàng khởi động lại máy, bật/tắt chế độ máy bay, vệ sinh lại khay SIM hoặc mang SIM qua điểm giao dịch VinaPhone gần nhất để kiểm tra đổi SIM." + action_suffix,
-            "FFF2CC"
-        )
+                dominant_pct = cell_pct
 
     # 🎯 PHÂN TÍCH THEO MỐC THỜI GIAN TIẾP NHẬN PHẢN ÁNH (ĐỐI CHIẾU PHIÊN DATA SAU KHI TIẾP NHẬN)
     dt_incident = parse_dt_safe(incident_time_str)
@@ -568,57 +677,79 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     has_session_over_10mb_after = max_downlink_after >= TRAFFIC_MAX_WEAK
     is_weak_traffic_after = TRAFFIC_MIN_WEAK <= max_downlink_after < TRAFFIC_MAX_WEAK
 
-    # 🎯 KỊCH BẢN ĐÁNH GIÁ THỜI GIAN TIẾP NHẬN
+    # 🎯 KỊCH BẢN ĐÁNH GIÁ KHI CÓ MỐC THỜI GIAN TIẾP NHẬN
     if dt_incident:
-        # Trường hợp 1: Có phiên >10MB SAU thời điểm tiếp nhận -> Chắc chắn hoạt động bình thường
+        # Trường hợp 1: Có phiên >10MB SAU thời điểm tiếp nhận -> Khách hàng đã dùng được
         if has_session_over_10mb_after:
-            if is_reported_slow:
+            if dominant_cell and is_reported_slow:
+                return (
+                    "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
+                    f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng). Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
+                    "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                    "FFF2CC"
+                )
+            elif is_reported_slow:
                 return (
                     "LƯU LƯỢNG YẾU",
                     f"Khách hàng phản ánh mạng chậm. Dữ liệu sau thời điểm tiếp nhận ({incident_time_str}) ghi nhận tốc độ download chưa ổn định, phiên cao nhất đạt {max_downlink_after/1024/1024:.1f}MB. Nghi ngờ chất lượng sóng tại khu vực khách hàng chưa đảm bảo.",
-                    "Đã chuyển thông tin sự cố đến Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                    "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                     "FFF2CC"
                 )
             else:
                 return (
                     "HOẠT ĐỘNG BÌNH THƯỜNG",
-                    f"Kiểm tra lịch sử kết nối sau thời điểm tiếp nhận phản ánh ({incident_time_str}), thuê bao đã phát sinh lưu lượng data bình thường (phiên lớn nhất đạt {max_downlink_after/1024/1024:.1f}MB, mạng 4G ổn định). Khách hàng đã sử dụng lại dịch vụ.",
+                    f"Kiểm tra lịch sử kết nối sau thời điểm tiếp nhận phản ánh ({incident_time_str}), thuê bao đã phát sinh lưu lượng data bình thường (phiên lớn nhất đạt {max_downlink_after/1024/1024:.1f}MB, mạng 4G ổn định). Khách hàng đã sử dụng được dịch vụ.",
                     "Dịch vụ đã khôi phục hoạt động bình thường sau thời điểm phản ánh. Hướng dẫn khách hàng theo dõi sử dụng, nếu cần hỗ trợ thêm vui lòng liên hệ lại tổng đài." + action_suffix,
                     "E2EFDA"
                 )
         
-        # Trường hợp 2: Có phiên >10MB TRƯỚC thời điểm tiếp nhận, nhưng SAU mốc tiếp nhận CHƯA CÓ phiên >10MB -> Loại bỏ khỏi Hoạt Động Bình Thường
+        # Trường hợp 2: Có phiên >10MB TRƯỚC thời điểm tiếp nhận, nhưng SAU mốc tiếp nhận CHƯA CÓ phiên >10MB -> Cần theo dõi thêm
         elif has_session_over_10mb:
             return (
                 "THEO DÕI THÊM",
                 f"Thuê bao có sử dụng data trước thời điểm phản ánh, tuy nhiên sau mốc tiếp nhận ({incident_time_str}) chưa ghi nhận phiên phát sinh lưu lượng mới. Cần theo dõi thêm.",
-                "Chuyển bộ phận chăm sóc khách hàng liên hệ lại để kiểm tra tình trạng kết nối hiện tại của thuê bao sau thời điểm tiếp nhận sự cố." + action_suffix,
+                "Nhờ VNP liên hệ lại để kiểm tra tình trạng kết nối hiện tại của thuê bao sau thời điểm tiếp nhận sự cố." + action_suffix,
                 "FFF2CC"
             )
 
         # Trường hợp 3: Sau tiếp nhận chỉ có lưu lượng yếu (1MB - 10MB)
         elif is_weak_traffic_after:
+            if dominant_cell:
+                return (
+                    "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
+                    f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng). Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
+                    "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                    "FFF2CC"
+                )
+            else:
+                return (
+                    "LƯU LƯỢNG YẾU",
+                    f"Sau thời điểm tiếp nhận ({incident_time_str}), lưu lượng data thực tế ở mức thấp (phiên lớn nhất chỉ đạt {max_downlink_after/1024/1024:.1f}MB), kết nối chập chờn tại khu vực phản ánh.",
+                    "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                    "FFF2CC"
+                )
+
+    # 🎯 KỊCH BẢN KHI CÓ DỮ LIỆU DATA >10MB (FALLBACK HOẶC KHÔNG CÓ MỐC TIẾP NHẬN)
+    if has_session_over_10mb:
+        if dominant_cell and (is_reported_slow or is_reported_multiple_places):
             return (
-                "LƯU LƯỢNG YẾU",
-                f"Sau thời điểm tiếp nhận ({incident_time_str}), lưu lượng data thực tế ở mức thấp (phiên lớn nhất chỉ đạt {max_downlink_after/1024/1024:.1f}MB), kết nối chập chờn tại khu vực phản ánh.",
-                "Đã tạo phiếu yêu cầu Chất lượng mạng, chuyển Kỹ thuật địa bàn kiểm tra và xử lý suy hao tại khu vực phản ánh." + action_suffix,
+                "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
+                f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng). Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
+                "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                 "FFF2CC"
             )
-
-    # 🎯 FALLBACK KHI KHÔNG CÓ THỜI ĐIỂM TIẾP NHẬN HỢP LỆ
-    if has_session_over_10mb:
-        if is_reported_completely_failed:
+        elif is_reported_completely_failed:
             return (
                 "HOẠT ĐỘNG BÌNH THƯỜNG",
                 f"Khách hàng phản ánh không truy cập được hoàn toàn, nhưng dữ liệu BTools thực tế ngày gần nhất ({recent_day_str}) vẫn ghi nhận phiên kết nối dung lượng lớn ({max_downlink/1024/1024:.1f}MB). Dịch vụ đã tự phục hồi sau thời điểm phản ánh.",
                 "Dịch vụ đã khôi phục hoạt động bình thường. Hướng dẫn khách hàng tiếp tục theo dõi sử dụng." + action_suffix,
                 "E2EFDA"
             )
-        elif is_reported_slow:
+        elif is_reported_slow or is_reported_multiple_places:
             return (
                 "LƯU LƯỢNG YẾU",
-                f"Khách hàng phản ánh mạng chậm. Dữ liệu thực tế ngày gần nhất ({recent_day_str}) ghi nhận tốc độ download chưa ổn định ({max_downlink/1024/1024:.1f}MB). Nghi ngờ chất lượng sóng tại khu vực khách hàng chưa đảm bảo.",
-                "Đã chuyển thông tin sự cố đến Kỹ thuật địa bàn để đo kiểm và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                f"Khách hàng phản ánh mạng chậm / chập chờn. Dữ liệu thực tế ngày gần nhất ({recent_day_str}) ghi nhận tốc độ download chưa ổn định ({max_downlink/1024/1024:.1f}MB). Nghi ngờ chất lượng sóng tại khu vực khách hàng chưa đảm bảo.",
+                "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                 "FFF2CC"
             )
         else:
@@ -629,73 +760,91 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 "E2EFDA"
             )
 
-    elif is_weak_traffic:
+    # 🎯 KỊCH BẢN LƯU LƯỢNG YẾU (1MB - 10MB)
+    if is_weak_traffic:
+        if dominant_cell:
+            return (
+                "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
+                f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng). Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
+                "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                "FFF2CC"
+            )
+        else:
+            return (
+                "LƯU LƯỢNG YẾU",
+                f"Lưu lượng data thực tế ngày gần nhất ({recent_day_str}) ở mức thấp (phiên lớn nhất chỉ đạt từ 1MB đến dưới 10MB), kết nối chập chờn tại khu vực phản ánh.",
+                "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                "FFF2CC"
+            )
+
+    # 🎯 KỊCH BẢN ĐI NHIỀU NƠI BỊ LỖI (CHỈ KHI THỰC SỰ KHÔNG LOAD ĐƯỢC DATA TRÊN NHIỀU TRẠM KHÁC NHAU)
+    if is_reported_multiple_places and not dominant_cell:
         return (
-            "LƯU LƯỢNG YẾU",
-            f"Lưu lượng data thực tế ngày gần nhất ({recent_day_str}) ở mức thấp (phiên lớn nhất chỉ đạt từ 1MB đến dưới 10MB), kết nối chập chờn tại khu vực phản ánh.",
-            "Đã tạo phiếu yêu cầu Chất lượng mạng, chuyển Kỹ thuật địa bàn kiểm tra và xử lý suy hao tại khu vực phản ánh." + action_suffix,
+            "LỖI THIẾT BỊ / ĐI NHIỀU NƠI BỊ LỖI",
+            "Khách hàng phản ánh đi nhiều nơi đều bị lỗi, dữ liệu mạng ghi nhận thuê bao đổi trạm liên tục qua nhiều khu vực khác nhau nhưng đều không load được data (<1MB). Nguyên nhân do xung đột cài đặt mạng, lỗi SIM hoặc thiết bị đầu cuối của khách hàng.",
+            "Hướng dẫn khách hàng khởi động lại máy, bật/tắt chế độ máy bay, vệ sinh lại khay SIM hoặc mang SIM qua điểm giao dịch VinaPhone gần nhất để kiểm tra đổi SIM." + action_suffix,
             "FFF2CC"
         )
 
-    else:
-        active_pkgs, expired_pkgs = get_sapc_package_validity(phone_84)
-        if not active_pkgs and expired_pkgs:
-            exp_names = ", ".join([p["name"] for p in expired_pkgs])
-            exp_dates = ", ".join([p["exp_str"] for p in expired_pkgs])
+    # 🎯 TRƯỜNG HỢP CÒN LẠI: KIỂM TRA LẠI GÓI CƯỚC SAPC
+    active_pkgs, expired_pkgs = get_sapc_package_validity(phone_84)
+    if not active_pkgs and expired_pkgs:
+        exp_names = ", ".join([p["name"] for p in expired_pkgs])
+        exp_dates = ", ".join([p["exp_str"] for p in expired_pkgs])
+        return (
+            "GÓI CƯỚC ĐÃ HẾT HẠN",
+            f"Gói cước data của thuê bao ({exp_names}) đã hết hạn từ ngày {exp_dates}, tài khoản không còn dung lượng ưu đãi dẫn đến không truy cập được Internet.",
+            f"Thông báo khách hàng gói cước ({exp_names}) đã hết hạn sử dụng. Tư vấn khách hàng nạp tiền gia hạn hoặc đăng ký gói cước mới phù hợp." + action_suffix,
+            "FFF2CC"
+        )
+    elif active_pkgs:
+        if all(p.get("is_paygo") for p in active_pkgs):
             return (
-                "GÓI CƯỚC ĐÃ HẾT HẠN",
-                f"Gói cước data của thuê bao ({exp_names}) đã hết hạn từ ngày {exp_dates}, tài khoản không còn dung lượng ưu đãi dẫn đến không truy cập được Internet.",
-                f"Thông báo khách hàng gói cước ({exp_names}) đã hết hạn sử dụng. Tư vấn khách hàng nạp tiền gia hạn hoặc đăng ký gói cước mới phù hợp." + action_suffix,
+                "CHỈ CÓ GÓI PAYGO",
+                f"Thuê bao hiện chỉ có gói cước mặc định (PAYGO/M0), không có gói data ưu đãi và tài khoản chính không đủ để trừ cước truy cập ngoài gói.",
+                "Hướng dẫn khách hàng kiểm tra số dư tài khoản chính, đồng thời tư vấn đăng ký các gói cước Data VinaPhone ưu đãi để sử dụng." + action_suffix,
                 "FFF2CC"
             )
-        elif active_pkgs:
-            if all(p.get("is_paygo") for p in active_pkgs):
-                return (
-                    "CHỈ CÓ GÓI PAYGO",
-                    f"Thuê bao hiện chỉ có gói cước mặc định (PAYGO/M0), không có gói data ưu đãi và tài khoản chính không đủ để trừ cước truy cập ngoài gói.",
-                    "Hướng dẫn khách hàng kiểm tra số dư tài khoản chính, đồng thời tư vấn đăng ký các gói cước Data VinaPhone ưu đãi để sử dụng." + action_suffix,
-                    "FFF2CC"
-                )
 
-            if all(p.get("is_home") or p.get("is_no_date") for p in active_pkgs):
-                pkg_names = ", ".join([p["name"] for p in active_pkgs])
-                return (
-                    "THEO DÕI THÊM",
-                    f"Thuê bao sử dụng gói tích hợp ({pkg_names}), hệ thống chưa ghi nhận phát sinh lưu lượng trong ngày gần nhất. Nghi ngờ thiết bị tắt data hoặc đang sử dụng Wifi.",
-                    f"Hướng dẫn khách hàng bật Dữ liệu di động (Data), khởi động lại thiết bị và theo dõi sử dụng." + action_suffix,
-                    "E2EFDA"
-                )
+        if all(p.get("is_home") or p.get("is_no_date") for p in active_pkgs):
+            pkg_names = ", ".join([p["name"] for p in active_pkgs])
+            return (
+                "THEO DÕI THÊM",
+                f"Thuê bao sử dụng gói tích hợp ({pkg_names}), hệ thống chưa ghi nhận phát sinh lưu lượng trong ngày gần nhất. Nghi ngờ thiết bị tắt data hoặc đang sử dụng Wifi.",
+                f"Hướng dẫn khách hàng bật Dữ liệu di động (Data), khởi động lại thiết bị và theo dõi sử dụng." + action_suffix,
+                "E2EFDA"
+            )
 
-            act_names = ", ".join([p["name"] for p in active_pkgs if not p.get("is_paygo")])
-            act_exp_dates = ", ".join([p["exp_str"] for p in active_pkgs if not p.get("is_paygo")])
-            act_reg_dates = ", ".join([p["reg_str"] for p in active_pkgs if not p.get("is_paygo") and p["reg_str"] != "N/A"]) or "trước đó"
-            earliest_reg_dt = min([p["reg_dt"] for p in active_pkgs if p["reg_dt"] and not p.get("is_paygo")], default=None)
-            
-            # Kiểm tra xem từ ngày đăng ký đến nay thuê bao đã từng dùng data chưa
-            has_used_since_reg = check_data_used_since_registration(clean_data, earliest_reg_dt)
-            
-            if not has_used_since_reg:
-                # Từ ngày ĐK đến nay hoàn toàn không phát sinh data -> Lỗi do gói
-                return (
-                    "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
-                    f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay hoàn toàn không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
-                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao." + action_suffix,
-                    "FFF2CC"
-                )
-            else:
-                # Trước đó từng dùng bình thường, chỉ gần đây không thấy data -> Do sóng yếu / máy treo / tắt data
-                return (
-                    "THEO DÕI THÊM",
-                    f"Thuê bao có gói cước {act_names} (HSD: {act_exp_dates}), lịch sử trước đó vẫn dùng bình thường nhưng ngày gần đây không thấy phát sinh data. Khả năng do khách hàng tắt data, chuyển sang dùng Wifi hoặc thiết bị treo tạm thời.",
-                    f"Hướng dẫn khách hàng kiểm tra lại dung lượng gói {act_names}, tắt/bật lại dữ liệu di động hoặc khởi động lại thiết bị để tiếp tục theo dõi." + action_suffix,
-                    "E2EFDA"
-                )
-        return (
-            "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ",
-            f"Lịch sử truy cập ngày gần nhất ({recent_day_str}) gần như không phát sinh lưu lượng sử dụng thực tế (dưới 1MB).",
-            "Hướng dẫn khách hàng kiểm tra lại trạng thái bật Data và kiểm tra dung lượng gói cước trên máy." + action_suffix,
-            "F2F2F2"
-        )
+        act_names = ", ".join([p["name"] for p in active_pkgs if not p.get("is_paygo")])
+        act_exp_dates = ", ".join([p["exp_str"] for p in active_pkgs if not p.get("is_paygo")])
+        act_reg_dates = ", ".join([p["reg_str"] for p in active_pkgs if not p.get("is_paygo") and p["reg_str"] != "N/A"]) or "trước đó"
+        earliest_reg_dt = min([p["reg_dt"] for p in active_pkgs if p["reg_dt"] and not p.get("is_paygo")], default=None)
+        
+        # Kiểm tra xem từ ngày đăng ký đến nay thuê bao đã từng dùng data chưa
+        has_used_since_reg = check_data_used_since_registration(clean_data, earliest_reg_dt)
+        
+        if not has_used_since_reg:
+            # Từ ngày ĐK đến nay hoàn toàn không phát sinh data -> Lỗi do gói
+            return (
+                "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
+                f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay hoàn toàn không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
+                f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao." + action_suffix,
+                "FFF2CC"
+            )
+        else:
+            # Trước đó từng dùng bình thường, chỉ gần đây không thấy data -> Do sóng yếu / máy treo / tắt data
+            return (
+                "THEO DÕI THÊM",
+                f"Thuê bao có gói cước {act_names} (HSD: {act_exp_dates}), lịch sử trước đó vẫn dùng bình thường nhưng ngày gần đây không thấy phát sinh data. Khả năng do khách hàng tắt data, chuyển sang dùng Wifi hoặc thiết bị treo tạm thời.",
+                f"Hướng dẫn khách hàng kiểm tra lại dung lượng gói {act_names}, tắt/bật lại dữ liệu di động hoặc khởi động lại thiết bị để tiếp tục theo dõi." + action_suffix,
+                "E2EFDA"
+            )
+    return (
+        "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ",
+        f"Lịch sử truy cập ngày gần nhất ({recent_day_str}) gần như không phát sinh lưu lượng sử dụng thực tế (dưới 1MB).",
+        "Hướng dẫn khách hàng kiểm tra lại trạng thái bật Data và kiểm tra dung lượng gói cước trên máy." + action_suffix,
+        "F2F2F2"
+    )
 
 def get_scenario_result(scenarios, scenario_id):
     for sc in scenarios:
@@ -728,8 +877,8 @@ def extract_incident_time(ticket_content, default_created_time=""):
 def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, end_d=None):
     if not start_d or not end_d:
         now = datetime.now()
-        start_d = (now - timedelta(days=4)).strftime("%Y-%m-%d")
-        end_d = now.strftime("%Y-%m-%d")
+        start_d = (now - timedelta(days=4)).strftime("%d%m%Y")
+        end_d = now.strftime("%d%m%Y")
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Nhận Định Sự Cố"

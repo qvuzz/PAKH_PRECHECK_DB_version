@@ -22,7 +22,7 @@
             "conclusion": "BẮT SÓNG 4G KÉM",
             "color": "FFF2CC",
             "technical_analysis": "Thiết bị có kết nối 4G nhưng tần suất rớt về sóng 2G/3G chiếm đa số trong các ngày gần đây. Biểu hiện thuê bao ở khu vực sóng 4G yếu hoặc mép vùng phủ sóng.",
-            "action_plan": "Đã tạo phiếu Chất lượng mạng chuyển Kỹ thuật địa bàn kiểm tra và đo kiểm vùng phủ sóng tại khu vực khách hàng phản ánh."
+            "action_plan": "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh."
         },
         {
             "id": "KC_03_THROTTLED",
@@ -46,7 +46,7 @@
             "conclusion": "SÓNG 4G CHẬP CHỜN / YẾU",
             "color": "FFF2CC",
             "technical_analysis": "Thiết bị có kết nối 4G nhưng tần suất rớt về sóng 2G/3G chiếm đa số trong các ngày gần đây. Biểu hiện thuê bao ở khu vực sóng 4G yếu hoặc mép vùng phủ sóng.",
-            "action_plan": "Đã tạo phiếu Chất lượng mạng chuyển Kỹ thuật địa bàn kiểm tra và đo kiểm vùng phủ sóng tại khu vực khách hàng phản ánh."
+            "action_plan": "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh."
         },
         {
             "id": "KC_06_VPN_OR_DEVICE_ISSUE",

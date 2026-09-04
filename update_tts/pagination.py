@@ -5,30 +5,39 @@
 
 GET_PAGE_NUMBERS_JS = """
 () => {
-    const ul = document.querySelector('ul.pagination.pull-right');
-    if (!ul) return [];
-    const links = Array.from(ul.querySelectorAll('a'));
-    const nums = [];
-    links.forEach(a => {
-        const t = (a.textContent || '').trim();
-        const m = t.match(/^(\\d+)/);
-        if (m) nums.push(parseInt(m[1], 10));
+    const uls = Array.from(document.querySelectorAll('ul.pagination, .pagination, [class*="pagination"]')).filter(el => el.offsetParent !== null);
+    if (!uls.length) return [];
+    let maxNums = [];
+    uls.forEach(ul => {
+        const links = Array.from(ul.querySelectorAll('a, button, li'));
+        const nums = [];
+        links.forEach(a => {
+            const t = (a.textContent || '').trim();
+            const m = t.match(/^(\\d+)/);
+            if (m) nums.push(parseInt(m[1], 10));
+        });
+        if (nums.length > maxNums.length) maxNums = nums;
     });
-    return nums;
+    return maxNums;
 }
 """
 
 CLICK_PAGE_NUMBER_JS = """
 (targetPage) => {
-    const ul = document.querySelector('ul.pagination.pull-right');
-    if (!ul) return false;
-    const links = Array.from(ul.querySelectorAll('a'));
-    const target = links.find(a => {
-        const t = (a.textContent || '').trim();
-        const m = t.match(/^(\\d+)/);
-        return m && parseInt(m[1], 10) === targetPage;
-    });
-    if (target) { target.click(); return true; }
+    const uls = Array.from(document.querySelectorAll('ul.pagination, .pagination, [class*="pagination"]')).filter(el => el.offsetParent !== null);
+    for (let ul of uls) {
+        const links = Array.from(ul.querySelectorAll('li, a, button'));
+        const target = links.find(a => {
+            const t = (a.textContent || '').trim();
+            const m = t.match(/^(\\d+)/);
+            return m && parseInt(m[1], 10) === targetPage;
+        });
+        if (target) {
+            const clickEl = target.querySelector('a') || target;
+            clickEl.click();
+            return true;
+        }
+    }
     return false;
 }
 """

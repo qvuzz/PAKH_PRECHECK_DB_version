@@ -127,9 +127,9 @@ class CEMClient:
         MSISDN chuẩn hóa bỏ số 0 và mã quốc gia 84 (ví dụ 918161817).
         """
         clean_phone = "".join(filter(str.isdigit, str(msisdn or "").strip()))
-        if clean_phone.startswith("84"):
+        if clean_phone.startswith("84") and len(clean_phone) >= 11:
             clean_phone = clean_phone[2:]
-        elif clean_phone.startswith("0"):
+        elif clean_phone.startswith("0") and len(clean_phone) >= 10:
             clean_phone = clean_phone[1:]
 
         all_records = []
@@ -219,8 +219,16 @@ class CEMClient:
         Lấy thống kê App Usage từ getTopSubEvents trong N ngày gần nhất (mặc định 5 ngày).
         """
         clean_phone = "".join(filter(str.isdigit, str(msisdn or "").strip()))
-        if not clean_phone.startswith("84"):
-            clean_phone = "84" + (clean_phone[1:] if clean_phone.startswith("0") else clean_phone)
+        if clean_phone.startswith("84") and len(clean_phone) == 11:
+            pass
+        elif clean_phone.startswith("0") and len(clean_phone) == 10:
+            clean_phone = "84" + clean_phone[1:]
+        elif len(clean_phone) == 9:
+            clean_phone = "84" + clean_phone
+        elif clean_phone.startswith("0"):
+            clean_phone = "84" + clean_phone[1:]
+        elif not clean_phone.startswith("84"):
+            clean_phone = "84" + clean_phone
 
         all_app_records = []
         today = datetime.now()
@@ -322,8 +330,16 @@ def save_cem_data_to_file(phone_84, cell_records, app_events, base_dir=None):
     from pathlib import Path
     
     clean_phone = "".join(filter(str.isdigit, str(phone_84 or "").strip()))
-    if not clean_phone.startswith("84"):
-        clean_phone = "84" + (clean_phone[1:] if clean_phone.startswith("0") else clean_phone)
+    if clean_phone.startswith("84") and len(clean_phone) == 11:
+        pass
+    elif clean_phone.startswith("0") and len(clean_phone) == 10:
+        clean_phone = "84" + clean_phone[1:]
+    elif len(clean_phone) == 9:
+        clean_phone = "84" + clean_phone
+    elif clean_phone.startswith("0"):
+        clean_phone = "84" + clean_phone[1:]
+    elif not clean_phone.startswith("84"):
+        clean_phone = "84" + clean_phone
 
     if base_dir is None:
         target_dir = Path("cem")
