@@ -22,12 +22,17 @@ AUTO_CLOSE_STATUSES_NO_ACCESS_CHECK = {
     "lỗi gói cước / thiết bị treo",     # KC_04
     "lỗi thiết bị / đi nhiều nơi bị lỗi",# Khách báo đi nhiều nơi và CEM phân tán -> Do thiết bị
     "lỗi thiết bị / đang dùng vpn",     # Phát hiện dùng VPN / 1.1.1.1 / Cloudflare
+    "đang sử dụng vpn / 1.1.1.1",       # 6: Phát hiện app VPN / 1.1.1.1
     "chưa đăng ký gói",                 # KC chưa có gói
     "chỉ có gói paygo",                 # Thuê bao chỉ có gói PAYGO
     "lỗi gói vd2 - thiếu paygo",        # Dùng VD2 nhưng không có gói PAYGO
     "lưu lượng yếu - tập trung 1 cell", # CEM Cell > 50%
     "gói cước đã hết hạn",              # SAPC toàn bộ gói hết hạn
     "gói còn hạn - không dùng được",    # SAPC còn gói nhưng mất data hoàn toàn
+    "sóng 4g kém / chỉ có 3g",          # 1: KH phản ánh sóng 4G kém / chỉ 3G
+    "bị khóa gprs",                     # 3: NAM = 1
+    "hss chưa có 5g",                   # 4: Profile HSS chưa mở 5G
+    "sóng 4g chập chờn / yếu",          # 7: SÓNG 4G CHẬP CHỜN / YẾU (KC_05)
 }
 
 LEVEL_LUU_LUONG_YEU_STATUS = "lưu lượng yếu"

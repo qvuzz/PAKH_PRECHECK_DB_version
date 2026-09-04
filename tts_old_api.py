@@ -151,9 +151,10 @@ def fetch_nguyen_nhan_list_api(token: str) -> dict:
             for item in data:
                 ten = str(item.get("Ten") or "").strip()
                 id_val = item.get("Id")
-                if ten and id_val:
-                    mapping[ten.lower()] = id_val
-                    mapping[ten] = id_val
+                if ten and id_val is not None:
+                    id_int = int(id_val)
+                    mapping[ten.lower()] = id_int
+                    mapping[ten] = id_int
     except Exception as e:
         print(f"⚠️ Lỗi fetch danh mục nguyên nhân TTS Cũ: {e}")
     return mapping

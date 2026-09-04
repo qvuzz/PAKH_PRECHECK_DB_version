@@ -211,8 +211,8 @@ def execute_tts_old_api_data_cycle(driver=None):
                         id_nn = nguyen_nhan_map.get(matched_nguyen_nhan.lower()) or nguyen_nhan_map.get(matched_nguyen_nhan)
 
                     if not id_nn:
-                        # Fallback về nguyên nhân mạng lưới đảm bảo nếu chưa có mapping chính xác
-                        id_nn = 1048
+                        # Fallback về nguyên nhân mạng lưới đảm bảo (Id: 1016)
+                        id_nn = 1016
 
                     full_content = f"{comment_calc}\n{action_plan}".strip()
                     close_ok, close_msg = close_tts_old_ticket_api(
