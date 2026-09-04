@@ -47,12 +47,17 @@ def match_diagnostic_scenarios(rat_set, service_set, rat_codes, downlink_values,
     # 🔍 GIAI ĐOẠN 2: KIỂM TRA LỖI SUY HAO / MẠNG CHẬP CHỜN TRÊN NGÀY GẦN NHẤT
     # =========================================================================
 
-    # --- Kịch bản 2: Bắt sóng 4G kém ---
-    if "6" in rat_set:
-        count_1_2 = rat_codes.count("1") + rat_codes.count("2")
-        count_6 = rat_codes.count("6")
-        if count_1_2 > count_6 and count_6 > 0:
-            return "KC_02_WEAK_4G", "SIGNAL"
+    # --- Kịch bản 2 & 5 (Đã gộp): Bắt sóng 4G kém / chập chờn (Tần suất rớt về 2G/3G chiếm đa số) ---
+    count_1_2 = rat_codes.count("1") + rat_codes.count("2")
+    count_6 = rat_codes.count("6")
+    is_weak_4g = False
+    if "6" in rat_set and count_1_2 > count_6 and count_6 > 0:
+        is_weak_4g = True
+    elif total_sessions >= 3 and (count_1_2 / total_sessions) >= 0.70:
+        is_weak_4g = True
+
+    if is_weak_4g:
+        return "KC_02_WEAK_4G", "SIGNAL"
 
     # --- Kịch bản 6 CẢI TIẾN: Nghi vấn dùng VPN (Chặn khoảng 5MB - 11MB) ---
     # BTools ghi nhận giá trị Bytes (10MB = 10,485,760 Bytes), mở rộng trần lên 11.5MB (11,500,000 Bytes)
@@ -62,11 +67,5 @@ def match_diagnostic_scenarios(rat_set, service_set, rat_codes, downlink_values,
             valid_v = [v for v in downlink_values if v > 0]
             if valid_v and (max(valid_v) - min(valid_v)) <= 2500000:
                 return "KC_06_VPN_OR_DEVICE_ISSUE", "BEHAVIOR"
-
-    # --- Kịch bản 5: Sóng 4G chập chờn dựa trên mật độ phiên ---
-    if total_sessions >= 3:
-        count_low_rat = rat_codes.count("1") + rat_codes.count("2")
-        if (count_low_rat / total_sessions) >= 0.70:
-            return "KC_05_LOW_DOWNLINK_BURST", "SIGNAL"
 
     return None, None

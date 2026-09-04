@@ -18,7 +18,7 @@
         },
         {
             "id": "KC_02_WEAK_4G",
-            "name": "Bắt sóng 4G kém (Chiếm thiểu số)",
+            "name": "Bắt sóng 4G kém / chập chờn (Thiết bị rớt về 2G/3G chiếm đa số)",
             "conclusion": "BẮT SÓNG 4G KÉM",
             "color": "FFF2CC",
             "technical_analysis": "Thiết bị có kết nối 4G nhưng tần suất rớt về sóng 2G/3G chiếm đa số trong các ngày gần đây. Biểu hiện thuê bao ở khu vực sóng 4G yếu hoặc mép vùng phủ sóng.",
@@ -39,14 +39,6 @@
             "color": "F2F2F2",
             "technical_analysis": "Hệ thống chỉ ghi nhận các mã dịch vụ quản lý phiên, không phát sinh lưu lượng data thực tế. Nghi ngờ gói cước bị treo phiên hoặc thiết bị khách hàng tắt dữ liệu di động.",
             "action_plan": "Kiểm tra thời hạn gói cước, hướng dẫn khách hàng bật/tắt lại Dữ liệu di động và khởi động lại thiết bị. Nếu không được, chuyển IT reset profile gói cước."
-        },
-        {
-            "id": "KC_05_LOW_DOWNLINK_BURST",
-            "name": "Bắt sóng 4G chập chờn (Thiết bị liên tục rớt về 2G/3G)",
-            "conclusion": "SÓNG 4G CHẬP CHỜN / YẾU",
-            "color": "FFF2CC",
-            "technical_analysis": "Thiết bị có kết nối 4G nhưng tần suất rớt về sóng 2G/3G chiếm đa số trong các ngày gần đây. Biểu hiện thuê bao ở khu vực sóng 4G yếu hoặc mép vùng phủ sóng.",
-            "action_plan": "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh."
         },
         {
             "id": "KC_06_VPN_OR_DEVICE_ISSUE",
