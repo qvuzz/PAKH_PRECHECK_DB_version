@@ -163,7 +163,7 @@ def save_or_update_ticket(t):
         ai_summary = t.get("ai_summary", "")
 
         if existing:
-            if existing["ticket_status"] == "Đã đóng" and ticket_status == "Chưa đóng":
+            if not t.get("force_update_status") and existing["ticket_status"] == "Đã đóng" and ticket_status == "Chưa đóng":
                 ticket_status = "Đã đóng"
             if not ai_summary and "ai_summary" in existing.keys():
                 ai_summary = existing["ai_summary"] or ""

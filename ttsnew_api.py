@@ -133,19 +133,16 @@ def fetch_active_tickets(token: str, limit: int = 1000, offset: int = 0) -> list
 
 def filter_data_tickets(raw_tickets: list) -> list:
     """
-    Lọc danh sách các phiếu thuộc dịch vụ Mobile Internet / Data.
+    Lọc danh sách các phiếu thuộc dịch vụ Mobile Internet / Data theo yêu cầu:
+    Chỉ tác động vào các phiếu có đồng thời 2 trường:
+    1. processDefinitionName == "2.4_QT_CLM_02"
+    2. stepName chứa "2.4" và "dịch vụ data" (ví dụ: "2.4 Đánh giá kết quả xử lý PAKH dịch vụ Data")
     """
     filtered = []
     for it in raw_tickets:
-        title = (it.get("title") or "").strip()
-        title_lower = title.lower()
-
-        # Loại trừ các dịch vụ không liên quan
-        if "gói cước mobile internet" in title_lower:
-            continue
-
-        is_data = any(k in title_lower for k in DATA_SERVICE_KEYWORDS)
-        if is_data:
+        proc = str(it.get("processDefinitionName") or "").strip()
+        step = str(it.get("stepName") or "").strip()
+        if proc == "2.4_QT_CLM_02" and ("2.4" in step and "dịch vụ data" in step.lower()):
             filtered.append(it)
     return filtered
 
@@ -173,8 +170,19 @@ def filter_non_data_tickets(raw_tickets: list) -> list:
 def enrich_ticket_customer(it: dict, token: str) -> dict:
     """
     Gọi API get-customer-by-ticketflowid để lấy SĐT, tên khách hàng và hạng hội viên.
+    Tạm đưa chung 2 trường Tên quy trình và Tên bước vào ticket_code.
     """
     flow_id = it.get("id")
+    proc_name = str(it.get("processDefinitionName") or "").strip()
+    step_name = str(it.get("stepName") or "").strip()
+    raw_code = str(it.get("ticketCode") or "").strip()
+
+    # Tạm đưa chung vào cột Mã phiếu 2 trường này theo yêu cầu của người dùng
+    if proc_name or step_name:
+        combined_code = f"{raw_code}\n[{proc_name}]\n{step_name}"
+    else:
+        combined_code = raw_code
+
     url = f"{API_BASE_URL}/get-customer-by-ticketflowid/{flow_id}"
     try:
         resp = make_api_request(url, token, timeout=10)
@@ -187,7 +195,10 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
         return {
             "flow_id": flow_id,
             "ticket_id": it.get("ticketId"),
-            "ticket_code": it.get("ticketCode"),
+            "ticket_code": combined_code,
+            "raw_ticket_code": raw_code,
+            "process_name": proc_name,
+            "step_name": step_name,
             "phone": phone,
             "raw_phone": raw_phone,
             "customer_name": cust.get("name", ""),
@@ -196,7 +207,6 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "content": it.get("content", ""),
             "incident_time": it.get("incidentDate", "") or it.get("requestDate", ""),
             "created_time": it.get("requestDate", ""),
-            "step_name": it.get("stepName", ""),
             "assigned_unit": it.get("assignedUnitName", ""),
             "source": "tts_new",
         }
@@ -204,7 +214,10 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
         return {
             "flow_id": flow_id,
             "ticket_id": it.get("ticketId"),
-            "ticket_code": it.get("ticketCode"),
+            "ticket_code": combined_code,
+            "raw_ticket_code": raw_code,
+            "process_name": proc_name,
+            "step_name": step_name,
             "phone": "",
             "raw_phone": "",
             "customer_name": "",
@@ -213,7 +226,6 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "content": it.get("content", ""),
             "incident_time": it.get("incidentDate", "") or it.get("requestDate", ""),
             "created_time": it.get("requestDate", ""),
-            "step_name": it.get("stepName", ""),
             "assigned_unit": it.get("assignedUnitName", ""),
             "source": "tts_new",
             "error": str(e),

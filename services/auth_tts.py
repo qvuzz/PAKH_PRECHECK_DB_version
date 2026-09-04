@@ -206,8 +206,8 @@ def _worker_step1(browser, active_sessions: dict, username: str, password: str, 
             try:
                 curr_url = page.url.lower()
                 content = page.content().lower()
-                has_otp_in_url = any(k in curr_url for k in ["otp", "twofactor", "verify"])
-                has_otp_in_text = any(k in content for k in ["mã otp", "mã xác thực", "xác thực otp", "nhập mã"])
+                has_otp_in_url = any(k in curr_url for k in ["otp", "twofactor", "smartca", "verify"])
+                has_otp_in_text = any(k in content for k in ["mã otp", "mã xác thực", "xác thực otp", "smartca", "nhập mã"])
                 has_otp_input = bool(page.query_selector("input#otp, input[name='otp'], input#token, input[name='token'], input[placeholder*='OTP'], input[placeholder*='otp']"))
 
                 if has_otp_in_url or has_otp_in_text or has_otp_input:

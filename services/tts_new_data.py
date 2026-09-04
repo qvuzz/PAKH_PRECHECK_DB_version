@@ -33,7 +33,6 @@ def execute_tts_new_data_cycle():
         state.log("WARN", "Hệ thống đang bận thực hiện chu kỳ khác.")
         return
 
-    state.is_running = True
     state.status = "PROCESSING"
     state.status_message = "Đang chạy tiền kiểm TTS Mới (REST API)..."
     state.current_step = "Kết nối REST API TTS Mới"
@@ -205,6 +204,8 @@ def execute_tts_new_data_cycle():
             rec = {
                 "phone": phone_84,
                 "ticket_code": ticket_code,
+                "ticket_id": ticket.get("ticket_id"),
+                "flow_id": ticket.get("flow_id"),
                 "package_title": title,
                 "incident_time": incident_time_str,
                 "ticket_content": content,
@@ -218,6 +219,7 @@ def execute_tts_new_data_cycle():
                 "action_plan": action_plan,
                 "color": color,
                 "ticket_status": "Chưa đóng",
+                "force_update_status": True,
                 "source": "tts_new",
                 "ai_summary": ai_summary if ai_summary else "null"
             }
@@ -237,7 +239,6 @@ def execute_tts_new_data_cycle():
     except Exception as e:
         state.log("ERROR", f"Lỗi trong chu kỳ tiền kiểm TTS Mới: {e}")
     finally:
-        state.is_running = False
         state.status = "IDLE"
         state.status_message = "Đã dừng. Sẵn sàng nhận lệnh."
         state.current_step = "Hoàn tất tiền kiểm TTS Mới"

@@ -8,8 +8,9 @@ from services.tts_old_api_data import execute_tts_old_api_data_cycle
 def automation_worker_loop():
     while True:
         if not state.is_running and not state.trigger_now_requested:
-            state.status = "IDLE"
-            state.status_message = "Đã dừng. Sẵn sàng nhận lệnh START."
+            if state.status != "PROCESSING":
+                state.status = "IDLE"
+                state.status_message = "Đã dừng. Sẵn sàng nhận lệnh START."
             time.sleep(0.5)
             continue
 

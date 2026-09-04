@@ -405,7 +405,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             conn = get_db_connection()
             row = None
             if ticket_code:
-                row = conn.execute("SELECT ticket_code, phone, ticket_id, flow_id FROM tickets WHERE ticket_code = ?", (ticket_code,)).fetchone()
+                row = conn.execute("SELECT ticket_code, phone, ticket_id, flow_id FROM tickets WHERE ticket_code = ? OR ticket_code LIKE ?", (ticket_code, f"{ticket_code}%")).fetchone()
             if not row and phone:
                 row = conn.execute("SELECT ticket_code, phone, ticket_id, flow_id FROM tickets WHERE phone = ? AND source = 'tts_new'", (phone,)).fetchone()
             conn.close()
@@ -413,10 +413,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             ticket_id = row["ticket_id"] if (row and row["ticket_id"]) else None
             flow_id = row["flow_id"] if (row and row["flow_id"]) else None
             code = row["ticket_code"] if (row and row["ticket_code"]) else ticket_code
+            clean_code = code.split("\n")[0].strip() if code else ""
 
-            if not ticket_id and code and "/" in code:
+            if not ticket_id and clean_code and "/" in clean_code:
                 try:
-                    ticket_id = int(code.split("/")[-1])
+                    ticket_id = int(clean_code.split("/")[-1])
                 except Exception:
                     pass
 
@@ -427,7 +428,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     if tok:
                         active_t = fetch_active_tickets(tok, limit=1000)
                         for at in active_t:
-                            if at.get("ticketCode") == code or (ticket_id and at.get("ticketId") == ticket_id):
+                            tc = at.get("ticketCode")
+                            if tc == code or tc == clean_code or (ticket_id and at.get("ticketId") == ticket_id):
                                 flow_id = at.get("id")
                                 ticket_id = at.get("ticketId")
                                 conn_u = get_db_connection()
