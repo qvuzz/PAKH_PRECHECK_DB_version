@@ -405,15 +405,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
             conn = get_db_connection()
             row = None
             if ticket_code:
-                row = conn.execute("SELECT ticket_code, phone, ticket_id, flow_id FROM tickets WHERE ticket_code = ? OR ticket_code LIKE ?", (ticket_code, f"{ticket_code}%")).fetchone()
+                row = conn.execute("SELECT ticket_code, phone, ticket_id, flow_id, comment, action_plan FROM tickets WHERE ticket_code = ? OR ticket_code LIKE ?", (ticket_code, f"{ticket_code}%")).fetchone()
             if not row and phone:
-                row = conn.execute("SELECT ticket_code, phone, ticket_id, flow_id FROM tickets WHERE phone = ? AND source = 'tts_new'", (phone,)).fetchone()
+                row = conn.execute("SELECT ticket_code, phone, ticket_id, flow_id, comment, action_plan FROM tickets WHERE phone = ? AND source = 'tts_new'", (phone,)).fetchone()
             conn.close()
 
             ticket_id = row["ticket_id"] if (row and row["ticket_id"]) else None
             flow_id = row["flow_id"] if (row and row["flow_id"]) else None
             code = row["ticket_code"] if (row and row["ticket_code"]) else ticket_code
             clean_code = code.split("\n")[0].strip() if code else ""
+            comment_val = str(row["comment"] or "").strip() if (row and "comment" in row.keys()) else ""
+            action_plan_val = str(row["action_plan"] or "").strip() if (row and "action_plan" in row.keys()) else ""
 
             if not ticket_id and clean_code and "/" in clean_code:
                 try:
@@ -444,7 +446,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json({"success": False, "message": f"Không tìm thấy mã luồng (flow_id/ticket_id) của phiếu {code or phone}."})
                 return
 
-            state.log("STEP", f"🌐 Đang chuyển màn hình tới chi tiết phiếu {code} trên tab TTS Mới...")
+            state.log("STEP", f"🌐 Đang mở cửa sổ Cập nhật xử lý phiếu {clean_code or code} trên TTS Mới...")
 
             try:
                 from playwright.sync_api import sync_playwright
@@ -466,10 +468,40 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         window.history.pushState({{ ticketFlowId: {flow_id}, ticketId: {ticket_id}, ticketTypeId: 2 }}, '', '/tts/ticket/quan-ly-phieu/chi-tiet-phieu-pakh');
                         window.location.reload();
                     }}""")
-                state.log("SUCCESS", f"✅ Đã mở tab chi tiết phiếu {code} (ID: {ticket_id}) trên TTS Mới!")
+
+                    # Đợi trang chi tiết tải xong và tự động mở cửa sổ "Cập nhật xử lý"
+                    try:
+                        btn_cap_nhat = target_page.wait_for_selector('button.p-button-primary:has-text("Cập nhật xử lý")', timeout=10000)
+                        if btn_cap_nhat:
+                            btn_cap_nhat.click()
+                            target_page.wait_for_timeout(1200)
+
+                            # Tự động điền B0: True, Nội dung xử lý (Cột 10) & Nội dung chuyển giao (Cột 11)
+                            dialog = target_page.query_selector('.p-dialog:has-text("Cập nhật xử lý")')
+                            if dialog:
+                                # B0: True
+                                b0_true = dialog.query_selector('p-radiobutton:has-text("True") .p-radiobutton-box')
+                                if b0_true:
+                                    b0_true.click()
+
+                                # Cột 10: Nội dung xử lý
+                                if comment_val:
+                                    txt_closing = dialog.query_selector('textarea[name="closingContent"], textarea[formcontrolname="closingContent"]')
+                                    if txt_closing:
+                                        txt_closing.fill(comment_val)
+
+                                # Cột 11: Nội dung chuyển giao
+                                if action_plan_val:
+                                    txt_assign = dialog.query_selector('textarea[name="assignContent"], textarea[formcontrolname="assignContent"]')
+                                    if txt_assign:
+                                        txt_assign.fill(action_plan_val)
+                    except Exception as ex_modal:
+                        state.log("WARN", f"Chưa tự động bật được nút Cập nhật xử lý: {ex_modal}")
+
+                state.log("SUCCESS", f"✅ Đã mở cửa sổ Cập nhật xử lý phiếu {clean_code or code} trên TTS Mới!")
                 self._send_json({
                     "success": True, 
-                    "message": f"Đã mở chi tiết phiếu {code} trên TTS Mới", 
+                    "message": f"Đã mở cửa sổ Cập nhật xử lý phiếu {clean_code or code} trên TTS Mới", 
                     "ticket_code": code,
                     "ticket_id": ticket_id,
                     "flow_id": flow_id
