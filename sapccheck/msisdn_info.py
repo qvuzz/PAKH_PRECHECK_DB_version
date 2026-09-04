@@ -87,6 +87,21 @@ def _parse_loc_response(data):
         nam_val = sud.get('NAM')
     result["NAM"] = str(nam_val).strip() if nam_val is not None else ""
 
+    # Sub State: MS PURGED, LOCATED, v.v.
+    sub_state_val = (
+        hlr_sub.get('subState')
+        or hlr_sub.get('sub_state')
+        or hlr_sub.get('subscriberState')
+        or location_data.get('subState')
+        or location_data.get('subscriberState')
+        or hss_sub.get('epsLocationState')
+        or hlr_sub.get('state')
+        or data.get('subState')
+        or data.get('Sub State')
+        or ''
+    )
+    result["Sub State"] = str(sub_state_val).strip()
+
     # ==========================================================
     # BỔ SUNG THÔNG TIN CELL
     # ==========================================================

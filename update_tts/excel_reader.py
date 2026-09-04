@@ -33,6 +33,8 @@ AUTO_CLOSE_STATUSES_NO_ACCESS_CHECK = {
     "bị khóa gprs",                     # 3: NAM = 1
     "hss chưa có 5g",                   # 4: Profile HSS chưa mở 5G
     "sóng 4g chập chờn / yếu",          # 7: SÓNG 4G CHẬP CHỜN / YẾU (KC_05)
+    "off thiết bị nhiều ngày",           # Sub State = MS PURGED
+    "tắt thiết bị nhiều ngày",          # Sub State = MS PURGED
 }
 
 LEVEL_LUU_LUONG_YEU_STATUS = "lưu lượng yếu"

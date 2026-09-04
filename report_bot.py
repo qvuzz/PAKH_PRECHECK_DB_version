@@ -361,6 +361,23 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             except Exception:
                 pass
 
+    # 🎯 KỊCH BẢN MS PURGED: KH đã off thiết bị nhiều ngày nên không kiểm tra được
+    sub_state = str(
+        sub_info.get("Sub State") 
+        or sub_info.get("subState") 
+        or sub_info.get("sub_state")
+        or sub_info.get("Location State") 
+        or sub_info.get("State") 
+        or ""
+    ).strip().upper()
+    if ("MS PURGED" in sub_state) or (sub_state == "PURGED") or ("PURGED" in sub_state):
+        return (
+            "OFF THIẾT BỊ NHIỀU NGÀY",
+            "Khách hàng đã off thiết bị nhiều ngày nên không kiểm tra được.",
+            "Thông báo khách hàng mở lại thiết bị để sử dụng dịch vụ. Nếu cần hỗ trợ thêm vui lòng liên hệ tổng đài.",
+            "FFF2CC"
+        )
+
     # 1. KỊCH BẢN NAM: NAM = 1 (BỊ KHÓA GPRS)
     nam_val = str(sub_info.get("NAM") if sub_info.get("NAM") is not None else "").strip()
     if nam_val == "1":

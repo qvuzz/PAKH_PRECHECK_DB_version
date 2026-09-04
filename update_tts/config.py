@@ -29,6 +29,8 @@ STATUS_TO_NGUYEN_NHAN = {
     "THIẾU SÓNG 5G / THIẾT BỊ": "Do thiết bị đầu cuối",
     "ĐANG SỬ DỤNG VPN / 1.1.1.1": "Do thiết bị đầu cuối",
     "SÓNG 4G KÉM / CHỈ CÓ 3G": "Khách hàng theo dõi thêm",
+    "OFF THIẾT BỊ NHIỀU NGÀY": "Do thiết bị đầu cuối",
+    "TẮT THIẾT BỊ NHIỀU NGÀY": "Do thiết bị đầu cuối",
 }
 
 # Danh sách đầy đủ các lựa chọn có trong dropdown "Nguyên nhân sự cố" trên TTS
