@@ -677,21 +677,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
             import update_tts.config as tts_config
             import update_tts.excel_reader as excel_reader
-            status = ticket_dict.get("status", "")
-            norm_status = excel_reader.normalize_text(status)
-            matched_nn = None
-            for k, v in tts_config.STATUS_TO_NGUYEN_NHAN.items():
-                if excel_reader.normalize_text(k) == norm_status:
-                    matched_nn = v
-                    break
+            matched_nn, action_override = excel_reader.get_nguyen_nhan_and_action(ticket_dict)
 
             id_nn = None
             if matched_nn:
                 id_nn = nguyen_nhan_map.get(matched_nn.lower()) or nguyen_nhan_map.get(matched_nn)
             if not id_nn:
-                id_nn = 1048  # Mạng lưới đảm bảo, KH sử dụng bình thường
+                id_nn = 1016  # Mạng lưới đảm bảo, KH sử dụng bình thường
 
-            full_content = f"{ticket_dict.get('comment', '')}\n{ticket_dict.get('action_plan', '')}".strip()
+            action_text = ticket_dict.get('action_plan', '') or action_override or ''
+            full_content = f"{ticket_dict.get('comment', '')}\n{action_text}".strip()
             if not full_content:
                 full_content = "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường"
 

@@ -35,6 +35,9 @@ AUTO_CLOSE_STATUSES_NO_ACCESS_CHECK = {
     "sóng 4g chập chờn / yếu",          # 7: SÓNG 4G CHẬP CHỜN / YẾU (KC_05)
     "off thiết bị nhiều ngày",           # Sub State = MS PURGED
     "tắt thiết bị nhiều ngày",          # Sub State = MS PURGED
+    "theo dõi thêm",                    # Row 2: THEO DÕI THÊM
+    "không có dữ liệu",                 # Row 4: KHÔNG CÓ DỮ LIỆU
+    "không có lưu lượng đáng kể",        # Row 8: KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ
 }
 
 LEVEL_LUU_LUONG_YEU_STATUS = "lưu lượng yếu"
@@ -73,27 +76,63 @@ def get_error_area(ai_summary):
     return match.group(1).strip() if match else ""
 
 
+def get_nguyen_nhan_and_action(record):
+    """
+    Xác định đúng nguyên nhân sự cố TTS và hướng xử lý dựa trên trạng thái và kết quả phân tích.
+    Trả về tuple: (nguyen_nhan_tts, action_plan_override)
+    """
+    status = normalize_text(record.get("status", ""))
+    ai_summary = record.get("ai_summary", "") or record.get("ticket_content", "") or ""
+    access_status = normalize_text(record.get("access_status") or get_access_status(ai_summary))
+    error_area = normalize_text(record.get("error_area") or get_error_area(ai_summary))
+    current_action = record.get("action_plan", "")
+
+    # Row 6: HOẠT ĐỘNG BÌNH THƯỜNG
+    if status == LEVEL_1_STATUS:
+        if access_status in LEVEL_1_ACCESS_STATUSES:
+            return "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường", current_action
+        else:
+            return "Khách hàng theo dõi thêm", "Có thể Khách hàng đang di chuyển vào khu vực sóng kém, hoặc nghẽn mạng tạm thời. Nhờ KH theo dõi thêm giúp."
+
+    # Row 7: LƯU LƯỢNG YẾU
+    if status == LEVEL_LUU_LUONG_YEU_STATUS:
+        if access_status != "không đề cập" and error_area.startswith(ERROR_AREA_LOCALIZED_PREFIX):
+            return "Thông tin đầu vào chưa chính xác, trùng lặp", current_action
+        else:
+            return "Khách hàng theo dõi thêm", "Có thể Khách hàng đang di chuyển vào khu vực sóng kém, hoặc nghẽn mạng tạm thời. Nhờ KH theo dõi thêm giúp."
+
+    # Row 2: THEO DÕI THÊM
+    if status == "theo dõi thêm":
+        return "Khách hàng theo dõi thêm", (current_action or "Có thể Khách hàng đang di chuyển vào khu vực sóng kém, hoặc nghẽn mạng tạm thời. Nhờ KH theo dõi thêm giúp.")
+
+    # Row 4: KHÔNG CÓ DỮ LIỆU
+    if status == "không có dữ liệu":
+        return "Do thiết bị đầu cuối", (current_action or "Nghi ngờ do thiết bị của khách hàng bị treo data. Nhờ khách hàng thử tắt/bật thiết bị và data, đổi sim sang máy khác và kiểm tra SPEEDTEST giúp.")
+
+    # Row 8: KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ
+    if status == "không có lưu lượng đáng kể":
+        return "Do thiết bị đầu cuối", (current_action or "Nghi ngờ do thiết bị của khách hàng bị treo data. Nhờ khách hàng thử tắt/bật thiết bị và data, speedtest lại giúp.")
+
+    # Các trạng thái khác tra cứu từ STATUS_TO_NGUYEN_NHAN
+    for k, v in config.STATUS_TO_NGUYEN_NHAN.items():
+        if normalize_text(k) == status:
+            return v, current_action
+
+    return "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường", current_action
+
+
 def is_level_1_auto_close_candidate(record):
     """
-    Cho phép tự động cập nhật + đóng phiếu với:
-    - HOẠT ĐỘNG BÌNH THƯỜNG: cần thêm điều kiện access_status (đối chiếu phản ánh khách hàng)
-    - KHÔNG BẮT ĐƯỢC SÓNG 4G / CHƯA KHAI BÁO PROFILE 4G / BẮT SÓNG 4G KÉM /
-      THUÊ BAO BỊ BÓP BĂNG THÔNG: đã được xác nhận qua số liệu kỹ thuật, không cần thêm điều kiện.
-    - LƯU LƯỢNG YẾU: chỉ tự đóng nếu (a) access_status (mục 2) KHÁC "Không đề cập", VÀ
-      (b) lỗi khoanh vùng được TẠI 1 KHU VỰC cụ thể (mục 5 tóm tắt AI).
+    Kiểm tra xem phiếu có đủ điều kiện tự động đóng hay không.
+    Tất cả các trường hợp đã được định nghĩa trong bảng cấu hình đóng đều trả về True.
     """
-    status = normalize_text(record["status"])
+    status = normalize_text(record.get("status", ""))
 
     if status == LEVEL_1_STATUS:
-        access_status = normalize_text(record["access_status"])
-        return access_status in LEVEL_1_ACCESS_STATUSES
+        return True
 
     if status == LEVEL_LUU_LUONG_YEU_STATUS:
-        access_status = normalize_text(record.get("access_status"))
-        if access_status == "không đề cập":
-            return False
-        error_area = normalize_text(record.get("error_area"))
-        return error_area.startswith(ERROR_AREA_LOCALIZED_PREFIX)
+        return True
 
     return status in AUTO_CLOSE_STATUSES_NO_ACCESS_CHECK
 

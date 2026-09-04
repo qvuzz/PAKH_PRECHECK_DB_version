@@ -548,8 +548,8 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         return (
             "KHÔNG CÓ DỮ LIỆU", 
             "Thuê bao hoàn toàn không phát sinh dữ liệu trong 5 ngày qua trên hệ thống BTools." + ALERT_COMMENT, 
-            "Kiểm tra sim vật lý, trạng thái chặn chiều thuê bao hoặc thời hạn gói cước." + ALERT_ACTION, 
-            "F2F2F2"
+            "Nghi ngờ do thiết bị của khách hàng bị treo data. Nhờ khách hàng thử tắt/bật thiết bị và data, đổi sim sang máy khác và kiểm tra SPEEDTEST giúp." + ALERT_ACTION, 
+            "FFF2CC"
         )
 
     scenarios_file = "diagnostic_scenarios.json"
@@ -786,7 +786,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             return (
                 "THEO DÕI THÊM",
                 f"Thuê bao có sử dụng data trước thời điểm phản ánh, tuy nhiên sau mốc tiếp nhận ({incident_time_str}) chưa ghi nhận phiên phát sinh lưu lượng mới. Cần theo dõi thêm.",
-                "Nhờ VNP liên hệ lại để kiểm tra tình trạng kết nối hiện tại của thuê bao sau thời điểm tiếp nhận sự cố." + action_suffix,
+                "Có thể Khách hàng đang di chuyển vào khu vực sóng kém, hoặc nghẽn mạng tạm thời. Nhờ KH theo dõi thêm giúp." + action_suffix,
                 "FFF2CC"
             )
 
@@ -920,8 +920,8 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     return (
         "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ",
         f"Lịch sử truy cập ngày gần nhất ({recent_day_str}) gần như không phát sinh lưu lượng sử dụng thực tế (dưới 1MB).",
-        "Hướng dẫn khách hàng kiểm tra lại trạng thái bật Data và kiểm tra dung lượng gói cước trên máy." + action_suffix,
-        "F2F2F2"
+        "Nghi ngờ do thiết bị của khách hàng bị treo data. Nhờ khách hàng thử tắt/bật thiết bị và data, speedtest lại giúp." + action_suffix,
+        "FFF2CC"
     )
 
 def get_scenario_result(scenarios, scenario_id):

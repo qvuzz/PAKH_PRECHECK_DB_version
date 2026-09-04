@@ -182,12 +182,6 @@ def execute_tts_old_api_data_cycle(driver=None):
 
                 # 5. Kiểm tra điều kiện tự động đóng
                 norm_status = excel_reader.normalize_text(status_calc)
-                matched_nguyen_nhan = None
-                for k, v in tts_config.STATUS_TO_NGUYEN_NHAN.items():
-                    if excel_reader.normalize_text(k) == norm_status:
-                        matched_nguyen_nhan = v
-                        break
-
                 ai_sum_text = ai_summary or t.get("content", "")
                 check_dict = {
                     "status": status_calc,
@@ -198,6 +192,11 @@ def execute_tts_old_api_data_cycle(driver=None):
                     "access_status": excel_reader.get_access_status(ai_sum_text),
                     "error_area": excel_reader.get_error_area(ai_sum_text)
                 }
+
+                matched_nguyen_nhan, action_override = excel_reader.get_nguyen_nhan_and_action(check_dict)
+                if action_override:
+                    action_plan = action_override
+                    rec["action_plan"] = action_plan
 
                 can_close = bool(clean_btools_data is not None and matched_nguyen_nhan and excel_reader.is_level_1_auto_close_candidate(check_dict))
 

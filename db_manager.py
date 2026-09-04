@@ -79,16 +79,6 @@ def check_ticket_can_close(t):
         status = str(t.get("status", "")).strip()
         norm_status = excel_reader.normalize_text(status)
 
-        # 1. Kiểm tra mapping trạng thái sang nguyên nhân sự cố TTS
-        matched_nguyen_nhan = None
-        for k, v in tts_config.STATUS_TO_NGUYEN_NHAN.items():
-            if excel_reader.normalize_text(k) == norm_status:
-                matched_nguyen_nhan = v
-                break
-        
-        if not matched_nguyen_nhan:
-            return False, f"Chưa có mapping nguyên nhân đóng trên TTS cho [{status}]"
-
         ai_sum = t.get("ai_summary") or t.get("ticket_content") or ""
         rec = {
             "status": status,
@@ -100,15 +90,14 @@ def check_ticket_can_close(t):
             "error_area": excel_reader.get_error_area(ai_sum),
         }
 
-        can_close = excel_reader.is_level_1_auto_close_candidate(rec)
+        matched_nguyen_nhan, _ = excel_reader.get_nguyen_nhan_and_action(rec)
+        if not matched_nguyen_nhan:
+            return False, f"Chưa có mapping nguyên nhân đóng trên TTS cho [{status}]"
+
         can_close = excel_reader.is_level_1_auto_close_candidate(rec)
         if can_close:
             return True, "Đủ điều kiện tự động đóng"
         else:
-            if norm_status == excel_reader.LEVEL_1_STATUS:
-                return False, "Hoạt động bình thường nhưng khách báo không dùng được / cần đối chiếu"
-            elif norm_status == excel_reader.LEVEL_LUU_LUONG_YEU_STATUS:
-                return False, "Lưu lượng yếu nhưng chưa xác định khu vực cụ thể"
             return False, f"Trạng thái [{status}] chưa đủ điều kiện tự đóng (dành cho KTV kiểm tra xử lý)"
     except Exception as e:
         return False, f"Lỗi kiểm tra điều kiện: {e}"
