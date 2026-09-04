@@ -69,10 +69,10 @@ class AutomationState:
         # In ra terminal an toàn trên mọi hệ điều hành (tránh lỗi font cp1252 trên Windows)
         prefix = f"[{timestamp}] [{level.upper()}]"
         try:
-            print(f"{prefix} {message}")
+            print(f"{prefix} {message}", flush=True)
         except Exception:
             try:
-                print(f"{prefix} {str(message).encode('ascii', errors='replace').decode('ascii')}")
+                print(f"{prefix} {str(message).encode('ascii', errors='replace').decode('ascii')}", flush=True)
             except Exception:
                 pass
 

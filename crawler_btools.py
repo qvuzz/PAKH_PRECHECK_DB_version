@@ -66,16 +66,8 @@ def get_btools_cookie(driver=None, force_refresh=False):
             context = browser.contexts[0]
             cookies = context.cookies()
             btools_cookies = [f"{c['name']}={c['value']}" for c in cookies if "10.159.21.241" in c.get("domain", "")]
-            if btools_cookies and not force_refresh:
+            if btools_cookies:
                 _BTOOLS_COOKIE_CACHE = "; ".join(btools_cookies)
-            else:
-                page = context.new_page()
-                page.goto("http://10.159.21.241:9267/B_tools_v2/", timeout=10000)
-                cookies = context.cookies()
-                btools_cookies = [f"{c['name']}={c['value']}" for c in cookies if "10.159.21.241" in c.get("domain", "")]
-                if btools_cookies:
-                    _BTOOLS_COOKIE_CACHE = "; ".join(btools_cookies)
-                page.close()
             browser.close()
     except Exception:
         pass
@@ -288,33 +280,69 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
         except Exception as ex_fetch:
             print(f"[BTools] Silent Fetch gặp lỗi: {ex_fetch}")
 
-    # --- PHƯƠNG ÁN 3: DỰ PHÒNG CUỐI CÙNG (SELENIUM NAVIGATE TRỰC TIẾP) ---
+    # --- PHƯƠNG ÁN 3: DỰ PHÒNG CUỐI CÙNG (CHỈ TẢI TRỰC TIẾP NẾU CÓ SẴN TAB BTOOLS) ---
     if driver:
+        orig_h = None
         try:
-            print(f"[BTools] Sử dụng chế độ tải trang truyền thống cho: {target_phone}")
-            driver.get(query_url)
-            table_loaded = False
-            for _ in range(20):
-                time.sleep(0.4)
-                has_table = driver.execute_script("""
-                    var tbl = document.querySelector('table');
-                    if(!tbl) return false;
-                    return tbl.innerText.toUpperCase().includes("RAT_TYPE") || tbl.innerText.toUpperCase().includes("MSISDN");
-                """)
-                if has_table:
-                    table_loaded = True
-                    break
-            if table_loaded:
-                html = driver.page_source
-                valid, err_reason = is_valid_btools_html(html)
-                if valid:
-                    data_rows = parse_btools_table_html(html)
-                    print(f"[BTools Legacy] Đã cào thành công {len(data_rows)} dòng dữ liệu.")
-                    return data_rows
+            orig_h = driver.current_window_handle
+            btools_h = None
+            for h in driver.window_handles:
+                try:
+                    driver.switch_to.window(h)
+                    if "10.159.21.241" in driver.current_url:
+                        btools_h = h
+                        break
+                except Exception:
+                    continue
+
+            if btools_h:
+                driver.switch_to.window(btools_h)
+                print(f"[BTools Legacy] Tải trang trực tiếp trên tab BTools cho: {target_phone}")
+                driver.get(query_url)
+                table_loaded = False
+                for _ in range(20):
+                    time.sleep(0.4)
+                    has_table = driver.execute_script("""
+                        var tbl = document.querySelector('table');
+                        if(!tbl) return false;
+                        return tbl.innerText.toUpperCase().includes("RAT_TYPE") || tbl.innerText.toUpperCase().includes("MSISDN");
+                    """)
+                    if has_table:
+                        table_loaded = True
+                        break
+                if table_loaded:
+                    html = driver.page_source
+                    valid, err_reason = is_valid_btools_html(html)
+                    if orig_h:
+                        try:
+                            driver.switch_to.window(orig_h)
+                        except Exception:
+                            pass
+                    if valid:
+                        data_rows = parse_btools_table_html(html)
+                        print(f"[BTools Legacy] Đã cào thành công {len(data_rows)} dòng dữ liệu.")
+                        return data_rows
+                    else:
+                        print(f"[BTools Legacy] Phản hồi không hợp lệ: {err_reason}")
                 else:
-                    print(f"[BTools Legacy] Phản hồi không hợp lệ: {err_reason}")
+                    if orig_h:
+                        try:
+                            driver.switch_to.window(orig_h)
+                        except Exception:
+                            pass
+            else:
+                if orig_h:
+                    try:
+                        driver.switch_to.window(orig_h)
+                    except Exception:
+                        pass
         except Exception as ex_nav:
-            print(f"[BTools Legacy] Lỗi tải trang truyền thống: {ex_nav}")
+            print(f"[BTools Legacy] Lỗi tải trang: {ex_nav}")
+            if orig_h:
+                try:
+                    driver.switch_to.window(orig_h)
+                except Exception:
+                    pass
 
     # BTOOLS LỖI HOẶC CHƯA ĐĂNG NHẬP -> TRẢ VỀ None ĐỂ BÁO LỖI VÀ KHÔNG TỰ ĐỘNG ĐÓNG PHIẾU
     print(f"[BTools] ⚠️ CẢNH BÁO: Không thể truy cập dữ liệu BTools cho {target_phone} (Chưa đăng nhập hoặc lỗi máy chủ). Trả về None!")

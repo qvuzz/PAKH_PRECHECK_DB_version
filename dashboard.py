@@ -374,7 +374,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         # 4. Quét TTS Cũ (Thoại / SMS / Gói)
         elif parsed.path == "/api/tts_old/scan_voice":
-            if state.is_running:
+            if state.status == "PROCESSING":
                 self._send_json({"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."})
             else:
                 threading.Thread(target=execute_tts_old_voice_cycle, daemon=True).start()
@@ -382,7 +382,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         # 5. Quét TTS Mới (Mobile Internet)
         elif parsed.path == "/api/ttsnew/run-now":
-            if state.is_running:
+            if state.status == "PROCESSING":
                 self._send_json({"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."})
             else:
                 threading.Thread(target=execute_tts_new_data_cycle, daemon=True).start()
@@ -390,7 +390,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         # 6. Quét TTS Mới (Thoại / SMS / Gói)
         elif parsed.path == "/api/ttsnew/scan_voice":
-            if state.is_running:
+            if state.status == "PROCESSING":
                 self._send_json({"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."})
             else:
                 threading.Thread(target=execute_tts_new_voice_cycle, daemon=True).start()

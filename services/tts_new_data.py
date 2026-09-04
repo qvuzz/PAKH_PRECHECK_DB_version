@@ -3,6 +3,7 @@
 
 import os
 import sys
+import json
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -28,7 +29,7 @@ def execute_tts_new_data_cycle():
     6. Lưu vào Database SQLite với source='tts_new' và xuất Excel báo cáo.
     7. TUYỆT ĐỐI KHÔNG TỰ ĐỘNG ĐÓNG PHIẾU (Chỉ tiền kiểm & hiển thị).
     """
-    if state.is_running:
+    if state.status == "PROCESSING":
         state.log("WARN", "Hệ thống đang bận thực hiện chu kỳ khác.")
         return
 
@@ -86,21 +87,6 @@ def execute_tts_new_data_cycle():
         now = datetime.now()
         start_d = (now - timedelta(days=4)).strftime("%d%m%Y")
         end_d = now.strftime("%d%m%Y")
-
-        # Chuẩn bị tab BTools
-        btools_tab_handle = None
-        for handle in driver.window_handles:
-            try:
-                driver.switch_to.window(handle)
-                if "10.159.21.241" in driver.current_url.lower():
-                    btools_tab_handle = handle
-                    break
-            except Exception:
-                pass
-
-        if not btools_tab_handle:
-            driver.switch_to.new_window('tab')
-            btools_tab_handle = driver.current_window_handle
 
         # Khởi tạo SAPC & CEM
         try:
