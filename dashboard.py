@@ -70,13 +70,16 @@ ACTIVE_LAN_SESSIONS = {}
 # ==============================================================================
 class DashboardHandler(BaseHTTPRequestHandler):
     def _send_json(self, data, status=200):
-        body = json.dumps(data, ensure_ascii=False).encode('utf-8')
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = json.dumps(data, ensure_ascii=False).encode('utf-8')
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            pass
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -745,6 +748,14 @@ def open_in_chrome_debug(url):
             return
 
 
+class RobustThreadingHTTPServer(ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        exc_type, _, _ = sys.exc_info()
+        if exc_type in (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            return
+        super().handle_error(request, client_address)
+
+
 # ==============================================================================
 # KHỞI CHẠY MÁY CHỦ WEB DASHBOARD
 # ==============================================================================
@@ -756,8 +767,8 @@ def run_dashboard():
     worker_thread = threading.Thread(target=automation_worker_loop, daemon=True)
     worker_thread.start()
 
-    ThreadingHTTPServer.allow_reuse_address = True
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), DashboardHandler)
+    RobustThreadingHTTPServer.allow_reuse_address = True
+    server = RobustThreadingHTTPServer(("0.0.0.0", PORT), DashboardHandler)
     print("================================================================")
     print(f"[PAKH Precheck] Web Dashboard dang chay tai: http://localhost:{PORT}")
     print("================================================================")
