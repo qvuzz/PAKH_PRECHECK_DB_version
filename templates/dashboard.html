@@ -866,10 +866,11 @@
                     <span>&lt;Bạn cần đăng nhập tts trước&gt;</span>
                 </button>
                 <!-- Trạng thái 2: Đã đăng nhập TTS -->
-                <div id="authPill" class="auth-pill auth" style="display:none;" onclick="openConnectModal()" title="Bấm để xem phiên làm việc hoặc đổi tài khoản">
-                    <span style="font-size:14px;">👤</span>
-                    <span id="authUserName">Xin chào, Kỹ thuật viên</span>
+                <div id="authPill" class="auth-pill auth" style="display:none;">
+                    <span style="font-size:14px; cursor:pointer;" onclick="openConnectModal()" title="Xem thông tin phiên">👤</span>
+                    <span id="authUserName" style="cursor:pointer;" onclick="openConnectModal()" title="Xem thông tin phiên">Xin chào, Kỹ thuật viên</span>
                     <span class="auth-role-tag ktv" id="authRoleTag">KTV</span>
+                    <button class="btn" onclick="event.stopPropagation(); clearTtsAuthSession();" style="padding:2px 8px; font-size:11px; margin-left:4px; background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; border-radius:4px; cursor:pointer; font-weight:600;" title="Đăng xuất khỏi phiên hiện tại để đổi tài khoản khác">Thoát</button>
                 </div>
             </div>
 
@@ -911,8 +912,15 @@
                 <p style="font-size:12.5px; color:#64748b; margin:0;">
                     Hệ thống đang tự động quét mỗi 10 giây để nhận diện token trên trình duyệt...
                 </p>
-                <div style="font-size:11.5px; color:#0284c7; background:#f0f9ff; padding:6px 12px; border-radius:6px; border:1px solid #bae6fd; margin-top:4px;">
-                    💡 Vui lòng hoàn tất đăng nhập trên tab TTS vừa mở.
+                <div style="font-size:12px; color:#0369a1; background:#f0f9ff; padding:10px 14px; border-radius:8px; border:1px solid #bae6fd; margin-top:6px; text-align:left; line-height:1.5;">
+                    💡 <b>Dành cho đồng nghiệp trên máy khác:</b>
+                    <div style="margin-top:6px;">
+                        Kéo nút này vào thanh Dấu trang: 
+                        <a id="welcomeBmLink" href="#" class="bm-drag-btn" style="padding:2px 8px; font-size:11px; display:inline-block; vertical-align:middle;">🔗 Đồng Bộ TTS</a>
+                    </div>
+                    <div style="margin-top:4px; font-size:11px; color:#0284c7;">
+                        (Sau khi đăng nhập trên tab TTS, chỉ cần bấm vào Dấu trang này để tự động quay lại đây với tài khoản của bạn!)
+                    </div>
                 </div>
                 <button class="btn btn-secondary" onclick="handleWelcomeSkipClick()" style="margin-top:6px; font-size:12px; padding:6px 14px;">
                     ⚡ Tôi đã đăng nhập xong, kiểm tra ngay
@@ -2310,12 +2318,13 @@
 
         async function checkTtsTokenFromBrowser() {
             // 1. Luôn ưu tiên hỏi server/LAN session xem có token mới nhất không
+            let serverData = null;
             try {
                 const res = await fetch('/api/current_user');
                 if (res.ok) {
-                    const data = await res.json();
-                    if (data.has_server_token && data.server_token) {
-                        setTtsAuthSession(data.server_token, data.server_user || { TaiKhoan: "KTV", HoTen: "Kỹ thuật viên" });
+                    serverData = await res.json();
+                    if (serverData.has_server_token && serverData.server_token) {
+                        setTtsAuthSession(serverData.server_token, serverData.server_user || { TaiKhoan: "KTV", HoTen: "Kỹ thuật viên" });
                         return getTtsAuthSession();
                     }
                 }
@@ -2325,7 +2334,18 @@
 
             // 2. Nếu server không có, kiểm tra session đã lưu trong localStorage của trình duyệt hiện tại
             let session = getTtsAuthSession();
-            if (session && session.token) return session;
+            if (session && session.token) {
+                // Bảo vệ: Nếu là client LAN (không phải Localhost) mà session lại chứa tài khoản admin máy chủ (quangvu)
+                // thì lập tức hủy bỏ để tránh nhận nhầm tài khoản của chủ máy!
+                const isLocal = serverData ? serverData.is_local : false;
+                if (!isLocal && (session.username === 'quangvu' || (session.displayName && session.displayName.includes('Quang Vũ')))) {
+                    console.warn("Phát hiện session rò rỉ quangvu trên client LAN, tự động hủy bỏ.");
+                    localStorage.removeItem('tts_auth_token');
+                    localStorage.removeItem('tts_auth_user');
+                    return null;
+                }
+                return session;
+            }
 
             return null;
         }
@@ -2338,6 +2358,12 @@
             if (errorMsg) errorMsg.style.display = 'none';
             if (btnsBox) btnsBox.style.display = 'none';
             if (waitingBox) waitingBox.style.display = 'flex';
+
+            // Cập nhật link Bookmarklet cho đồng nghiệp
+            const dashOrigin = window.location.origin;
+            const bmCode = `javascript:(function(){try{var t=localStorage.getItem('scnntttoken')||'';var u=localStorage.getItem('userInfo')||'';if(!t){alert('Không tìm thấy phiên TTS! Vui lòng mở tts.vnpt.vn và đăng nhập tài khoản trước.');return;}var target='${dashOrigin}/?sync_token='+encodeURIComponent(t)+'&sync_user='+encodeURIComponent(u);window.location.href=target;}catch(e){alert('Lỗi: '+e.message);}})();`;
+            const welcomeBm = document.getElementById('welcomeBmLink');
+            if (welcomeBm) welcomeBm.href = bmCode;
 
             // Mở tab TTS để user đăng nhập
             window.open('https://tts.vnpt.vn/#/xl-xu-ly-su-co/xu-ly-su-co-new', '_blank');
@@ -2453,6 +2479,14 @@
             // Cập nhật phiên mới nhất từ Chrome nếu đang ở máy chủ Localhost
             if (serverData.is_local && serverData.has_server_token && serverData.server_token) {
                 setTtsAuthSession(serverData.server_token, serverData.server_user || { TaiKhoan: "admin", HoTen: "Quản trị viên (Server)" });
+            } else if (!serverData.is_local && !serverData.has_server_token) {
+                // Nếu là client LAN và máy chủ chưa nhận token của IP này,
+                // dọn sạch session 'quangvu' nếu trước đó client này từng vô tình lưu lại
+                const existing = getTtsAuthSession();
+                if (existing && (existing.username === 'quangvu' || (existing.displayName && existing.displayName.includes('Quang Vũ')))) {
+                    localStorage.removeItem('tts_auth_token');
+                    localStorage.removeItem('tts_auth_user');
+                }
             }
 
             applyUserSessionState();
