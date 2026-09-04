@@ -230,13 +230,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json({"success": False, "message": "Thiếu mã token"})
             return
 
-        # 0.1 Đăng nhập trực tiếp TTS từ Dashboard (Username & Password)
+        # 0.1 Đăng nhập trực tiếp TTS từ Dashboard (Bước 1: Username & Password)
         elif parsed.path == "/api/login":
             username = body.get("username", "").strip()
             password = body.get("password", "").strip()
 
-            from services.auth_tts import authenticate_tts
-            result = authenticate_tts(username, password)
+            from services.auth_tts import authenticate_tts_step1
+            result = authenticate_tts_step1(username, password)
 
             if result.get("success"):
                 client_ip = self.client_address[0]
@@ -257,10 +257,51 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "token": token,
                     "user": user_info
                 })
+            elif result.get("otp_required"):
+                self._send_json({
+                    "success": False,
+                    "otp_required": True,
+                    "session_id": result.get("session_id"),
+                    "message": result.get("message", "Vui lòng nhập mã OTP để tiếp tục.")
+                })
             else:
                 self._send_json({
                     "success": False,
                     "error": result.get("error", "Đăng nhập thất bại. Vui lòng kiểm tra lại tài khoản hoặc mật khẩu.")
+                })
+            return
+
+        # 0.2 Xác thực mã OTP TTS (Bước 2)
+        elif parsed.path == "/api/login/otp":
+            session_id = body.get("session_id", "").strip()
+            otp_code = body.get("otp", "").strip()
+
+            from services.auth_tts import authenticate_tts_step2_otp
+            result = authenticate_tts_step2_otp(session_id, otp_code)
+
+            if result.get("success"):
+                client_ip = self.client_address[0]
+                token = result.get("token", "")
+                user_info = result.get("user", {})
+                ACTIVE_LAN_SESSIONS[client_ip] = {
+                    "token": token,
+                    "user": user_info,
+                    "timestamp": time.time()
+                }
+                user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or "KTV"
+                try:
+                    state.log("SUCCESS", f"🔑 [XÁC THỰC OTP] {user_display} (IP: {client_ip}) đã qua bước OTP thành công!")
+                except Exception:
+                    pass
+                self._send_json({
+                    "success": True,
+                    "token": token,
+                    "user": user_info
+                })
+            else:
+                self._send_json({
+                    "success": False,
+                    "error": result.get("error", "Xác thực OTP thất bại. Vui lòng thử lại.")
                 })
             return
 
