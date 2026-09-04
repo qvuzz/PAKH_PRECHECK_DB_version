@@ -58,6 +58,10 @@ def init_db():
             conn.execute("ALTER TABLE tickets ADD COLUMN flow_id INTEGER;")
         except Exception:
             pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN closed_by TEXT;")
+        except Exception:
+            pass
     conn.close()
 
 def check_ticket_can_close(t):
@@ -430,7 +434,7 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
     return results
 
 def update_ticket_field(phone, field, value, incident_time=None):
-    valid_fields = ["comment", "action_plan", "ticket_status", "status", "ai_summary"]
+    valid_fields = ["comment", "action_plan", "ticket_status", "status", "ai_summary", "closed_by"]
     if field not in valid_fields:
         return False
 

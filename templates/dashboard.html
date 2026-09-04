@@ -634,6 +634,218 @@
             from { opacity: 0; transform: scale(0.95); }
             to { opacity: 1; transform: scale(1); }
         }
+
+        /* PHÂN QUYỀN & KHÓA GIAO DIỆN KHI CHƯA ĐĂNG NHẬP */
+        body.is-unauthenticated .main-layout,
+        body.is-unauthenticated .top-toolbar,
+        body.is-unauthenticated .panel-logs {
+            pointer-events: none !important;
+            user-select: none !important;
+            filter: blur(4px) opacity(0.35);
+            transition: filter 0.3s ease;
+        }
+
+        body.role-operator .ctrl-admin-only {
+            display: none !important;
+        }
+
+        /* NÚT THÔNG TIN ĐĂNG NHẬP TRÊN HEADER */
+        .auth-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12.5px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: inherit;
+            border: 1px solid transparent;
+            background: transparent;
+        }
+        .auth-pill.unauth {
+            background: #fef2f2;
+            color: #dc2626;
+            border-color: #fca5a5;
+            animation: pulse-danger 2s infinite;
+        }
+        .auth-pill.unauth:hover {
+            background: #fee2e2;
+            border-color: #f87171;
+            transform: scale(1.02);
+        }
+        @keyframes pulse-danger {
+            0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4); }
+            70% { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+        }
+
+        .auth-pill.auth {
+            background: #f0fdf4;
+            color: #15803d;
+            border-color: #86efac;
+        }
+        .auth-pill.auth:hover {
+            background: #dcfce7;
+            border-color: #4ade80;
+        }
+        .auth-role-tag {
+            font-size: 10px;
+            font-weight: 800;
+            padding: 2px 6px;
+            border-radius: 10px;
+            letter-spacing: 0.04em;
+        }
+        .auth-role-tag.admin {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+        }
+        .auth-role-tag.ktv {
+            background: #dcfce7;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+
+        /* OVERLAY KHÓA GIAO DIỆN KHI CHƯA ĐĂNG NHẬP */
+        .unauth-lock-overlay {
+            position: fixed;
+            top: 72px;
+            left: 0; right: 0; bottom: 0;
+            background: rgba(248, 250, 252, 0.88);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            z-index: 990;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .lock-modal-card {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 14px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+            max-width: 490px;
+            width: 100%;
+            padding: 36px 30px;
+            text-align: center;
+            animation: modalFadeIn 0.2s ease-out;
+        }
+        .lock-icon-circle {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: #fef2f2;
+            color: #dc2626;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 16px auto;
+            border: 2px solid #fee2e2;
+        }
+        .lock-modal-card h2 {
+            font-size: 18px;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 10px;
+        }
+        .lock-desc {
+            font-size: 13.5px;
+            color: #475569;
+            line-height: 1.55;
+            margin-bottom: 22px;
+        }
+        .lock-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 16px;
+        }
+        .lock-footnote {
+            font-size: 11.5px;
+            color: #64748b;
+        }
+
+        /* MODAL KẾT NỐI TÀI KHOẢN TTS */
+        .connect-modal-backdrop {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: blur(3px);
+            display: none; align-items: center; justify-content: center;
+            z-index: 10000;
+        }
+        .connect-modal-box {
+            background: #ffffff;
+            border-radius: 14px;
+            padding: 24px 28px;
+            width: 560px;
+            max-width: 92%;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            border: 1px solid #cbd5e1;
+            text-align: left;
+            animation: modalFadeIn 0.2s ease-out;
+        }
+        .connect-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 12px;
+            margin-bottom: 16px;
+        }
+        .connect-modal-header h3 {
+            font-size: 16px;
+            font-weight: 800;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .connect-tab-nav {
+            display: flex;
+            gap: 8px;
+            border-bottom: 2px solid #e2e8f0;
+            margin-bottom: 16px;
+        }
+        .connect-tab-btn {
+            padding: 8px 14px;
+            border: none;
+            background: none;
+            font-size: 13px;
+            font-weight: 600;
+            color: #64748b;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            font-family: inherit;
+        }
+        .connect-tab-btn.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+            font-weight: 700;
+        }
+        .bm-drag-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #eff6ff;
+            color: #1d4ed8;
+            border: 2px dashed #93c5fd;
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-size: 13.5px;
+            font-weight: 700;
+            text-decoration: none;
+            cursor: grab;
+            transition: all 0.15s ease;
+        }
+        .bm-drag-btn:hover {
+            background: #dbeafe;
+            border-color: #3b82f6;
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 <body>
@@ -646,13 +858,73 @@
             <span class="logo-subtitle">Hệ thống tiền kiểm phản ánh khách hàng</span>
         </div>
         <div style="display:flex; align-items:center; gap:12px;">
-            <div id="headerModeTag" class="badge-mode auto">⚡ Tự động đóng</div>
+            <!-- WIDGET XÁC THỰC TÀI KHOẢN TTS -->
+            <div id="userSessionWidget" style="display:flex; align-items:center;">
+                <!-- Trạng thái 1: Chưa đăng nhập TTS -->
+                <button id="unauthBtn" class="auth-pill unauth" onclick="openConnectModal()" title="Bấm để đăng nhập / kết nối tài khoản TTS của bạn">
+                    <span style="font-size:14px;">⚠️</span>
+                    <span>&lt;Bạn cần đăng nhập tts trước&gt;</span>
+                </button>
+                <!-- Trạng thái 2: Đã đăng nhập TTS -->
+                <div id="authPill" class="auth-pill auth" style="display:none;" onclick="openConnectModal()" title="Bấm để xem phiên làm việc hoặc đổi tài khoản">
+                    <span style="font-size:14px;">👤</span>
+                    <span id="authUserName">Xin chào, Kỹ thuật viên</span>
+                    <span class="auth-role-tag ktv" id="authRoleTag">KTV</span>
+                </div>
+            </div>
+
+            <div id="headerModeTag" class="badge-mode auto ctrl-admin-only">⚡ Tự động đóng</div>
             <div class="system-pill">
                 <div id="statusDot" class="status-dot"></div>
                 <span id="statusText">Sẵn sàng</span>
             </div>
         </div>
     </header>
+
+    <!-- POPUP CHÀO MỪNG & XÁC THỰC TTS -->
+    <div id="welcomeTtsModal" class="connect-modal-backdrop" style="display:none;">
+        <div class="connect-modal-box" style="width:480px; text-align:center; padding:32px 28px;">
+            <div style="font-size:38px; margin-bottom:12px;">👋</div>
+            <h2 style="font-size:18px; font-weight:800; color:#0f172a; margin-bottom:10px;">
+                Chào mừng bạn đã đến với VNPT TTS Precheck.
+            </h2>
+            <p style="font-size:14px; color:#475569; line-height:1.6; margin-bottom:24px;">
+                Bạn cần đăng nhập Hệ thống TTS trước, nếu đã đăng nhập xin vui lòng bỏ qua.
+            </p>
+
+            <!-- TRẠNG THÁI MẶC ĐỊNH: 2 NÚT ĐĂNG NHẬP & BỎ QUA -->
+            <div id="welcomeBtnsBox" style="display:flex; justify-content:center; gap:12px;">
+                <button class="btn btn-primary" onclick="handleWelcomeLoginClick()" style="padding:10px 24px; font-size:14px; font-weight:700;">
+                    🔑 Đăng nhập
+                </button>
+                <button class="btn btn-secondary" onclick="handleWelcomeSkipClick()" style="padding:10px 24px; font-size:14px; font-weight:600;">
+                    ⏭️ Bỏ qua
+                </button>
+            </div>
+
+            <!-- TRẠNG THÁI KHI CLICK ĐĂNG NHẬP: ĐANG CHỜ ĐĂNG NHẬP -->
+            <div id="welcomeWaitingBox" style="display:none; flex-direction:column; align-items:center; gap:12px; margin-top:8px;">
+                <div style="display:flex; align-items:center; gap:8px; font-size:14.5px; font-weight:700; color:#005baa;">
+                    <span class="status-dot processing" style="width:10px; height:10px;"></span>
+                    <span>Đang chờ đăng nhập...</span>
+                </div>
+                <p style="font-size:12.5px; color:#64748b; margin:0;">
+                    Hệ thống đang tự động quét mỗi 10 giây để nhận diện token trên trình duyệt...
+                </p>
+                <div style="font-size:11.5px; color:#0284c7; background:#f0f9ff; padding:6px 12px; border-radius:6px; border:1px solid #bae6fd; margin-top:4px;">
+                    💡 Vui lòng hoàn tất đăng nhập trên tab TTS vừa mở.
+                </div>
+                <button class="btn btn-secondary" onclick="handleWelcomeSkipClick()" style="margin-top:6px; font-size:12px; padding:6px 14px;">
+                    ⚡ Tôi đã đăng nhập xong, kiểm tra ngay
+                </button>
+            </div>
+
+            <!-- THÔNG BÁO LỖI NẾU BỎ QUA MÀ CHƯA CÓ TOKEN -->
+            <div id="welcomeErrorMsg" style="display:none; margin-top:16px; padding:10px 14px; background:#fef2f2; border:1px solid #fca5a5; border-radius:8px; color:#dc2626; font-size:13px; font-weight:600;">
+                ⚠️ Chưa thấy phiên đăng nhập TTS trên trình duyệt. Vui lòng bấm "Đăng nhập" lại.
+            </div>
+        </div>
+    </div>
 
     <!-- THANH CÔNG CỤ TRÊN CÙNG: CHỈ SỐ RÚT GỌN + BỘ ĐIỀU KHIỂN -->
     <div class="top-toolbar">
@@ -680,13 +952,13 @@
         <div class="top-controls-container">
             <!-- 1. CỤM ĐIỀU KHIỂN: TTS CŨ REST API - MOBILE INTERNET -->
             <div id="ctrlOldApiData" class="ctrl-group-inline" style="display:flex;">
-                <div class="ctrl-item" style="display:flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:#475569;">
+                <div class="ctrl-item ctrl-admin-only" style="display:flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:#475569;">
                     <span>⏱ Lặp:</span>
                     <input type="number" id="inpIntervalApi" class="ctrl-input-sm" value="15" min="1" max="60">
                     <span>phút</span>
                 </div>
 
-                <div class="ctrl-item" style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#475569; margin:0 4px;">
+                <div class="ctrl-item ctrl-admin-only" style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#475569; margin:0 4px;">
                     <span id="autoCloseSubLabelApi">Tự đóng:</span>
                     <label class="switch-sm" title="Bật/Tắt chế độ tự động đóng phiếu qua REST API">
                         <input type="checkbox" id="chkAutoCloseApi" onchange="toggleAutoCloseMode(this.checked)" checked>
@@ -694,11 +966,11 @@
                     </label>
                 </div>
 
-                <button id="btnStartApi" class="btn-sm btn-primary" onclick="startAutomation('api')">
+                <button id="btnStartApi" class="btn-sm btn-primary ctrl-admin-only" onclick="startAutomation('api')">
                     <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                     Bắt đầu
                 </button>
-                <button id="btnStopApi" class="btn-sm btn-danger" onclick="stopAutomation()" style="display:none;">
+                <button id="btnStopApi" class="btn-sm btn-danger ctrl-admin-only" onclick="stopAutomation()" style="display:none;">
                     <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
                     Dừng
                 </button>
@@ -706,7 +978,7 @@
                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                     Quét ngay
                 </button>
-                <span id="countdownBadgeApi" style="color:var(--primary); font-family:'JetBrains Mono'; font-weight:700; font-size:12px; margin-left:2px;">--:--</span>
+                <span id="countdownBadgeApi" class="ctrl-admin-only" style="color:var(--primary); font-family:'JetBrains Mono'; font-weight:700; font-size:12px; margin-left:2px;">--:--</span>
             </div>
 
             <!-- 2. CỤM ĐIỀU KHIỂN: TTS CŨ REST API - THOẠI / SMS -->
@@ -1649,6 +1921,13 @@
         }
 
         async function closeTtsOldApiTicket(phone, incidentTime, btnElem) {
+            const session = getTtsAuthSession();
+            if (!session || !session.token) {
+                alert("⚠️ Bạn cần đăng nhập tài khoản TTS của mình trước khi thực hiện thao tác đóng phiếu!");
+                openConnectModal();
+                return;
+            }
+
             const row = btnElem ? btnElem.closest('tr') : null;
             let commentVal = '';
             let actionPlanVal = '';
@@ -1675,7 +1954,10 @@
                         phone, 
                         incident_time: incidentTime,
                         comment: commentVal,
-                        action_plan: actionPlanVal
+                        action_plan: actionPlanVal,
+                        token: session.token,
+                        user_id: session.userId || 0,
+                        user_name: session.displayName || session.username || "Kỹ thuật viên"
                     })
                 });
                 const data = await res.json();
@@ -1880,10 +2162,393 @@
             window.location.href = '/api/export_excel';
         }
 
+        // =====================================================================
+        // QUẢN LÝ PHIÊN ĐĂNG NHẬP TTS & PHÂN QUYỀN (MULTI-USER SESSION)
+        // =====================================================================
+        let currentAuthUser = null;
+        let isSystemAdmin = false;
+
+        function getTtsAuthSession() {
+            try {
+                const token = localStorage.getItem('tts_auth_token') || '';
+                const userRaw = localStorage.getItem('tts_auth_user') || '';
+                if (!token) return null;
+                let userObj = {};
+                try {
+                    userObj = JSON.parse(userRaw);
+                } catch(e) {
+                    userObj = { TaiKhoan: userRaw, HoTen: userRaw };
+                }
+                const username = userObj.TaiKhoan || userObj.username || userObj.user_name || 'KTV';
+                const displayName = userObj.HoTen || userObj.fullname || username;
+                const userId = userObj.Id || userObj.id || userObj.user_id || 0;
+                return {
+                    token: token,
+                    username: username,
+                    displayName: displayName,
+                    userId: userId,
+                    raw: userObj
+                };
+            } catch(e) {
+                return null;
+            }
+        }
+
+        function setTtsAuthSession(token, userInfo) {
+            if (!token) return;
+            localStorage.setItem('tts_auth_token', token.trim());
+            if (typeof userInfo === 'object') {
+                localStorage.setItem('tts_auth_user', JSON.stringify(userInfo));
+            } else {
+                localStorage.setItem('tts_auth_user', String(userInfo || ''));
+            }
+        }
+
+        function clearTtsAuthSession() {
+            localStorage.removeItem('tts_auth_token');
+            localStorage.removeItem('tts_auth_user');
+            currentAuthUser = null;
+            applyUserSessionState();
+        }
+
+        function switchConnectTab(tab) {
+            const tabBm = document.getElementById('tabContentBm');
+            const tabManual = document.getElementById('tabContentManual');
+            const btnBm = document.getElementById('tabBtnBm');
+            const btnManual = document.getElementById('tabBtnManual');
+
+            if (tab === 'bm') {
+                if (tabBm) tabBm.style.display = 'block';
+                if (tabManual) tabManual.style.display = 'none';
+                if (btnBm) btnBm.className = 'connect-tab-btn active';
+                if (btnManual) btnManual.className = 'connect-tab-btn';
+            } else {
+                if (tabBm) tabBm.style.display = 'none';
+                if (tabManual) tabManual.style.display = 'block';
+                if (btnBm) btnBm.className = 'connect-tab-btn';
+                if (btnManual) btnManual.className = 'connect-tab-btn active';
+            }
+        }
+
+        function openConnectModal() {
+            const modal = document.getElementById('connectTtsModal');
+            if (!modal) return;
+            modal.style.display = 'flex';
+
+            // Cập nhật Bookmarklet link với hostname động
+            const bmLink = document.getElementById('bmLink');
+            const dashOrigin = window.location.origin;
+            const bmCode = `javascript:(function(){try{var t=localStorage.getItem('scnntttoken')||'';var u=localStorage.getItem('userInfo')||'';if(!t){alert('Không tìm thấy phiên TTS! Vui lòng mở tts.vnpt.vn và đăng nhập tài khoản trước.');return;}var target='${dashOrigin}/?sync_token='+encodeURIComponent(t)+'&sync_user='+encodeURIComponent(u);window.location.href=target;}catch(e){alert('Lỗi: '+e.message);}})();`;
+            if (bmLink) {
+                bmLink.href = bmCode;
+            }
+
+            // Hiển thị thông tin phiên hiện tại (nếu có)
+            const session = getTtsAuthSession();
+            const curBox = document.getElementById('modalCurrentSessionBox');
+            if (session) {
+                if (curBox) {
+                    curBox.style.display = 'block';
+                    document.getElementById('curSessionUser').innerText = `${session.displayName} (${session.username})`;
+                    document.getElementById('curSessionToken').innerText = session.token.substring(0, 16) + '...';
+                }
+            } else {
+                if (curBox) curBox.style.display = 'none';
+            }
+        }
+
+        function closeConnectModal() {
+            const modal = document.getElementById('connectTtsModal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function copyBookmarkletCode() {
+            const dashOrigin = window.location.origin;
+            const bmCode = `javascript:(function(){try{var t=localStorage.getItem('scnntttoken')||'';var u=localStorage.getItem('userInfo')||'';if(!t){alert('Không tìm thấy phiên TTS! Vui lòng đăng nhập tts.vnpt.vn trước.');return;}var target='${dashOrigin}/?sync_token='+encodeURIComponent(t)+'&sync_user='+encodeURIComponent(u);window.location.href=target;}catch(e){alert('Lỗi: '+e.message);}})();`;
+            navigator.clipboard.writeText(bmCode).then(() => {
+                alert("📋 Đã sao chép mã Bookmarklet vào bộ nhớ tạm! Bạn có thể dán vào thanh địa chỉ (URL) hoặc Bookmark trên trình duyệt.");
+            }).catch(err => {
+                prompt("Sao chép mã sau:", bmCode);
+            });
+        }
+
+        function saveManualToken() {
+            const tokenInp = document.getElementById('inpManualToken');
+            const userInp = document.getElementById('inpManualUser');
+            const token = tokenInp ? tokenInp.value.trim() : '';
+            const user = userInp ? userInp.value.trim() : 'Kỹ thuật viên';
+
+            if (!token) {
+                alert("⚠️ Vui lòng nhập mã Token scnntttoken!");
+                return;
+            }
+
+            setTtsAuthSession(token, { TaiKhoan: user, HoTen: user });
+            closeConnectModal();
+            applyUserSessionState();
+            alert(`✅ Đã kết nối thành công tài khoản: ${user}!`);
+        }
+
+        async function syncServerTokenQuick() {
+            try {
+                const res = await fetch('/api/current_user');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.server_token) {
+                        setTtsAuthSession(data.server_token, data.server_user || { TaiKhoan: "admin", HoTen: "Quản trị viên máy chủ" });
+                        closeConnectModal();
+                        applyUserSessionState();
+                        alert("✅ Đã đồng bộ thành công Token từ máy chủ!");
+                        return;
+                    }
+                }
+            } catch(e) {}
+            alert("⚠️ Máy chủ hiện chưa trích xuất được token từ trình duyệt.");
+        }
+
+        let pollTtsInterval = null;
+
+        async function checkTtsTokenFromBrowser() {
+            // 1. Kiểm tra localStorage của Dashboard trước
+            let session = getTtsAuthSession();
+            if (session && session.token) return session;
+
+            // 2. Hỏi server xem trên trình duyệt đã có token chưa
+            try {
+                const res = await fetch('/api/current_user');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.has_server_token && data.server_token) {
+                        setTtsAuthSession(data.server_token, data.server_user || { TaiKhoan: "KTV", HoTen: "Kỹ thuật viên" });
+                        return getTtsAuthSession();
+                    }
+                }
+            } catch(e) {
+                console.warn("Lỗi kiểm tra token từ trình duyệt:", e);
+            }
+            return null;
+        }
+
+        function handleWelcomeLoginClick() {
+            const btnsBox = document.getElementById('welcomeBtnsBox');
+            const waitingBox = document.getElementById('welcomeWaitingBox');
+            const errorMsg = document.getElementById('welcomeErrorMsg');
+
+            if (errorMsg) errorMsg.style.display = 'none';
+            if (btnsBox) btnsBox.style.display = 'none';
+            if (waitingBox) waitingBox.style.display = 'flex';
+
+            // Mở tab TTS để user đăng nhập
+            window.open('https://tts.vnpt.vn/#/xl-xu-ly-su-co/xu-ly-su-co-new', '_blank');
+
+            // Quét 10 giây 1 lần cho đến khi get được token trên trình duyệt, và vào trang
+            if (pollTtsInterval) clearInterval(pollTtsInterval);
+            pollTtsInterval = setInterval(async () => {
+                const session = await checkTtsTokenFromBrowser();
+                if (session && session.token) {
+                    clearInterval(pollTtsInterval);
+                    pollTtsInterval = null;
+                    closeWelcomeModalAndEnter();
+                }
+            }, 10000);
+        }
+
+        async function handleWelcomeSkipClick() {
+            const errorMsg = document.getElementById('welcomeErrorMsg');
+            if (errorMsg) errorMsg.style.display = 'none';
+
+            // Ngay lập tức quét xem token trên trình duyệt có chưa
+            const session = await checkTtsTokenFromBrowser();
+            if (session && session.token) {
+                if (pollTtsInterval) {
+                    clearInterval(pollTtsInterval);
+                    pollTtsInterval = null;
+                }
+                closeWelcomeModalAndEnter();
+            } else {
+                // Chưa thấy -> yêu cầu user Đăng nhập lại
+                const btnsBox = document.getElementById('welcomeBtnsBox');
+                const waitingBox = document.getElementById('welcomeWaitingBox');
+                if (btnsBox) btnsBox.style.display = 'flex';
+                if (waitingBox) waitingBox.style.display = 'none';
+                if (errorMsg) errorMsg.style.display = 'block';
+            }
+        }
+
+        function closeWelcomeModalAndEnter() {
+            const modal = document.getElementById('welcomeTtsModal');
+            if (modal) modal.style.display = 'none';
+            applyUserSessionState();
+            loadTickets(true);
+        }
+
+        function applyUserSessionState() {
+            const session = getTtsAuthSession();
+            currentAuthUser = session;
+
+            const unauthBtn = document.getElementById('unauthBtn');
+            const authPill = document.getElementById('authPill');
+            const authUserName = document.getElementById('authUserName');
+            const authRoleTag = document.getElementById('authRoleTag');
+            const welcomeModal = document.getElementById('welcomeTtsModal');
+
+            if (!session || !session.token) {
+                // CHƯA ĐĂNG NHẬP: HIỆN POPUP CHÀO MỪNG & KHÓA
+                if (unauthBtn) unauthBtn.style.display = 'inline-flex';
+                if (authPill) authPill.style.display = 'none';
+                if (welcomeModal) welcomeModal.style.display = 'flex';
+                document.body.classList.add('is-unauthenticated');
+            } else {
+                // ĐÃ ĐĂNG NHẬP: VÀO TRANG, HIỂN THỊ XIN CHÀO
+                if (unauthBtn) unauthBtn.style.display = 'none';
+                if (authPill) authPill.style.display = 'inline-flex';
+                if (authUserName) authUserName.innerText = `Xin chào, ${session.displayName || session.username}`;
+                if (authRoleTag) {
+                    authRoleTag.innerText = isSystemAdmin ? 'ADMIN' : 'KTV';
+                    authRoleTag.className = isSystemAdmin ? 'auth-role-tag admin' : 'auth-role-tag ktv';
+                }
+                if (welcomeModal) welcomeModal.style.display = 'none';
+                document.body.classList.remove('is-unauthenticated');
+            }
+
+            // Áp dụng vai trò (Admin vs KTV)
+            if (isSystemAdmin) {
+                document.body.classList.remove('role-operator');
+            } else {
+                document.body.classList.add('role-operator');
+            }
+        }
+
+        async function initUserSession() {
+            // 1. Đọc tham số sync_token từ URL (nếu có chuyển tiếp từ bookmarklet hoặc login)
+            const urlParams = new URLSearchParams(window.location.search);
+            const syncToken = urlParams.get('sync_token');
+            const syncUser = urlParams.get('sync_user');
+            if (syncToken) {
+                let parsedUser = {};
+                try {
+                    parsedUser = JSON.parse(decodeURIComponent(syncUser));
+                } catch(e) {
+                    parsedUser = { TaiKhoan: syncUser, HoTen: syncUser };
+                }
+                setTtsAuthSession(syncToken, parsedUser);
+                // Làm sạch URL
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+
+            // 2. Lấy thông tin server & kiểm tra vai trò admin
+            let serverData = { is_local: false, has_server_token: false };
+            try {
+                const res = await fetch('/api/current_user');
+                if (res.ok) {
+                    serverData = await res.json();
+                }
+            } catch(e) {
+                console.warn("Lỗi kiểm tra current_user:", e);
+            }
+
+            isSystemAdmin = serverData.is_local || urlParams.get('role') === 'admin';
+
+            // Nếu máy chủ là Admin Localhost và chưa có token trong localStorage nhưng server đã có:
+            let curSession = getTtsAuthSession();
+            if (!curSession && serverData.is_local && serverData.has_server_token && serverData.server_token) {
+                setTtsAuthSession(serverData.server_token, serverData.server_user || { TaiKhoan: "admin", HoTen: "Quản trị viên (Server)" });
+            }
+
+            applyUserSessionState();
+        }
+
+        // KHỞI CHẠY HỆ THỐNG
+        initUserSession();
         setInterval(fetchStatus, 1500);
         setInterval(() => loadTickets(false), 8000);
         fetchStatus();
         loadTickets(true);
     </script>
+
+    <!-- MODAL KẾT NỐI TÀI KHOẢN TTS VNPT -->
+    <div id="connectTtsModal" class="connect-modal-backdrop" style="display:none;" onclick="if(event.target===this) closeConnectModal()">
+        <div class="connect-modal-box">
+            <div class="connect-modal-header">
+                <h3>
+                    <span>🔑</span>
+                    <span>Kết Nối Tài Khoản TTS VNPT</span>
+                </h3>
+                <button class="btn btn-icon" onclick="closeConnectModal()" style="border:none; font-size:16px;">✕</button>
+            </div>
+
+            <!-- Khung thông tin phiên hiện tại nếu đã đăng nhập -->
+            <div id="modalCurrentSessionBox" style="display:none; background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:12px 14px; margin-bottom:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div style="font-size:11px; font-weight:700; color:#166534; text-transform:uppercase;">Phiên đang kết nối</div>
+                        <div id="curSessionUser" style="font-size:14px; font-weight:700; color:#15803d; margin-top:2px;">--</div>
+                        <div style="font-size:11px; color:#16a34a; margin-top:1px; font-family:monospace;">Token: <span id="curSessionToken">--</span></div>
+                    </div>
+                    <button class="btn btn-danger" onclick="clearTtsAuthSession(); closeConnectModal();" style="padding:6px 12px; font-size:12px;">
+                        🚪 Đăng Xuất
+                    </button>
+                </div>
+            </div>
+
+            <div class="connect-tab-nav">
+                <button class="connect-tab-btn active" id="tabBtnBm" onclick="switchConnectTab('bm')">🔗 Dấu Trang 1-Click (Khuyên Dùng)</button>
+                <button class="connect-tab-btn" id="tabBtnManual" onclick="switchConnectTab('manual')">✍️ Nhập Thủ Công</button>
+            </div>
+
+            <!-- Tab 1: Bookmarklet -->
+            <div id="tabContentBm" style="display:block;">
+                <p style="font-size:13px; color:#475569; line-height:1.5; margin-bottom:14px;">
+                    Phương pháp tiện lợi nhất để đồng bộ tài khoản TTS mà không cần nhớ token hay mật khẩu:
+                </p>
+
+                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:14px; margin-bottom:16px; text-align:center;">
+                    <div style="margin-bottom:10px; font-size:12.5px; font-weight:600; color:#334155;">
+                        👇 Kéo nút bên dưới vào thanh Dấu trang (Bookmarks bar) của trình duyệt:
+                    </div>
+                    <a id="bmLink" href="#" class="bm-drag-btn" title="Kéo nút này thả vào thanh Bookmarks bar của trình duyệt">
+                        <span>🔗</span>
+                        <span>Đồng Bộ TTS Precheck</span>
+                    </a>
+                </div>
+
+                <div style="font-size:12.5px; color:#475569; display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+                    <div><strong>Bước 1:</strong> Mở tab <a href="https://tts.vnpt.vn" target="_blank" style="color:var(--primary); font-weight:600;">tts.vnpt.vn</a> (nơi bạn đang đăng nhập tài khoản của mình).</div>
+                    <div><strong>Bước 2:</strong> Bấm vào Dấu trang <strong>"Đồng Bộ TTS Precheck"</strong> vừa lưu trên thanh trình duyệt.</div>
+                    <div><strong>Bước 3:</strong> Trình duyệt sẽ tự động quay trở lại trang này và xác thực danh tính ngay lập tức!</div>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #f1f5f9; padding-top:12px;">
+                    <button class="btn btn-secondary" onclick="copyBookmarkletCode()" style="font-size:12px; padding:6px 12px;">
+                        📋 Sao chép mã Bookmarklet
+                    </button>
+                    <button class="btn btn-outline-primary" id="btnQuickServerSync" onclick="syncServerTokenQuick()" style="font-size:12px; padding:6px 12px;">
+                        ⚡ Đồng bộ từ máy chủ (Admin)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Tab 2: Manual Input -->
+            <div id="tabContentManual" style="display:none;">
+                <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">
+                    <div>
+                        <label style="font-size:12px; font-weight:700; color:#334155; display:block; margin-bottom:4px;">Tên đăng nhập / Họ tên KTV:</label>
+                        <input type="text" id="inpManualUser" class="control-input" placeholder="Ví dụ: lequangvu hoặc KTV Vũ">
+                    </div>
+                    <div>
+                        <label style="font-size:12px; font-weight:700; color:#334155; display:block; margin-bottom:4px;">Mã Token (scnntttoken):</label>
+                        <textarea id="inpManualToken" class="control-input" rows="3" placeholder="Dán mã scnntttoken từ tts.vnpt.vn tại đây..." style="resize:vertical; font-family:monospace; font-size:11.5px;"></textarea>
+                        <span style="font-size:11px; color:#64748b; margin-top:4px; display:block;">
+                            (Trên tab tts.vnpt.vn: Bấm F12 → Application → Local Storage → https://tts.vnpt.vn → copy giá trị của khóa <code>scnntttoken</code>).
+                        </span>
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:8px;">
+                    <button class="btn btn-secondary" onclick="closeConnectModal()">Hủy</button>
+                    <button class="btn btn-primary" onclick="saveManualToken()">💾 Lưu & Kết Nối</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

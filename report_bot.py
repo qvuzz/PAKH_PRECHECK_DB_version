@@ -979,9 +979,11 @@ def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, 
         if "Cần kiểm tra tình trạng thuê bao và gói cước" in action_text:
             a_cell.font = Font(name="Segoe UI", size=11, bold=True, color="C00000")
 
-        # 🎯 CỘT 12 (L): TRẠNG THÁI PHIẾU (ĐÃ ĐÓNG / CHƯA ĐÓNG)
+        # 🎯 CỘT 12 (L): TRẠNG THÁI PHIẾU (ĐÃ ĐÓNG / CHƯA ĐÓNG) & NGƯỜI ĐÓNG
         ticket_st = str(rec.get("ticket_status") or ("Đã đóng" if rec.get("is_closed") else "Chưa đóng")).strip()
-        st_cell = ws.cell(row=current_row, column=12, value=ticket_st)
+        closed_by = str(rec.get("closed_by") or "").strip()
+        display_st = f"{ticket_st}\n({closed_by})" if (closed_by and "đã đóng" in ticket_st.lower()) else ticket_st
+        st_cell = ws.cell(row=current_row, column=12, value=display_st)
         st_cell.alignment = Alignment(horizontal="center", vertical="center")
         if "đã đóng" in ticket_st.lower():
             st_cell.font = Font(name="Segoe UI", size=11, bold=True, color="006100")

@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "VNPT TTS Precheck Helper",
+  "version": "1.0",
+  "description": "Hỗ trợ đồng bộ phiên đăng nhập an toàn (ATBMTT) từ TTS VNPT sang hệ thống Tiền kiểm PAKH Precheck.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://tts.vnpt.vn/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://tts.vnpt.vn/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

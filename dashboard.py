@@ -63,6 +63,8 @@ def load_dashboard_html() -> str:
     return "<h1>Lỗi: Không tìm thấy file templates/dashboard.html</h1>"
 
 
+ACTIVE_LAN_SESSIONS = {}
+
 # ==============================================================================
 # HTTP REQUEST HANDLER & REST API ROUTER
 # ==============================================================================
@@ -76,6 +78,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
@@ -86,6 +95,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(body)
 
@@ -98,7 +108,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "image/svg+xml")
                 self.send_header("Content-Length", str(len(content)))
-                self.send_header("Cache-Control", "public, max-age=86400")
+                self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
                 self.wfile.write(content)
             else:
@@ -107,6 +117,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
         # 3. Trạng thái live
         elif parsed.path == "/api/status":
             self._send_json(state.get_snapshot())
+
+        # 3.1 Thông tin xác thực tài khoản & phân quyền (Local & LAN)
+        elif parsed.path == "/api/current_user":
+            client_ip = self.client_address[0]
+            is_local = client_ip in ("127.0.0.1", "localhost", "::1")
+            
+            token = ""
+            user_info = {}
+            if client_ip in ACTIVE_LAN_SESSIONS and (time.time() - ACTIVE_LAN_SESSIONS[client_ip].get("timestamp", 0) < 86400):
+                token = ACTIVE_LAN_SESSIONS[client_ip].get("token", "")
+                user_info = ACTIVE_LAN_SESSIONS[client_ip].get("user", {})
+            
+            if not token:
+                token, user_info = extract_token_from_browser()
+
+            self._send_json({
+                "is_local": is_local,
+                "client_ip": client_ip,
+                "has_server_token": bool(token),
+                "server_user": user_info,
+                "server_token": token
+            })
 
         # 4. Danh sách phiếu
         elif parsed.path == "/api/tickets":
@@ -178,8 +210,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except Exception:
             body = {}
 
+        # 0. Đăng ký phiên KTV từ extension hoặc browser sync
+        if parsed.path == "/api/session/register":
+            token = body.get("token", "").strip()
+            user_info = body.get("user") or {}
+            client_ip = self.client_address[0]
+            if token:
+                ACTIVE_LAN_SESSIONS[client_ip] = {
+                    "token": token,
+                    "user": user_info,
+                    "timestamp": time.time()
+                }
+                try:
+                    state.log("SUCCESS", f"[AUTH] Da lien ket phien KTV cho IP: {client_ip}")
+                except Exception:
+                    pass
+                self._send_json({"success": True, "message": f"Đã kết nối phiên cho IP {client_ip}"})
+            else:
+                self._send_json({"success": False, "message": "Thiếu mã token"})
+            return
+
         # 1. Bật tự động
-        if parsed.path == "/api/start":
+        elif parsed.path == "/api/start":
             state.is_running = True
             state.stop_requested = False
             state.engine = "api"
@@ -502,12 +554,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 update_ticket_field(phone, "action_plan", action_plan_input, incident_time=incident_time)
                 ticket_dict["action_plan"] = action_plan_input
 
-            token, user_info = extract_token_from_browser()
+            client_token = (body.get("token") or "").strip()
+            client_user_id = body.get("user_id")
+            client_user_name = (body.get("user_name") or "").strip()
+
+            token = client_token
+            user_id = client_user_id
+            user_name = client_user_name
+
             if not token:
-                self._send_json({"success": False, "message": "Không tìm thấy token scnntttoken của TTS Cũ."})
+                token, user_info = extract_token_from_browser()
+                if user_info:
+                    user_id = user_id or user_info.get("Id") or user_info.get("id") or 0
+                    user_name = user_name or user_info.get("HoTen") or user_info.get("TaiKhoan") or "Quản trị viên"
+
+            if not token:
+                self._send_json({"success": False, "message": "Không tìm thấy token scnntttoken của TTS Cũ. Vui lòng kết nối tài khoản TTS trước."})
                 return
 
-            user_id = user_info.get("Id") or user_info.get("id") or 0
+            if not user_name:
+                user_name = "Kỹ thuật viên"
+
+            user_id = user_id or 0
             nguyen_nhan_map = fetch_nguyen_nhan_list_api(token)
 
             import update_tts.config as tts_config
@@ -530,7 +598,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not full_content:
                 full_content = "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường"
 
-            state.log("STEP", f"Đang gửi request đóng phiếu REST API TTS Cũ cho SĐT {phone}...")
+            state.log("STEP", f"Đang gửi request đóng phiếu REST API TTS Cũ cho SĐT {phone} bởi [{user_name}]...")
             ok, msg = close_tts_old_ticket_api(
                 ticket=ticket_dict,
                 id_nguyen_nhan=id_nn,
@@ -541,12 +609,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             )
             if ok:
                 update_ticket_field(phone, "ticket_status", "Đã đóng", incident_time=incident_time)
+                update_ticket_field(phone, "closed_by", user_name, incident_time=incident_time)
                 state.closed_count += 1
-                state.log("SUCCESS", msg)
+                state.log("SUCCESS", f"✅ [{user_name}] {msg}")
             else:
                 state.log("WARN", msg)
 
-            self._send_json({"success": ok, "message": msg})
+            self._send_json({"success": ok, "message": msg, "closed_by": user_name})
 
         else:
             self.send_error(404, "Not Found")
