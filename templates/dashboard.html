@@ -1714,10 +1714,11 @@
                             ? `<span class="badge-status badge-green" style="font-size:10px; padding:3px 6px; font-weight:700;">✓ Đã kiểm Core</span>`
                             : `<button class="btn-precheck-blue" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để tiền kiểm tra Core tức thì">⚡ Tiền kiểm Core</button>`;
 
+                        const cleanTicketCode = (t.ticket_code || '').split('\n')[0].trim();
                         actionHtml = `
                             <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
                                 ${precheckBtn}
-                                <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px;" onclick="openTtsNewTicketDetail('${t.ticket_code || ''}', '${t.phone}', '${t.incident_time}', this)" title="Mở trang chi tiết phiếu trên TTS Mới để cập nhật / đóng thủ công">
+                                <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở cửa sổ Cập nhật xử lý phiếu trên TTS Mới">
                                     Đóng thủ công
                                 </button>
                             </div>
