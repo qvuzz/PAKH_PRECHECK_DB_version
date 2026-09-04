@@ -678,45 +678,45 @@
         </div>
 
         <div class="top-controls-container">
-            <!-- 1. CỤM ĐIỀU KHIỂN: TTS CŨ - MOBILE INTERNET -->
-            <div id="ctrlOldData" class="ctrl-group-inline" style="display:flex;">
+            <!-- 1. CỤM ĐIỀU KHIỂN: TTS CŨ REST API - MOBILE INTERNET -->
+            <div id="ctrlOldApiData" class="ctrl-group-inline" style="display:flex;">
                 <div class="ctrl-item" style="display:flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:#475569;">
                     <span>⏱ Lặp:</span>
-                    <input type="number" id="inpInterval" class="ctrl-input-sm" value="5" min="1" max="60">
+                    <input type="number" id="inpIntervalApi" class="ctrl-input-sm" value="15" min="1" max="60">
                     <span>phút</span>
                 </div>
 
                 <div class="ctrl-item" style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#475569; margin:0 4px;">
-                    <span id="autoCloseSubLabel">Tự đóng:</span>
-                    <label class="switch-sm" title="Bật/Tắt chế độ tự động đóng phiếu">
-                        <input type="checkbox" id="chkAutoClose" onchange="toggleAutoCloseMode(this.checked)" checked>
+                    <span id="autoCloseSubLabelApi">Tự đóng:</span>
+                    <label class="switch-sm" title="Bật/Tắt chế độ tự động đóng phiếu qua REST API">
+                        <input type="checkbox" id="chkAutoCloseApi" onchange="toggleAutoCloseMode(this.checked)" checked>
                         <span class="slider"></span>
                     </label>
                 </div>
 
-                <button id="btnStart" class="btn-sm btn-primary" onclick="startAutomation()">
+                <button id="btnStartApi" class="btn-sm btn-primary" onclick="startAutomation('api')">
                     <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                     Bắt đầu
                 </button>
-                <button id="btnStop" class="btn-sm btn-danger" onclick="stopAutomation()" style="display:none;">
+                <button id="btnStopApi" class="btn-sm btn-danger" onclick="stopAutomation()" style="display:none;">
                     <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
                     Dừng
                 </button>
-                <button id="btnRunNow" class="btn-sm btn-secondary" onclick="runNow()" title="Quét & phân tích ngay lập tức">
+                <button id="btnRunNowApi" class="btn-sm btn-secondary" onclick="startTtsOldApiDataScan()" title="Quét & đối soát REST API ngay lập tức">
                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                     Quét ngay
                 </button>
-                <span id="countdownBadge" style="color:var(--primary); font-family:'JetBrains Mono'; font-weight:700; font-size:12px; margin-left:2px;">--:--</span>
+                <span id="countdownBadgeApi" style="color:var(--primary); font-family:'JetBrains Mono'; font-weight:700; font-size:12px; margin-left:2px;">--:--</span>
             </div>
 
-            <!-- 2. CỤM ĐIỀU KHIỂN: TTS CŨ - THOẠI / SMS -->
-            <div id="ctrlOldVoice" class="ctrl-group-inline" style="display:none;">
-                <button id="btnScanOldVoice" class="btn-sm btn-primary" onclick="startOldVoiceScan()">
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <!-- 2. CỤM ĐIỀU KHIỂN: TTS CŨ REST API - THOẠI / SMS -->
+            <div id="ctrlOldApiVoice" class="ctrl-group-inline" style="display:none;">
+                <button id="btnTtsOldApiScanVoice" class="btn-sm btn-primary" onclick="startTtsOldApiVoiceScan()">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                     ⚡ Quét phiếu Thoại / SMS
                 </button>
                 <span style="font-size:11.5px; font-weight:600; color:#0369a1; background:#f0f9ff; padding:4px 8px; border-radius:4px; border:1px solid #bae6fd;">
-                    Chỉ quét Thoại/SMS độc lập • Tiền kiểm On-Demand từng số (Không tự động đóng)
+                    Quét REST API danh sách phản ánh Thoại, SMS, Gói cước • Tiền kiểm Core On-Demand
                 </span>
             </div>
 
@@ -753,26 +753,26 @@
     <div class="main-layout">
         <!-- CỘT BÊN TRÁI: MENU NGHIỆP VỤ LỰA CHỌN -->
         <div class="sidebar-nav">
-            <!-- NHÓM 1: HỆ THỐNG TTS CŨ -->
+            <!-- NHÓM 1: HỆ THỐNG TTS CŨ (REST API) -->
             <div class="nav-section">
                 <div class="nav-section-title">HỆ THỐNG TTS CŨ</div>
-                <button class="nav-item active" id="nav-tts_old-data" onclick="selectModule('tts_old', 'data')">
+                <button class="nav-item active" id="nav-tts_old_api-data" onclick="selectModule('tts_old_api', 'data')">
                     <div class="nav-item-left">
                         <div class="nav-item-text">
                             <span class="nav-item-title">Mobile Internet</span>
-                            <span class="nav-item-sub">Tự động quét & đóng</span>
+                            <span class="nav-item-sub">REST API Siêu tốc</span>
                         </div>
                     </div>
-                    <span class="nav-badge" id="badgeOldData">0</span>
+                    <span class="nav-badge" id="badgeOldApiData">0</span>
                 </button>
-                <button class="nav-item" id="nav-tts_old-voice_sms" onclick="selectModule('tts_old', 'voice_sms')">
+                <button class="nav-item" id="nav-tts_old_api-voice_sms" onclick="selectModule('tts_old_api', 'voice_sms')">
                     <div class="nav-item-left">
                         <div class="nav-item-text">
                             <span class="nav-item-title">Thoại / SMS / Gói</span>
                             <span class="nav-item-sub">Tiền kiểm On-Demand</span>
                         </div>
                     </div>
-                    <span class="nav-badge" id="badgeOldVoice">0</span>
+                    <span class="nav-badge" id="badgeOldApiVoice">0</span>
                 </button>
             </div>
 
@@ -862,10 +862,6 @@
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                         Xuất Excel
                     </button>
-                    <button class="btn btn-ghost-danger" onclick="clearDatabase()" title="Xóa toàn bộ dữ liệu phiếu trong cơ sở dữ liệu" style="white-space:nowrap; padding:6px 12px; font-size:12.5px;">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                        Xóa Dữ Liệu
-                    </button>
                     <button class="btn btn-icon" id="btnRefresh" onclick="manualRefreshDashboard()" title="Làm mới danh sách & trạng thái">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                     </button>
@@ -925,6 +921,8 @@
             currentAutoClose = !!autoClose;
             const chk = document.getElementById('chkAutoClose');
             if (chk) chk.checked = currentAutoClose;
+            const chkApi = document.getElementById('chkAutoCloseApi');
+            if (chkApi) chkApi.checked = currentAutoClose;
 
             const modeLabelBadge = document.getElementById('modeLabelBadge');
             const headerModeTag = document.getElementById('headerModeTag');
@@ -970,8 +968,15 @@
                 const data = await res.json();
 
                 isRunning = data.is_running;
-                document.getElementById('btnStart').style.display = isRunning ? 'none' : 'flex';
-                document.getElementById('btnStop').style.display = isRunning ? 'flex' : 'none';
+                const btnStart = document.getElementById('btnStart');
+                const btnStop = document.getElementById('btnStop');
+                if (btnStart) btnStart.style.display = isRunning ? 'none' : 'flex';
+                if (btnStop) btnStop.style.display = isRunning ? 'flex' : 'none';
+
+                const btnStartApi = document.getElementById('btnStartApi');
+                const btnStopApi = document.getElementById('btnStopApi');
+                if (btnStartApi) btnStartApi.style.display = isRunning ? 'none' : 'flex';
+                if (btnStopApi) btnStopApi.style.display = isRunning ? 'flex' : 'none';
 
                 const dot = document.getElementById('statusDot');
                 dot.className = 'status-dot';
@@ -993,6 +998,8 @@
                     const sc = data.system_counts;
                     const bOldData = document.getElementById('badgeOldData');
                     const bOldVoice = document.getElementById('badgeOldVoice');
+                    const bOldApiData = document.getElementById('badgeOldApiData');
+                    const bOldApiVoice = document.getElementById('badgeOldApiVoice');
                     const bNewData = document.getElementById('badgeNewData');
                     const bNewVoice = document.getElementById('badgeNewVoice');
                     const bTotalClosed = document.getElementById('badgeTotalClosed');
@@ -1000,6 +1007,8 @@
 
                     if (bOldData) bOldData.innerText = sc.tts_old_data || 0;
                     if (bOldVoice) bOldVoice.innerText = sc.tts_old_voice || 0;
+                    if (bOldApiData) bOldApiData.innerText = sc.tts_old_api_data || 0;
+                    if (bOldApiVoice) bOldApiVoice.innerText = sc.tts_old_api_voice || 0;
                     if (bNewData) bNewData.innerText = sc.tts_new_data || 0;
                     if (bNewVoice) bNewVoice.innerText = sc.tts_new_voice || 0;
                     if (bTotalClosed) bTotalClosed.innerText = sc.total_closed || 0;
@@ -1014,9 +1023,16 @@
                 if (data.countdown_seconds > 0) {
                     const m = Math.floor(data.countdown_seconds / 60);
                     const s = data.countdown_seconds % 60;
-                    document.getElementById('countdownBadge').innerText = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+                    const cdText = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+                    const cb1 = document.getElementById('countdownBadge');
+                    const cb2 = document.getElementById('countdownBadgeApi');
+                    if (cb1) cb1.innerText = cdText;
+                    if (cb2) cb2.innerText = cdText;
                 } else {
-                    document.getElementById('countdownBadge').innerText = '--:--';
+                    const cb1 = document.getElementById('countdownBadge');
+                    const cb2 = document.getElementById('countdownBadgeApi');
+                    if (cb1) cb1.innerText = '--:--';
+                    if (cb2) cb2.innerText = '--:--';
                 }
 
                 if (data.auto_close !== undefined && data.auto_close !== currentAutoClose) {
@@ -1042,7 +1058,7 @@
 
         let lastTicketsSignature = "";
         let currentTableTab = 'chua_dong';
-        let currentSystem = 'tts_old';
+        let currentSystem = 'tts_old_api';
         let currentService = 'data';
 
         function selectModule(sys, srv) {
@@ -1061,22 +1077,22 @@
             }
 
             // Toggle top controls
-            const ctrlOldData = document.getElementById('ctrlOldData');
-            const ctrlOldVoice = document.getElementById('ctrlOldVoice');
+            const ctrlOldApiData = document.getElementById('ctrlOldApiData');
+            const ctrlOldApiVoice = document.getElementById('ctrlOldApiVoice');
             const ctrlNewData = document.getElementById('ctrlNewData');
             const ctrlNewVoice = document.getElementById('ctrlNewVoice');
             const ctrlHistory = document.getElementById('ctrlHistory');
 
-            if (ctrlOldData) ctrlOldData.style.display = 'none';
-            if (ctrlOldVoice) ctrlOldVoice.style.display = 'none';
+            if (ctrlOldApiData) ctrlOldApiData.style.display = 'none';
+            if (ctrlOldApiVoice) ctrlOldApiVoice.style.display = 'none';
             if (ctrlNewData) ctrlNewData.style.display = 'none';
             if (ctrlNewVoice) ctrlNewVoice.style.display = 'none';
             if (ctrlHistory) ctrlHistory.style.display = 'none';
 
-            if (sys === 'tts_old' && srv === 'data') {
-                if (ctrlOldData) ctrlOldData.style.display = 'flex';
-            } else if (sys === 'tts_old' && srv === 'voice_sms') {
-                if (ctrlOldVoice) ctrlOldVoice.style.display = 'flex';
+            if (sys === 'tts_old_api' && srv === 'data') {
+                if (ctrlOldApiData) ctrlOldApiData.style.display = 'flex';
+            } else if (sys === 'tts_old_api' && srv === 'voice_sms') {
+                if (ctrlOldApiVoice) ctrlOldApiVoice.style.display = 'flex';
             } else if (sys === 'tts_new' && srv === 'data') {
                 if (ctrlNewData) ctrlNewData.style.display = 'flex';
             } else if (sys === 'tts_new' && srv === 'voice_sms') {
@@ -1102,12 +1118,16 @@
 
             const ctrlOldData = document.getElementById('ctrlOldData');
             const ctrlOldVoice = document.getElementById('ctrlOldVoice');
+            const ctrlOldApiData = document.getElementById('ctrlOldApiData');
+            const ctrlOldApiVoice = document.getElementById('ctrlOldApiVoice');
             const ctrlNewData = document.getElementById('ctrlNewData');
             const ctrlNewVoice = document.getElementById('ctrlNewVoice');
             const ctrlHistory = document.getElementById('ctrlHistory');
 
             if (ctrlOldData) ctrlOldData.style.display = 'none';
             if (ctrlOldVoice) ctrlOldVoice.style.display = 'none';
+            if (ctrlOldApiData) ctrlOldApiData.style.display = 'none';
+            if (ctrlOldApiVoice) ctrlOldApiVoice.style.display = 'none';
             if (ctrlNewData) ctrlNewData.style.display = 'none';
             if (ctrlNewVoice) ctrlNewVoice.style.display = 'none';
             if (ctrlHistory) ctrlHistory.style.display = 'flex';
@@ -1149,46 +1169,7 @@
         }
 
         async function startOldVoiceScan() {
-            const btn = document.getElementById('btnScanOldVoice');
-            btn.disabled = true;
-            const originalHtml = btn.innerHTML;
-            btn.innerHTML = '<span class="status-dot processing" style="display:inline-block; margin-right:6px;"></span> Đang quét TTS...';
-            try {
-                const res = await fetch('/api/tts_old/scan_voice', { method: 'POST' });
-                const data = await res.json();
-                if (!data.success) {
-                    alert("⚠️ " + (data.message || "Không thể quét phiếu Thoại/SMS."));
-                    btn.disabled = false;
-                    btn.innerHTML = originalHtml;
-                    return;
-                }
-
-                // Chờ cho đến khi quét và tiền kiểm xong
-                let checkAttempts = 0;
-                const interval = setInterval(async () => {
-                    checkAttempts++;
-                    const stRes = await fetch('/api/status');
-                    const stData = await stRes.json();
-                    if (stData.status !== 'PROCESSING' || checkAttempts > 30) {
-                        clearInterval(interval);
-                        btn.disabled = false;
-                        btn.innerHTML = originalHtml;
-                        await loadTickets(true);
-                        await fetchStatus();
-
-                        const vCount = (stData.system_counts && stData.system_counts.tts_old_voice) || 0;
-                        if (vCount === 0) {
-                            alert("ℹ️ Đã quét xong: Bảng sự cố TTS Cũ hiện tại không có phiếu Thoại / SMS nào (Toàn bộ là phiếu Mobile Internet).");
-                        } else {
-                            alert(`✅ Đã quét & tiền kiểm tra đầy đủ thông tin cho ${vCount} phiếu Thoại / SMS!`);
-                        }
-                    }
-                }, 2000);
-            } catch (e) {
-                alert("Lỗi khi gửi yêu cầu quét phiếu Thoại/SMS: " + e);
-                btn.disabled = false;
-                btn.innerHTML = originalHtml;
-            }
+            return startTtsOldApiVoiceScan();
         }
 
         async function startNewVoiceScan() {
@@ -1328,6 +1309,8 @@
                     const sc = data.system_counts;
                     const bOldData = document.getElementById('badgeOldData');
                     const bOldVoice = document.getElementById('badgeOldVoice');
+                    const bOldApiData = document.getElementById('badgeOldApiData');
+                    const bOldApiVoice = document.getElementById('badgeOldApiVoice');
                     const bNewData = document.getElementById('badgeNewData');
                     const bNewVoice = document.getElementById('badgeNewVoice');
                     const bTotalClosed = document.getElementById('badgeTotalClosed');
@@ -1335,6 +1318,8 @@
 
                     if (bOldData) bOldData.innerText = sc.tts_old_data || 0;
                     if (bOldVoice) bOldVoice.innerText = sc.tts_old_voice || 0;
+                    if (bOldApiData) bOldApiData.innerText = sc.tts_old_api_data || 0;
+                    if (bOldApiVoice) bOldApiVoice.innerText = sc.tts_old_api_voice || 0;
                     if (bNewData) bNewData.innerText = sc.tts_new_data || 0;
                     if (bNewVoice) bNewVoice.innerText = sc.tts_new_voice || 0;
                     if (bTotalClosed) bTotalClosed.innerText = sc.total_closed || 0;
@@ -1383,6 +1368,7 @@
 
                     let actionHtml = '';
                     const isTtsNew = (t.source === 'tts_new' || currentSystem === 'tts_new');
+                    const isTtsOldApi = (t.source === 'tts_old_api' || currentSystem === 'tts_old_api');
 
                     if (t.ticket_status === 'Đã đóng') {
                         actionHtml = `
@@ -1404,54 +1390,41 @@
                                 </button>
                             </div>
                         `;
-                    } else if (currentService === 'voice_sms') {
-                        const hasProfile = t.real_packages && t.real_packages.includes('Radio:');
-                        const precheckBtn = hasProfile 
-                            ? `<span class="badge-status badge-green" style="font-size:10px; padding:3px 6px; font-weight:700;">✓ Đã kiểm Core</span>`
-                            : `<button class="btn-precheck-blue" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để tiền kiểm tra Core tức thì">⚡ Tiền kiểm Core</button>`;
-                        actionHtml = `
-                            <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
-                                ${precheckBtn}
-                                <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px;" onclick="closeSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng thủ công trên TTS Cũ">
-                                    Đóng thủ công
-                                </button>
-                            </div>
-                        `;
                     } else {
-                        if (!currentAutoClose) {
+                        // TOÀN BỘ HỆ THỐNG TTS CŨ HOẠT ĐỘNG 100% QUA REST API
+                        if (currentService === 'voice_sms') {
+                            const hasProfile = t.real_packages && t.real_packages.includes('Radio:');
+                            const precheckBtn = hasProfile 
+                                ? `<span class="badge-status badge-green" style="font-size:10px; padding:3px 6px; font-weight:700;">✓ Đã kiểm Core</span>`
+                                : `<button class="btn-precheck-blue" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để tiền kiểm tra Core tức thì">⚡ Tiền kiểm Core</button>`;
+                            actionHtml = `
+                                <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
+                                    ${precheckBtn}
+                                    <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng qua REST API TTS Cũ">
+                                        ⚡ Đóng (API)
+                                    </button>
+                                </div>
+                            `;
+                        } else {
                             if (t.can_close) {
                                 actionHtml = `
                                     <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                                        <button class="btn-close-green" onclick="closeSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu ngay trên TTS">
-                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-                                            Đóng Phiếu
+                                        <button class="btn-close-green" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng ngay qua REST API">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                                            Đóng (API)
                                         </button>
                                     </div>
                                 `;
                             } else {
                                 actionHtml = `
                                     <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                                        <span class="badge-close-yellow" title="${t.cannot_close_reason || 'Chưa đủ điều kiện đóng'}">
+                                        <span class="badge-close-yellow" title="${t.cannot_close_reason || 'Chưa đủ điều kiện đóng tự động'}">
                                             <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
                                             Chưa đóng được
                                         </span>
-                                    </div>
-                                `;
-                            }
-                        } else {
-                            if (t.can_close) {
-                                actionHtml = `
-                                    <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                                        <span class="badge-status badge-cyan" style="font-weight:600; padding:4px 8px; font-size:11px;" title="Hệ thống sẽ tự động đóng phiếu này trong chu kỳ quét">⏳ Chờ tự đóng</span>
-                                    </div>
-                                `;
-                            } else {
-                                actionHtml = `
-                                    <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                                        <span class="badge-close-yellow" title="${t.cannot_close_reason || 'Chưa đủ điều kiện đóng'}">
-                                            <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
-                                            Chưa đóng được
-                                        </span>
+                                        <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px; margin-top:2px;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="KTV nhập cột 10 & 11 rồi bấm để đóng qua API">
+                                            ⚡ Đóng (API)
+                                        </button>
                                     </div>
                                 `;
                             }
@@ -1582,9 +1555,13 @@
                         cemHtml = `<div style="font-size:10.5px; line-height:1.35; color:#334155;">${formattedCem}</div>`;
                     }
 
-                    let displayStatus = t.status || '--';
-                    if (displayStatus.includes('HOẠT ĐỘNG BÌNH THƯỜNG') || displayStatus.includes('HOAT DONG BINH THUONG')) {
-                        displayStatus = 'BÌNH THƯỜNG';
+                    let statusHtml = '';
+                    if (t.status && t.status !== '--' && t.status.trim() !== '') {
+                        let displayStatus = t.status;
+                        if (displayStatus.includes('HOẠT ĐỘNG BÌNH THƯỜNG') || displayStatus.includes('HOAT DONG BINH THUONG')) {
+                            displayStatus = 'BÌNH THƯỜNG';
+                        }
+                        statusHtml = `<span class="badge-status ${badgeClass}">${escapeHtml(displayStatus)}</span>`;
                     }
 
                     return `
@@ -1593,7 +1570,7 @@
                             <td style="${ticketCodeDisplay} font-family:'JetBrains Mono'; font-size:11px; font-weight:700; color:#2563eb; white-space:nowrap; vertical-align:top;">
                                 ${t.ticket_code ? `<a href="javascript:void(0)" onclick="openTtsNewTicketDetail('${t.ticket_code}', '${t.phone}', '${t.incident_time}', this)" style="color:#005baa; text-decoration:none; cursor:pointer;" title="Mở trang chi tiết phiếu ${t.ticket_code} trên TTS Mới">${t.ticket_code}</a>` : '--'}
                             </td>
-                            <td style="vertical-align:top; text-align:center; width:90px;"><span class="badge-status ${badgeClass}">${escapeHtml(displayStatus)}</span></td>
+                            <td style="vertical-align:top; text-align:center; width:90px;">${statusHtml}</td>
                             <td style="vertical-align:top;">
                                 <a href="${btoolsUrl}" target="_blank" style="color:var(--cyan); font-weight:700; text-decoration:none; font-size:12px;">
                                     ${t.phone} ↗
@@ -1638,6 +1615,21 @@
             const btn = document.getElementById('btnRefresh');
             if (btn) btn.classList.add('spinning');
             try {
+                lastTicketsSignature = "";
+                // Kích hoạt quét nhanh từ API theo phân hệ đang chọn để đồng bộ dữ liệu thực tế
+                if (currentSystem === 'tts_old_api') {
+                    if (currentService === 'data') {
+                        fetch('/api/tts_old_api/run-now', { method: 'POST' }).catch(() => {});
+                    } else if (currentService === 'voice_sms') {
+                        fetch('/api/tts_old_api/scan_voice', { method: 'POST' }).catch(() => {});
+                    }
+                } else if (currentSystem === 'tts_new') {
+                    if (currentService === 'data') {
+                        fetch('/api/ttsnew/run-now', { method: 'POST' }).catch(() => {});
+                    } else if (currentService === 'voice_sms') {
+                        fetch('/api/ttsnew/scan_voice', { method: 'POST' }).catch(() => {});
+                    }
+                }
                 await Promise.all([
                     fetchStatus(),
                     loadTickets(true)
@@ -1645,23 +1637,46 @@
             } finally {
                 setTimeout(() => {
                     if (btn) btn.classList.remove('spinning');
-                }, 500);
+                }, 800);
             }
         }
+        function closeSingleTicket(phone, incidentTime, btnElem) {
+            closeTtsOldApiTicket(phone, incidentTime, btnElem);
+        }
 
-        async function closeSingleTicket(phone, incidentTime, btnElem) {
+        function manualCloseTicket(btnElem, phone, incidentTime) {
+            closeTtsOldApiTicket(phone, incidentTime, btnElem);
+        }
+
+        async function closeTtsOldApiTicket(phone, incidentTime, btnElem) {
+            const row = btnElem ? btnElem.closest('tr') : null;
+            let commentVal = '';
+            let actionPlanVal = '';
+            if (row) {
+                const textareas = row.querySelectorAll('textarea.editable-cell');
+                if (textareas.length >= 2) {
+                    commentVal = textareas[0].value.trim();
+                    actionPlanVal = textareas[1].value.trim();
+                }
+            }
+
             const originalHtml = btnElem ? btnElem.innerHTML : '';
             if (btnElem) {
                 btnElem.disabled = true;
-                btnElem.innerHTML = `⏳ Đang đóng...`;
+                btnElem.innerHTML = `⏳ Đang đóng API...`;
                 btnElem.style.opacity = '0.7';
             }
 
             try {
-                const res = await fetch('/api/tickets/close_one', {
+                const res = await fetch('/api/tts_old_api/close_one', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ phone, incident_time: incidentTime })
+                    body: JSON.stringify({ 
+                        phone, 
+                        incident_time: incidentTime,
+                        comment: commentVal,
+                        action_plan: actionPlanVal
+                    })
                 });
                 const data = await res.json();
                 if (data.success) {
@@ -1669,7 +1684,7 @@
                     await loadTickets(true);
                     await fetchStatus();
                 } else {
-                    alert("⚠️ " + (data.message || "Thao tác đóng phiếu thất bại. Vui lòng kiểm tra lại tab TTS."));
+                    alert("⚠️ " + (data.message || "Thao tác đóng phiếu qua REST API thất bại."));
                     if (btnElem) {
                         btnElem.disabled = false;
                         btnElem.innerHTML = originalHtml;
@@ -1677,7 +1692,7 @@
                     }
                 }
             } catch (e) {
-                alert("Lỗi khi gửi yêu cầu đóng phiếu: " + e);
+                alert("Lỗi khi gửi yêu cầu đóng phiếu REST API: " + e);
                 if (btnElem) {
                     btnElem.disabled = false;
                     btnElem.innerHTML = originalHtml;
@@ -1686,8 +1701,80 @@
             }
         }
 
-        function manualCloseTicket(btnElem, phone, incidentTime) {
-            closeSingleTicket(phone, incidentTime, btnElem);
+        async function startTtsOldApiDataScan() {
+            const btn = document.getElementById('btnTtsOldApiScanData');
+            if (btn) btn.disabled = true;
+            const originalHtml = btn ? btn.innerHTML : '';
+            if (btn) btn.innerHTML = '<span class="status-dot processing" style="display:inline-block; margin-right:6px;"></span> Đang quét REST API...';
+            try {
+                const res = await fetch('/api/tts_old_api/run-now', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    await fetchStatus();
+                    setTimeout(() => loadTickets(true), 2500);
+                } else {
+                    alert("⚠️ " + (data.message || "Không thể khởi động quét REST API TTS Cũ."));
+                }
+            } catch (e) {
+                alert("Lỗi kết nối khi quét REST API TTS Cũ: " + e);
+            } finally {
+                setTimeout(() => {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = originalHtml;
+                    }
+                }, 3000);
+            }
+        }
+
+        async function startTtsOldApiVoiceScan() {
+            const btn = document.getElementById('btnTtsOldApiScanVoice');
+            const originalHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="status-dot processing" style="display:inline-block; margin-right:6px;"></span> Đang quét REST API...';
+            }
+            try {
+                const res = await fetch('/api/tts_old_api/scan_voice', { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) {
+                    alert("⚠️ " + (data.message || "Không thể quét phiếu Thoại/SMS REST API."));
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = originalHtml;
+                    }
+                    return;
+                }
+
+                let checkAttempts = 0;
+                const interval = setInterval(async () => {
+                    checkAttempts++;
+                    const stRes = await fetch('/api/status');
+                    const stData = await stRes.json();
+                    if (stData.status !== 'PROCESSING' || checkAttempts > 35) {
+                        clearInterval(interval);
+                        if (btn) {
+                            btn.disabled = false;
+                            btn.innerHTML = originalHtml;
+                        }
+                        await loadTickets(true);
+                        await fetchStatus();
+
+                        const vCount = (stData.system_counts && stData.system_counts.tts_old_api_voice) || 0;
+                        if (vCount === 0) {
+                            alert("ℹ️ Đã quét xong: Bảng sự cố TTS Cũ hiện tại không có phiếu Thoại / SMS nào.");
+                        } else {
+                            alert(`✅ Đã quét & tiền kiểm tra đầy đủ cho ${vCount} phiếu Thoại / SMS!`);
+                        }
+                    }
+                }, 2000);
+            } catch (e) {
+                alert("Lỗi khi gửi yêu cầu quét Thoại/SMS: " + e);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                }
+            }
         }
 
         async function openTtsNewTicketDetail(ticketCode, phone, incidentTime, btnElem) {
@@ -1754,14 +1841,26 @@
             }
         }
 
-        async function startAutomation() {
-            const interval = parseInt(document.getElementById('inpInterval').value) || 5;
-            const autoClose = document.getElementById('chkAutoClose').checked;
+        async function startAutomation(engine = 'selenium') {
+            let interval = 15;
+            let autoClose = true;
+
+            if (engine === 'api') {
+                const inp = document.getElementById('inpIntervalApi');
+                interval = inp ? (parseInt(inp.value) || 15) : 15;
+                const chk = document.getElementById('chkAutoCloseApi');
+                autoClose = chk ? chk.checked : true;
+            } else {
+                const inp = document.getElementById('inpInterval');
+                interval = inp ? (parseInt(inp.value) || 5) : 5;
+                const chk = document.getElementById('chkAutoClose');
+                autoClose = chk ? chk.checked : true;
+            }
 
             await fetch('/api/start', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({interval_minutes: interval, auto_close: autoClose})
+                body: JSON.stringify({engine: engine, interval_minutes: interval, auto_close: autoClose})
             });
             fetchStatus();
         }
@@ -1781,52 +1880,10 @@
             window.location.href = '/api/export_excel';
         }
 
-        function openClearModal() {
-            document.getElementById('confirmClearModal').style.display = 'flex';
-        }
-        function closeClearModal() {
-            document.getElementById('confirmClearModal').style.display = 'none';
-        }
-        async function executeClearDatabase() {
-            closeClearModal();
-            try {
-                const res = await fetch('/api/tickets/clear', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({})
-                });
-                if (res.ok) {
-                    lastTicketsSignature = "";
-                    await loadTickets(true);
-                    await fetchStatus();
-                } else {
-                    alert("⚠️ Lỗi máy chủ khi xóa dữ liệu");
-                }
-            } catch (e) {
-                alert("Lỗi khi xóa dữ liệu: " + e);
-            }
-        }
-
-        function clearDatabase() {
-            openClearModal();
-        }
-
         setInterval(fetchStatus, 1500);
         setInterval(() => loadTickets(false), 8000);
         fetchStatus();
         loadTickets(true);
     </script>
-
-    <div id="confirmClearModal" class="modal-backdrop" onclick="if(event.target===this) closeClearModal();">
-        <div class="modal-box">
-            <div style="font-size:32px; margin-bottom:8px;">🗑️</div>
-            <div style="font-weight:700; font-size:16px; margin-bottom:6px; color:var(--text-heading);">Xác nhận xóa toàn bộ dữ liệu?</div>
-            <div style="font-size:13px; color:var(--text-muted); margin-bottom:20px; line-height:1.45;">Toàn bộ danh sách phiếu trong cơ sở dữ liệu sẽ bị dọn sạch. Bạn có chắc chắn muốn xóa?</div>
-            <div style="display:flex; justify-content:center; gap:12px;">
-                <button class="btn btn-outline" style="padding:7px 18px; font-weight:600;" onclick="closeClearModal()">Hủy bỏ</button>
-                <button class="btn btn-danger" style="padding:7px 20px; font-weight:700; background:#dc2626;" onclick="executeClearDatabase()">Xóa Ngay</button>
-            </div>
-        </div>
-    </div>
 </body>
 </html>

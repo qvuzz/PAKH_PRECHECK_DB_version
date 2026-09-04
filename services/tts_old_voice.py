@@ -3,6 +3,7 @@
 
 import os
 import sys
+import json
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -117,26 +118,23 @@ def execute_tts_old_voice_cycle():
                 # Đối với Thoại / SMS / Gói: không gọi AI tóm tắt, chỉ dùng trực tiếp nội dung phản ánh
                 ticket_content = t.get("content", "")
 
-                status_calc, comment, action_plan, _ = analyze_subscriber_status(
-                    [], t.get("title", "Thoại / SMS"), ticket_content, phone_84=phone_84, incident_time_str=inc_time
-                )
-
                 cell_desc = info_result.get("Cell ID") or info_result.get("ECGI") or "--"
                 rat = info_result.get("Radio") or "Sóng di động"
 
+                # Đối với case không phải Mobile Internet: Nhận định, Cột 10, Cột 11 để trống
                 rec = {
                     "phone": phone_84,
                     "incident_time": inc_time,
                     "package_title": t.get("title", "Thoại / SMS"),
                     "ticket_content": ticket_content,
-                    "status": status_calc,
+                    "status": "",
                     "real_packages": final_packages_str,
                     "rat_types": rat,
                     "cem_data": f"Cell: {cell_desc}",
                     "app_usage": "--",
                     "ai_summary": ticket_content,
-                    "comment": comment,
-                    "action_plan": action_plan,
+                    "comment": "",
+                    "action_plan": "",
                     "ticket_status": "Chưa đóng",
                     "source": "tts_old",
                     "created_time": t.get("created_time", "")

@@ -32,8 +32,9 @@ class AutomationState:
         self.is_running = False
         self.status = "IDLE"  # IDLE, PROCESSING, WAITING, STOPPING
         self.status_message = "Sẵn sàng khởi động"
-        self.interval_minutes = 5
+        self.interval_minutes = 15  # Mặc định chu kỳ 15 phút
         self.auto_close = True
+        self.engine = "api"  # 'api' (TTS Old REST API) hoặc 'selenium' (Chrome 9222)
         self.dry_run = False
         self.observe = False
         self.open_excel = False
@@ -83,6 +84,7 @@ class AutomationState:
                 "status_message": self.status_message,
                 "interval_minutes": self.interval_minutes,
                 "auto_close": self.auto_close,
+                "engine": getattr(self, "engine", "api"),
                 "dry_run": self.dry_run,
                 "observe": self.observe,
                 "open_excel": self.open_excel,

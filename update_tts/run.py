@@ -165,7 +165,7 @@ def run_update_tts(excel_path=None, dry_run=False, observe=False):
         return True
 
 
-def close_single_ticket_from_db(phone, incident_time=None, dry_run=False, observe=False):
+def close_single_ticket_from_db(phone, incident_time=None, dry_run=False, observe=False, comment=None, action_plan=None, force=False):
     """
     Đóng 1 phiếu cụ thể từ database trên hệ thống TTS qua Chrome Debugging (Port 9222).
     Trả về (success: bool, message: str)
@@ -200,8 +200,8 @@ def close_single_ticket_from_db(phone, incident_time=None, dry_run=False, observ
         return False, f"Không tìm thấy phiếu của SĐT {phone} trong cơ sở dữ liệu."
 
     status = target_ticket.get("status", "")
-    comment = target_ticket.get("comment", "")
-    action_plan = target_ticket.get("action_plan", "")
+    final_comment = comment if comment is not None else target_ticket.get("comment", "")
+    final_action_plan = action_plan if action_plan is not None else target_ticket.get("action_plan", "")
 
     step_delay_ms = OBSERVE_STEP_DELAY_MS if observe else 0
 
@@ -222,10 +222,11 @@ def close_single_ticket_from_db(phone, incident_time=None, dry_run=False, observ
             page,
             phone,
             status,
-            comment,
-            action_plan,
+            final_comment,
+            final_action_plan,
             dry_run=dry_run,
-            step_delay_ms=step_delay_ms
+            step_delay_ms=step_delay_ms,
+            force=force
         )
 
         browser.close()

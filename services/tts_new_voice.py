@@ -124,33 +124,30 @@ def execute_ttsnew_voice_cycle():
                 # Đối với Thoại / SMS / Gói: không gọi AI tóm tắt, chỉ dùng trực tiếp nội dung phản ánh
                 ticket_content = t.get("content", "")
 
-                status_calc, comment_calc, action_plan, _ = analyze_subscriber_status(
-                    [], t.get("title", "Thoại / SMS"), ticket_content, phone_84=phone_84, incident_time_str=t.get("incident_time")
-                )
-
                 cell_desc = info_result.get("Cell ID") or info_result.get("ECGI") or "--"
                 rat_type_str = info_result.get("Radio") or "Sóng di động"
 
+                # Đối với case không phải Mobile Internet: Nhận định, Cột 10, Cột 11 để trống
                 rec_update = {
                     "phone": phone_84,
                     "incident_time": str(t.get("incident_time") or ""),
                     "package_title": t.get("title", "Thoại / SMS"),
                     "ticket_content": ticket_content,
-                    "status": status_calc,
+                    "status": "",
                     "real_packages": formatted_packages,
                     "rat_types": rat_type_str,
                     "cem_data": f"Cell: {cell_desc}",
                     "app_usage": "--",
                     "ai_summary": ticket_content,
-                    "comment": comment_calc,
-                    "action_plan": action_plan,
+                    "comment": "",
+                    "action_plan": "",
                     "ticket_status": "Chưa đóng",
                     "source": "tts_new",
                     "ticket_code": code,
                     "flow_id": t.get("flow_id", "")
                 }
                 save_or_update_ticket(rec_update)
-                state.log("SUCCESS", f"[{idx}/{len(voice_tickets)}] Hoàn tất: {phone_84} ({code}) -> {status_calc}")
+                state.log("SUCCESS", f"[{idx}/{len(voice_tickets)}] Hoàn tất tra cứu Core cho {phone_84} ({code})")
 
             except Exception as e:
                 state.log("ERROR", f"Lỗi xử lý {phone_84}: {e}")

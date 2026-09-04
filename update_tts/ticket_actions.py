@@ -261,15 +261,18 @@ def submit_modal(modal, phone, dry_run=False):
         return False
 
 
-def close_ticket(page, phone, status, comment_text, action_plan_text, dry_run=False, step_delay_ms=0):
+def close_ticket(page, phone, status, comment_text, action_plan_text, dry_run=False, step_delay_ms=0, force=False):
     """
     Luồng đầy đủ cho 1 ticket.
     Trả về True/False (thành công/thất bại), hoặc None nếu bị bỏ qua do chưa có mapping.
     """
     nguyen_nhan_text = config.STATUS_TO_NGUYEN_NHAN.get(status)
     if not nguyen_nhan_text:
-        print(f"⏭️  BỎ QUA SĐT {phone}: trạng thái '{status}' chưa có mapping trong STATUS_TO_NGUYEN_NHAN.")
-        return None
+        if force:
+            nguyen_nhan_text = "Mạng lưới đảm bảo, KH sử dụng bình thường"
+        else:
+            print(f"⏭️  BỎ QUA SĐT {phone}: trạng thái '{status}' chưa có mapping trong STATUS_TO_NGUYEN_NHAN.")
+            return None
 
     # Dọn dẹp modal kẹt lại từ lượt xử lý trước (nếu có)
     force_close_any_open_modal(page)
@@ -285,7 +288,7 @@ def close_ticket(page, phone, status, comment_text, action_plan_text, dry_run=Fa
     if found_on_page != "trang hiện tại":
         print(f"📄 Đã tìm thấy SĐT {phone} ở trang {found_on_page}.")
 
-    if is_reopened_ticket(row):
+    if is_reopened_ticket(row) and not force:
         print(f"🚩 BỎ QUA SĐT {phone}: phiếu đang gắn nhãn 'Phiếu mở lại' - để kỹ thuật kiểm tra thủ công, không tự động đóng.")
         return None
 

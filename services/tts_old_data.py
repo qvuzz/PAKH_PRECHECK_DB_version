@@ -3,6 +3,7 @@
 
 import os
 import sys
+import json
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -77,8 +78,7 @@ def execute_tts_old_data_cycle():
                     p = "84" + p
                 scanned_phones.add(p)
         if scanned_phones:
-            from db_manager import sync_active_tickets_state
-            sync_active_tickets_state(scanned_phones, source="tts_old", key_type="phone")
+            sync_active_tickets_state(scanned_phones, source="tts_old", key_type="phone", service_type="data")
 
         now = datetime.now()
         start_d = (now - timedelta(days=4)).strftime("%d%m%Y")

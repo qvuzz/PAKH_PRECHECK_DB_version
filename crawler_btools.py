@@ -21,14 +21,64 @@ def _normalize_phone(phone_84):
     return clean_p
 
 
+def _normalize_date_btools(d_str):
+    """
+    Chuẩn hóa ngày về định dạng ddmmyyyy theo đúng yêu cầu của Oracle BTools.
+    Hỗ trợ đầu vào: YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, hoặc ddmmyyyy.
+    """
+    clean = str(d_str or "").strip()
+    if not clean:
+        return ""
+    if len(clean) == 8 and clean.isdigit():
+        return clean
+    if " " in clean:
+        clean = clean.split()[0]
+    if "-" in clean:
+        parts = clean.split("-")
+        if len(parts) == 3:
+            if len(parts[0]) == 4:  # 2026-08-28
+                return f"{parts[2].zfill(2)}{parts[1].zfill(2)}{parts[0]}"
+            elif len(parts[2]) == 4:  # 28-08-2026
+                return f"{parts[0].zfill(2)}{parts[1].zfill(2)}{parts[2]}"
+    if "/" in clean:
+        parts = clean.split("/")
+        if len(parts) == 3:
+            if len(parts[2]) == 4:  # 28/08/2026
+                return f"{parts[0].zfill(2)}{parts[1].zfill(2)}{parts[2]}"
+            elif len(parts[0]) == 4:  # 2026/08/28
+                return f"{parts[2].zfill(2)}{parts[1].zfill(2)}{parts[0]}"
+    return clean
+
+
 def get_btools_cookie(driver=None, force_refresh=False):
     """
     Lấy cookie JSESSIONID từ Chrome tab BTools và cache lại.
-    Nếu chưa có, quét các tab của driver để lấy cookie.
+    Nếu chưa có, mở nhẹ page BTools qua Playwright CDP để tạo phiên.
     """
     global _BTOOLS_COOKIE_CACHE
     if _BTOOLS_COOKIE_CACHE and not force_refresh:
         return _BTOOLS_COOKIE_CACHE
+
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.connect_over_cdp("http://localhost:9222")
+            context = browser.contexts[0]
+            cookies = context.cookies()
+            btools_cookies = [f"{c['name']}={c['value']}" for c in cookies if "10.159.21.241" in c.get("domain", "")]
+            if btools_cookies and not force_refresh:
+                _BTOOLS_COOKIE_CACHE = "; ".join(btools_cookies)
+            else:
+                page = context.new_page()
+                page.goto("http://10.159.21.241:9267/B_tools_v2/", timeout=10000)
+                cookies = context.cookies()
+                btools_cookies = [f"{c['name']}={c['value']}" for c in cookies if "10.159.21.241" in c.get("domain", "")]
+                if btools_cookies:
+                    _BTOOLS_COOKIE_CACHE = "; ".join(btools_cookies)
+                page.close()
+            browser.close()
+    except Exception:
+        pass
 
     if not driver:
         return _BTOOLS_COOKIE_CACHE
@@ -122,12 +172,14 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
     Nếu thất bại sẽ tự động fallback sang Chrome.
     """
     target_phone = _normalize_phone(phone_84)
+    s_clean = _normalize_date_btools(start_d)
+    e_clean = _normalize_date_btools(end_d)
     query_url = (
         f"http://10.159.21.241:9267/B_tools_v2/data_view.jsp?"
-        f"name={target_phone}&start_d={start_d}&end_d={end_d}&submit=T%C3%ACm+Ki%E1%BA%BFm"
+        f"name={target_phone}&start_d={s_clean}&end_d={e_clean}&submit=T%C3%ACm+Ki%E1%BA%BFm"
     )
 
-    print(f"[BTools] Tra cuu ngam cho thue bao: {target_phone} ({start_d} -> {end_d})")
+    print(f"[BTools] Tra cuu ngam cho thue bao: {target_phone} ({s_clean} -> {e_clean})")
 
     # --- PHƯƠNG ÁN 1: CHẠY NGẦM HOÀN TOÀN QUA HTTP REQUEST (SIÊU TỐC) ---
     cookie_str = get_btools_cookie(driver)
@@ -158,7 +210,7 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
                     with urllib.request.urlopen(req, timeout=12) as resp2:
                         html = resp2.read().decode("utf-8", errors="ignore")
 
-            if "CAS – Central Authentication Service" not in html:
+            if "CAS – Central Authentication Service" not in html and "SQLException" not in html:
                 data_rows = parse_btools_table_html(html)
                 if data_rows:
                     print(f"[BTools HTTP Ngam] Da cao thanh cong {len(data_rows)} dong du lieu.")

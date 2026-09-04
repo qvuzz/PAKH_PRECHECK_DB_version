@@ -3,7 +3,7 @@
 
 import time
 from services.state import state
-from services.tts_old_data import execute_tts_old_data_cycle
+from services.tts_old_api_data import execute_tts_old_api_data_cycle
 
 def automation_worker_loop():
     while True:
@@ -16,8 +16,8 @@ def automation_worker_loop():
         state.is_running = True
         state.trigger_now_requested = False
 
-        # Thực thi chu kỳ
-        execute_tts_old_data_cycle()
+        # Thực thi chu kỳ tự động ngầm 100% bằng REST API siêu tốc (không kích hoạt code Selenium)
+        execute_tts_old_api_data_cycle()
 
         if not state.is_running or state.stop_requested:
             state.is_running = False

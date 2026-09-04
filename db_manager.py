@@ -227,35 +227,61 @@ def save_tickets_bulk(ticket_list):
     for t in ticket_list:
         save_or_update_ticket(t)
 
-def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone"):
+DATA_PKG_SQL = "(package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước%')"
+VOICE_PKG_SQL = f"NOT {DATA_PKG_SQL}"
+
+def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", service_type=None):
     """
     Đồng bộ trạng thái danh sách phiếu hiện hữu với danh sách cào/quét thực tế trên TTS.
-    Bất kỳ phiếu nào trong DB đang ở trạng thái 'Chưa đóng' của nguồn này
+    Bất kỳ phiếu nào trong DB đang ở trạng thái 'Chưa đóng' của nguồn/nghiệp vụ này
     nhưng KHÔNG còn xuất hiện trên web TTS nữa -> Tự động chuyển thành 'Đã đóng'.
     """
-    if not active_keys:
-        return
-    
     init_db()
     conn = get_db_connection()
     with conn:
+        service_sql = ""
+        if service_type == "data":
+            service_sql = f" AND {DATA_PKG_SQL}"
+        elif service_type == "voice_sms":
+            service_sql = f" AND {VOICE_PKG_SQL}"
+
+        if source in ("tts_old", "tts_old_api"):
+            source_condition = "(source IN ('tts_old', 'tts_old_api') OR source IS NULL)"
+            source_params = []
+        else:
+            source_condition = "source = ?"
+            source_params = [source]
+
+        if not active_keys:
+            # Nếu trên TTS đã hết sạch phiếu chờ xử lý -> toàn bộ phiếu chưa đóng trong DB thuộc nguồn này đã đóng!
+            conn.execute(f"""
+                UPDATE tickets 
+                SET ticket_status = 'Đã đóng', updated_at = CURRENT_TIMESTAMP 
+                WHERE {source_condition}
+                  AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+                  {service_sql}
+            """, source_params)
+            return
+
         placeholders = ",".join(["?"] * len(active_keys))
         if key_type == "ticket_code":
             conn.execute(f"""
                 UPDATE tickets 
                 SET ticket_status = 'Đã đóng', updated_at = CURRENT_TIMESTAMP 
-                WHERE source = ? 
+                WHERE {source_condition}
                   AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+                  {service_sql}
                   AND ticket_code NOT IN ({placeholders})
-            """, [source] + list(active_keys))
+            """, source_params + list(active_keys))
         else:
             conn.execute(f"""
                 UPDATE tickets 
                 SET ticket_status = 'Đã đóng', updated_at = CURRENT_TIMESTAMP 
-                WHERE (source = ? OR (source IS NULL AND ? = 'tts_old')) 
+                WHERE {source_condition}
                   AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+                  {service_sql}
                   AND phone NOT IN ({placeholders})
-            """, [source, source] + list(active_keys))
+            """, source_params + list(active_keys))
     conn.close()
 
 def get_system_counts():
@@ -267,42 +293,60 @@ def get_system_counts():
         "tts_old_voice": 0,
         "tts_new_data": 0,
         "tts_new_voice": 0,
+        "tts_old_api_data": 0,
+        "tts_old_api_voice": 0,
         "total_active": 0,
         "total_closed": 0,
         "total_all": 0
     }
     try:
-        c1 = conn.execute("""
+        c1 = conn.execute(f"""
             SELECT count(*) FROM tickets 
             WHERE (source = 'tts_old' OR source IS NULL) 
               AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND (package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước%')
+              AND {DATA_PKG_SQL}
         """).fetchone()
         counts["tts_old_data"] = c1[0] if c1 else 0
 
-        c2 = conn.execute("""
+        c2 = conn.execute(f"""
             SELECT count(*) FROM tickets 
             WHERE (source = 'tts_old' OR source IS NULL) 
               AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND NOT (package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước%')
+              AND {VOICE_PKG_SQL}
         """).fetchone()
         counts["tts_old_voice"] = c2[0] if c2 else 0
 
-        c3 = conn.execute("""
+        c3 = conn.execute(f"""
             SELECT count(*) FROM tickets 
             WHERE source = 'tts_new' 
               AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND (package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước%')
+              AND {DATA_PKG_SQL}
         """).fetchone()
         counts["tts_new_data"] = c3[0] if c3 else 0
 
-        c4 = conn.execute("""
+        c4 = conn.execute(f"""
             SELECT count(*) FROM tickets 
             WHERE source = 'tts_new' 
               AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND NOT (package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước%')
+              AND {VOICE_PKG_SQL}
         """).fetchone()
         counts["tts_new_voice"] = c4[0] if c4 else 0
+
+        c5 = conn.execute(f"""
+            SELECT count(*) FROM tickets 
+            WHERE (source = 'tts_old_api' OR source = 'tts_old' OR source IS NULL) 
+              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+              AND {DATA_PKG_SQL}
+        """).fetchone()
+        counts["tts_old_api_data"] = c5[0] if c5 else 0
+
+        c6 = conn.execute(f"""
+            SELECT count(*) FROM tickets 
+            WHERE (source = 'tts_old_api' OR source = 'tts_old' OR source IS NULL) 
+              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+              AND {VOICE_PKG_SQL}
+        """).fetchone()
+        counts["tts_old_api_voice"] = c6[0] if c6 else 0
 
         ca = conn.execute("SELECT count(*) FROM tickets WHERE ticket_status != 'Đã đóng' AND ticket_status != 'Da dong'").fetchone()
         counts["total_active"] = ca[0] if ca else 0
@@ -324,19 +368,19 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
     query = "SELECT * FROM tickets WHERE 1=1"
     params = []
 
-    # Lọc theo nguồn hệ thống (tts_old / tts_new)
+    # Lọc theo nguồn hệ thống (tts_old_api / tts_new)
     if source:
-        if source == "tts_old":
-            query += " AND (source = 'tts_old' OR source IS NULL OR source = '')"
+        if source in ("tts_old", "tts_old_api"):
+            query += " AND (source = 'tts_old_api' OR source = 'tts_old' OR source IS NULL OR source = '')"
         else:
             query += " AND source = ?"
             params.append(source)
 
     # Lọc theo loại nghiệp vụ (data / voice_sms)
     if service_type == "data":
-        query += " AND (package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước%')"
+        query += f" AND {DATA_PKG_SQL}"
     elif service_type == "voice_sms":
-        query += " AND NOT (package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước%')"
+        query += f" AND {VOICE_PKG_SQL}"
 
     if search:
         query += " AND (phone LIKE ? OR ticket_content LIKE ? OR package_title LIKE ?)"

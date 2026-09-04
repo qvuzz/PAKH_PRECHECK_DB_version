@@ -45,6 +45,7 @@ temp.txt
 # Scratch & Token cache
 scratch_*
 ttsnew_token_cache.json
+tts_old_token_cache.json
 screenshot_*.png
 
 # OS / editor artifacts

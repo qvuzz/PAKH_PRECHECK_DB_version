@@ -18,6 +18,18 @@ BASE_DIR = Path(__file__).resolve().parent
 PORT = 1234
 TEMPLATE_PATH = BASE_DIR / "templates" / "dashboard.html"
 
+# Bảo vệ khi chạy ngầm bằng pythonw (tránh NoneType write error)
+if sys.stdout is None:
+    try:
+        sys.stdout = open(BASE_DIR / "dashboard_service.log", "a", encoding="utf-8", buffering=1)
+    except Exception:
+        sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    try:
+        sys.stderr = open(BASE_DIR / "dashboard_service.log", "a", encoding="utf-8", buffering=1)
+    except Exception:
+        sys.stderr = open(os.devnull, "w")
+
 # Database operations
 from db_manager import (
     init_db, 
@@ -30,10 +42,16 @@ from db_manager import (
 
 # Services & Modules
 from services.state import state, normalize_phone_vn
-from services.tts_old_data import execute_tts_old_data_cycle, execute_one_cycle
-from services.tts_old_voice import execute_tts_old_voice_cycle
+from services.tts_old_api_data import execute_tts_old_api_data_cycle
+from services.tts_old_api_voice import execute_tts_old_api_voice_cycle
+# Chuyển hướng toàn bộ TTS Cũ sang REST API, vô hiệu hóa hoàn toàn Selenium cho TTS Cũ
+execute_tts_old_data_cycle = execute_tts_old_api_data_cycle
+execute_one_cycle = execute_tts_old_api_data_cycle
+execute_tts_old_voice_cycle = execute_tts_old_api_voice_cycle
+
 from services.tts_new_data import execute_tts_new_data_cycle, execute_ttsnew_cycle
 from services.tts_new_voice import execute_tts_new_voice_cycle
+from tts_old_api import close_tts_old_ticket_api, fetch_nguyen_nhan_list_api, extract_token_from_browser
 from services.automation_worker import automation_worker_loop
 
 
@@ -164,11 +182,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/start":
             state.is_running = True
             state.stop_requested = False
-            state.status_message = "Đã khởi động tiến trình tự động."
+            state.engine = "api"
+            state.status_message = "Đã khởi động tiến trình tự động REST API."
+            state.log("INFO", "🚀 Khởi động chu kỳ tự động ngầm 100% qua REST API (không kích hoạt Selenium).")
             if "auto_close" in body:
                 state.auto_close = bool(body["auto_close"])
                 mode_str = "TỰ ĐỘNG ĐÓNG" if state.auto_close else "ĐÓNG THỦ CÔNG"
                 state.log("INFO", f"⚙️ Đã chuyển chế độ đóng phiếu sang: [{mode_str}]")
+            if "interval_minutes" in body:
+                state.interval_minutes = int(body["interval_minutes"])
+                state.log("INFO", f"⏱️ Thời gian lặp chu kỳ: {state.interval_minutes} phút")
+            self._send_json({"success": True, "auto_close": state.auto_close, "engine": "api"})
+
+        # 1.1. Cập nhật cấu hình (Tự động đóng, v.v.)
+        elif parsed.path == "/api/config":
+            if "auto_close" in body:
+                state.auto_close = bool(body["auto_close"])
+                mode_str = "TỰ ĐỘNG ĐÓNG" if state.auto_close else "ĐÓNG THỦ CÔNG"
+                state.log("INFO", f"⚙️ Đã chuyển chế độ đóng phiếu sang: [{mode_str}]")
+            if "dry_run" in body:
+                state.dry_run = bool(body["dry_run"])
             if "interval_minutes" in body:
                 state.interval_minutes = int(body["interval_minutes"])
             self._send_json({"success": True, "auto_close": state.auto_close})
@@ -180,13 +213,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             state.log("WARN", "⏹️ DỪNG VÒNG LẶP TỰ ĐỘNG.")
             self._send_json({"success": True})
 
-        # 3. Quét ngay TTS Cũ (Mobile Internet)
+        # 3. Quét ngay TTS Cũ (Mobile Internet - REST API)
         elif parsed.path == "/api/run-now":
-            state.trigger_now_requested = True
-            state.is_running = True
-            state.stop_requested = False
-            state.log("INFO", "⚡ KÍCH HOẠT QUÉT NGAY LẬP TỨC (TTS CŨ - DATA)!")
-            self._send_json({"success": True})
+            state.engine = "api"
+            if state.status == "PROCESSING":
+                self._send_json({"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."})
+            else:
+                if state.is_running:
+                    state.trigger_now_requested = True
+                    state.log("INFO", "⚡ KÍCH HOẠT QUÉT NGAY LẬP TỨC (TTS CŨ REST API - DATA)!")
+                    self._send_json({"success": True})
+                else:
+                    threading.Thread(target=execute_tts_old_api_data_cycle, daemon=True).start()
+                    self._send_json({"success": True})
 
         # 4. Quét TTS Cũ (Thoại / SMS / Gói)
         elif parsed.path == "/api/tts_old/scan_voice":
@@ -359,12 +398,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 with conn:
                     cur = conn.execute("SELECT package_title, ticket_content FROM tickets WHERE phone = ?", (phone,))
                     row = cur.fetchone()
-                    pkg_title = row[0] if row else "Thoại / SMS"
+                    pkg_title = (row[0] if row else "Thoại / SMS") or ""
                     t_content = row[1] if row else ""
                     
-                    status_calc, comment_calc, action_calc, _ = analyze_subscriber_status(
-                        [], pkg_title, t_content, phone_84=phone, incident_time_str=incident_time
-                    )
+                    is_mobile_data = ("mobile internet" in pkg_title.lower() and "gói cước" not in pkg_title.lower() and "goi cuoc" not in pkg_title.lower())
+
+                    if is_mobile_data:
+                        status_calc, comment_calc, action_calc, _ = analyze_subscriber_status(
+                            [], pkg_title, t_content, phone_84=phone, incident_time_str=incident_time
+                        )
+                    else:
+                        status_calc = ""
+                        comment_calc = ""
+                        action_calc = ""
 
                     conn.execute("""
                         UPDATE tickets 
@@ -385,28 +431,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 state.log("WARN", f"⚠️ Lỗi tiền kiểm tra cho {phone}: {ex_pre}")
                 self._send_json({"success": False, "error": str(ex_pre)})
 
-        # 9. Đóng thủ công phiếu TTS Cũ
-        elif parsed.path == "/api/tickets/close_one":
-            phone = body.get("phone")
-            incident_time = body.get("incident_time")
-            if not phone:
-                self.send_error(400, "Missing phone")
-                return
-
-            state.log("STEP", f"Đang thực hiện đóng thủ công phiếu cho SĐT {phone} trên TTS Cũ...")
-            from update_tts.run import close_single_ticket_from_db
-            success, message = close_single_ticket_from_db(
-                phone=phone,
-                incident_time=incident_time,
-                dry_run=False,
-                observe=False
-            )
-            if success:
-                state.log("SUCCESS", f"✅ {message}")
-            else:
-                state.log("WARN", f"⚠️ {message}")
-            self._send_json({"success": success, "message": message})
-
         # 10. Cập nhật ý kiến phân tích / phương án xử lý
         elif parsed.path == "/api/tickets/update":
             phone = body.get("phone")
@@ -426,8 +450,103 @@ class DashboardHandler(BaseHTTPRequestHandler):
             state.total_scanned = 0
             state.closed_count = 0
             sys_text = "TTS Mới" if source == "tts_new" else ("TTS Cũ" if source == "tts_old" else "toàn bộ")
-            state.log("WARN", f"🗑️ Đã xóa sạch dữ liệu phiếu ({sys_text}) trong SQLite Database.")
+            state.log("WARN", f"🗑️ ĐÃ XÓA DỮ LIỆU BẢNG TẠM {sys_text.upper()}.")
             self._send_json({"success": True})
+
+        # 12. Quét TTS Cũ REST API (Mobile Internet)
+        elif parsed.path == "/api/tts_old_api/run-now":
+            if state.status == "PROCESSING":
+                self._send_json({"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."})
+            else:
+                state.engine = "api"
+                if state.is_running:
+                    state.trigger_now_requested = True
+                    state.log("INFO", "⚡ KÍCH HOẠT QUÉT NGAY LẬP TỨC (TTS CŨ REST API - DATA)!")
+                    self._send_json({"success": True, "message": "Đã kích hoạt quét ngay chu kỳ REST API!"})
+                else:
+                    threading.Thread(target=execute_tts_old_api_data_cycle, daemon=True).start()
+                    self._send_json({"success": True, "message": "Đã kích hoạt quét tiền kiểm REST API TTS Cũ (Data)..."})
+
+        # 13. Quét TTS Cũ REST API (Thoại / SMS / Gói)
+        elif parsed.path == "/api/tts_old_api/scan_voice":
+            if state.status == "PROCESSING":
+                self._send_json({"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."})
+            else:
+                threading.Thread(target=execute_tts_old_api_voice_cycle, daemon=True).start()
+                self._send_json({"success": True, "message": "Đã kích hoạt quét tiền kiểm REST API TTS Cũ (Thoại/SMS)..."})
+
+        # 14. Đóng thủ công 1 phiếu TTS Cũ qua REST API (ngầm 100%, không dùng Selenium)
+        elif parsed.path in ("/api/tts_old_api/close_one", "/api/tickets/close_one"):
+            phone = body.get("phone")
+            incident_time = body.get("incident_time")
+            comment_input = body.get("comment")
+            action_plan_input = body.get("action_plan")
+            if not phone:
+                self.send_error(400, "Missing phone")
+                return
+
+            conn = get_db_connection()
+            row = conn.execute("SELECT * FROM tickets WHERE phone = ? AND incident_time = ?", (phone, incident_time)).fetchone()
+            conn.close()
+
+            if not row:
+                self._send_json({"success": False, "message": f"Không tìm thấy phiếu của SĐT {phone} trong cơ sở dữ liệu."})
+                return
+
+            ticket_dict = dict(row)
+
+            if comment_input is not None:
+                update_ticket_field(phone, "comment", comment_input, incident_time=incident_time)
+                ticket_dict["comment"] = comment_input
+            if action_plan_input is not None:
+                update_ticket_field(phone, "action_plan", action_plan_input, incident_time=incident_time)
+                ticket_dict["action_plan"] = action_plan_input
+
+            token, user_info = extract_token_from_browser()
+            if not token:
+                self._send_json({"success": False, "message": "Không tìm thấy token scnntttoken của TTS Cũ."})
+                return
+
+            user_id = user_info.get("Id") or user_info.get("id") or 0
+            nguyen_nhan_map = fetch_nguyen_nhan_list_api(token)
+
+            import update_tts.config as tts_config
+            import update_tts.excel_reader as excel_reader
+            status = ticket_dict.get("status", "")
+            norm_status = excel_reader.normalize_text(status)
+            matched_nn = None
+            for k, v in tts_config.STATUS_TO_NGUYEN_NHAN.items():
+                if excel_reader.normalize_text(k) == norm_status:
+                    matched_nn = v
+                    break
+
+            id_nn = None
+            if matched_nn:
+                id_nn = nguyen_nhan_map.get(matched_nn.lower()) or nguyen_nhan_map.get(matched_nn)
+            if not id_nn:
+                id_nn = 1048  # Mạng lưới đảm bảo, KH sử dụng bình thường
+
+            full_content = f"{ticket_dict.get('comment', '')}\n{ticket_dict.get('action_plan', '')}".strip()
+            if not full_content:
+                full_content = "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường"
+
+            state.log("STEP", f"Đang gửi request đóng phiếu REST API TTS Cũ cho SĐT {phone}...")
+            ok, msg = close_tts_old_ticket_api(
+                ticket=ticket_dict,
+                id_nguyen_nhan=id_nn,
+                noi_dung=full_content,
+                token=token,
+                user_id=user_id,
+                dry_run=False
+            )
+            if ok:
+                update_ticket_field(phone, "ticket_status", "Đã đóng", incident_time=incident_time)
+                state.closed_count += 1
+                state.log("SUCCESS", msg)
+            else:
+                state.log("WARN", msg)
+
+            self._send_json({"success": ok, "message": msg})
 
         else:
             self.send_error(404, "Not Found")
