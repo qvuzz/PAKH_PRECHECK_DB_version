@@ -2309,11 +2309,7 @@
         let pollTtsInterval = null;
 
         async function checkTtsTokenFromBrowser() {
-            // 1. Kiểm tra localStorage của Dashboard trước
-            let session = getTtsAuthSession();
-            if (session && session.token) return session;
-
-            // 2. Hỏi server xem trên trình duyệt đã có token chưa
+            // 1. Luôn ưu tiên hỏi server/LAN session xem có token mới nhất không
             try {
                 const res = await fetch('/api/current_user');
                 if (res.ok) {
@@ -2326,6 +2322,11 @@
             } catch(e) {
                 console.warn("Lỗi kiểm tra token từ trình duyệt:", e);
             }
+
+            // 2. Nếu server không có, kiểm tra session đã lưu trong localStorage của trình duyệt hiện tại
+            let session = getTtsAuthSession();
+            if (session && session.token) return session;
+
             return null;
         }
 
@@ -2449,9 +2450,8 @@
 
             isSystemAdmin = serverData.is_local || urlParams.get('role') === 'admin';
 
-            // Nếu máy chủ là Admin Localhost và chưa có token trong localStorage nhưng server đã có:
-            let curSession = getTtsAuthSession();
-            if (!curSession && serverData.is_local && serverData.has_server_token && serverData.server_token) {
+            // Cập nhật phiên mới nhất từ Chrome nếu đang ở máy chủ Localhost
+            if (serverData.is_local && serverData.has_server_token && serverData.server_token) {
                 setTtsAuthSession(serverData.server_token, serverData.server_user || { TaiKhoan: "admin", HoTen: "Quản trị viên (Server)" });
             }
 

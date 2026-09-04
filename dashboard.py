@@ -128,8 +128,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if client_ip in ACTIVE_LAN_SESSIONS and (time.time() - ACTIVE_LAN_SESSIONS[client_ip].get("timestamp", 0) < 86400):
                 token = ACTIVE_LAN_SESSIONS[client_ip].get("token", "")
                 user_info = ACTIVE_LAN_SESSIONS[client_ip].get("user", {})
-            
-            if not token:
+            elif is_local:
+                # CHỈ lấy từ Chrome Debug trên máy chủ NẾU request xuất phát từ chính máy chủ (Localhost)
                 token, user_info = extract_token_from_browser()
 
             self._send_json({
