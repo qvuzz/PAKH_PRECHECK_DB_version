@@ -28,6 +28,7 @@ STATUS_TO_NGUYEN_NHAN = {
     "BỊ KHÓA GPRS": "Lỗi do VNPT-VinaPhone khai báo dịch vụ cho khách hàng",
     "THIẾU SÓNG 5G / THIẾT BỊ": "Do thiết bị đầu cuối",
     "ĐANG SỬ DỤNG VPN / 1.1.1.1": "Do thiết bị đầu cuối",
+    "SÓNG 4G KÉM / CHỈ CÓ 3G": "Khách hàng theo dõi thêm",
 }
 
 # Danh sách đầy đủ các lựa chọn có trong dropdown "Nguyên nhân sự cố" trên TTS

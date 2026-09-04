@@ -431,6 +431,55 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 "FFF2CC"
             )
 
+    # 🎯 KỊCH BẢN ĐẶC THÙ 3: KH phản ánh trong ngày, hồ sơ Radio: 3G & IP: null, đi nhiều nơi lỗi, BTools có data < 10MB
+    radio_str = str(sub_info.get("Radio") or "").strip().upper()
+    is_radio_3g = ("3G" in radio_str) or ("UTRAN" in radio_str)
+    ipv4_str = str(sub_info.get("IPv4") or sub_info.get("IP") or "").strip().lower()
+    is_ip_null = (not ipv4_str) or (ipv4_str in ("null", "none", "--", "undefined", "0.0.0.0"))
+
+    is_incident_today = False
+    if incident_time_str:
+        try:
+            date_part = incident_time_str.split(" ")[0].strip()
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+                try:
+                    inc_d = datetime.strptime(date_part, fmt).date()
+                    if inc_d == datetime.now().date():
+                        is_incident_today = True
+                    break
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    multi_area_patterns = [
+        "đi nhiều nơi", "di nhiều nơi", "di nhieu noi", "nhiều nơi", "nhieu noi",
+        "đi nhiều khu vực", "nhiều khu vực", "nhieu khu vuc",
+        "khu vực khác cũng", "khu vuc khac cung", "kv khác cũng", "kv khac cung",
+        "đi đâu cũng", "di dau cung", "các khu vực", "qua nhiều trạm", "nhiều địa chỉ"
+    ]
+    is_multi_area = any(p in combined_report_text for p in multi_area_patterns)
+
+    total_bytes = 0
+    if clean_data:
+        for r in clean_data:
+            try:
+                dl = float(r.get("DATA_VOLUME_DOWNLINK") or 0)
+                ul = float(r.get("DATA_VOLUME_UPLINK") or 0)
+                total_bytes += (dl + ul)
+            except (ValueError, TypeError):
+                pass
+    total_mb = total_bytes / (1024 * 1024)
+    has_btools_under_10mb = bool(clean_data and len(clean_data) > 0 and 0 <= total_mb < 10.0)
+
+    if is_incident_today and is_radio_3g and is_ip_null and is_multi_area and has_btools_under_10mb:
+        return (
+            "SÓNG 4G KÉM / CHỈ CÓ 3G",
+            "Khách hàng đang ở khu vực sóng 4G kém, chỉ ở 3G nên khó truy cập.",
+            "Nhờ VNP báo Khách hàng chi tiết giúp, thông cảm và theo dõi thêm giúp.",
+            "FFF2CC"
+        )
+
     if not clean_data or len(clean_data) == 0:
         active_pkgs, expired_pkgs = get_sapc_package_validity(phone_84)
         
