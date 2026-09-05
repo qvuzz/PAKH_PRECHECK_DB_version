@@ -58,7 +58,7 @@ def execute_tts_new_data_cycle():
         from msisdn_info import tra_cell_tu_so_dien_thoai
         from ai_interpreter import analyze_ticket_with_ai
 
-        from ttsnew_api import get_ttsnew_tickets_for_precheck
+        from ttsnew_api import get_ttsnew_tickets_for_precheck, api_transfer_ttsnew_ticket, extract_token_from_browser
         state.log("STEP", "Đang kết nối REST API TTS Mới (gw-oneoss.vnpt.vn)...")
 
         options = Options()
@@ -69,6 +69,7 @@ def execute_tts_new_data_cycle():
             state.log("ERROR", f"Không thể kết nối tới Chrome cổng 9222: {e}")
             return
 
+        token = extract_token_from_browser(driver=driver)
         enriched_tickets, total_scanned = get_ttsnew_tickets_for_precheck(driver=driver)
         if not enriched_tickets:
             state.log("WARN", f"Đã quét {total_scanned} phiếu trên TTS Mới nhưng không tìm thấy phiếu Mobile Internet nào đang xử lý.")
@@ -228,6 +229,32 @@ def execute_tts_new_data_cycle():
             }
             excel_summary_list.append(rec)
             save_or_update_ticket(rec)
+
+            # Tự động đóng phiếu qua REST API 2 vòng nếu đang bật chế độ auto_close
+            if state.auto_close and ticket.get("flow_id") and ticket.get("ticket_id"):
+                state.log("STEP", f"🤖 [Tự Động Đóng] Đang xử lý phiếu TTS Mới cho {phone_84}...")
+                try:
+                    close_res = api_transfer_ttsnew_ticket(
+                        token=token,
+                        ticket_flow_id=ticket.get("flow_id"),
+                        ticket_id=ticket.get("ticket_id"),
+                        phone=phone_84,
+                        ticket_code=ticket_code,
+                        status=status,
+                        closing_content=comment,
+                        assign_content=action_plan
+                    )
+                    if close_res.get("success"):
+                        state.log("SUCCESS", f"   ↳ {close_res.get('message')}")
+                        if close_res.get("round") == 1:
+                            rec["ticket_status"] = "Chờ đóng lần 2"
+                        else:
+                            rec["ticket_status"] = "Đã đóng"
+                        save_or_update_ticket(rec)
+                    else:
+                        state.log("WARN", f"   ↳ Không thể tự động chuyển bước phiếu {phone_84}: {close_res.get('message')}")
+                except Exception as ex_auto:
+                    state.log("WARN", f"   ↳ Lỗi khi tự động đóng phiếu {phone_84}: {ex_auto}")
 
         # Xuất file Excel báo cáo riêng cho TTS Mới
         if excel_summary_list:

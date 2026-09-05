@@ -1056,10 +1056,14 @@
             <div id="ctrlNewData" class="ctrl-group-inline" style="display:none;">
                 <button id="btnTtsNewScan" class="btn-sm btn-success" onclick="startTtsNewScan()">
                     <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                    ⚡ Quét REST API TTS Mới (1.000 phiếu)
+                    ⚡ Quét & Tiền Kiểm
+                </button>
+                <button id="btnTtsNewCloseAll" class="btn-sm btn-primary" onclick="triggerTtsNewAutoCloseAll(this)" title="Tự động xử lý đóng tất cả phiếu Mobile Internet qua REST API (Quy trình 2 vòng: 2.4 SOC2 -> 2.6 hoặc 5.1)">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+                    ⚡ Tự Động Đóng (2 Vòng)
                 </button>
                 <a href="https://tts.vnptnet.vn/tts/ticket/quan-ly-phieu" target="_blank" class="btn-sm btn-outline">
-                    🌐 Mở Giao Diện TTS Mới
+                    🌐 Mở TTS Mới
                 </a>
             </div>
 
@@ -1715,12 +1719,23 @@
                             : `<button class="btn-precheck-blue" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để tiền kiểm tra Core tức thì">⚡ Tiền kiểm Core</button>`;
 
                         const cleanTicketCode = (t.ticket_code || '').split('\n')[0].trim();
+                        let stageBadge = '';
+                        if (t.ticket_status === 'Chờ đóng lần 2') {
+                            stageBadge = `<span class="badge-status" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-size:10px; padding:2px 6px; font-weight:700;">⏳ Chờ lần 2</span>`;
+                        }
+
                         actionHtml = `
-                            <div style="display:flex; flex-direction:column; align-items:center; gap:5px;">
+                            <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
                                 ${precheckBtn}
-                                <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở cửa sổ Cập nhật xử lý phiếu trên TTS Mới">
-                                    Đóng thủ công
-                                </button>
+                                ${stageBadge}
+                                <div style="display:flex; gap:4px; margin-top:2px;">
+                                    <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px;" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Tự động chuyển bước/đóng phiếu qua REST API (Vòng 1 -> Vòng 2)">
+                                        ⚡ Đóng (API)
+                                    </button>
+                                    <button class="btn-sm btn-outline" style="padding:4px 6px; font-size:10px;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở trang chi tiết phiếu trên TTS Mới">
+                                        🌐 Mở
+                                    </button>
+                                </div>
                             </div>
                         `;
                     } else {
@@ -2182,6 +2197,109 @@
                         btn.innerHTML = originalHtml;
                     }
                 }, 3000);
+            }
+        }
+
+        async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem) {
+            if (btnElem && btnElem.disabled) return;
+
+            const row = btnElem ? btnElem.closest('tr') : null;
+            let commentVal = '';
+            let actionPlanVal = '';
+            if (row) {
+                const textareas = row.querySelectorAll('textarea.editable-cell');
+                if (textareas.length >= 2) {
+                    commentVal = textareas[0].value.trim();
+                    actionPlanVal = textareas[1].value.trim();
+                }
+            }
+
+            const originalHtml = btnElem ? btnElem.innerHTML : '';
+            if (btnElem) {
+                btnElem.disabled = true;
+                btnElem.innerHTML = `⏳ Đang đóng API...`;
+                btnElem.style.opacity = '0.7';
+            }
+
+            try {
+                const res = await fetch('/api/ttsnew/close_one', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ 
+                        ticket_code: ticketCode,
+                        phone: phone, 
+                        incident_time: incidentTime,
+                        comment: commentVal,
+                        action_plan: actionPlanVal
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert(data.message || `✅ Đã xử lý thành công phiếu ${ticketCode}!`);
+                    lastTicketsSignature = "";
+                    await loadTickets(true);
+                    await fetchStatus();
+                } else {
+                    alert("⚠️ " + (data.message || "Xử lý đóng phiếu TTS Mới thất bại."));
+                    if (btnElem) {
+                        btnElem.disabled = false;
+                        btnElem.innerHTML = originalHtml;
+                        btnElem.style.opacity = '1';
+                    }
+                }
+            } catch (e) {
+                alert("Lỗi kết nối khi gửi yêu cầu đóng phiếu: " + e);
+                if (btnElem) {
+                    btnElem.disabled = false;
+                    btnElem.innerHTML = originalHtml;
+                    btnElem.style.opacity = '1';
+                }
+            }
+        }
+
+        async function triggerTtsNewAutoCloseAll(btnElem) {
+            if (btnElem && btnElem.disabled) return;
+            if (!confirm("Xác nhận tự động chuyển bước/đóng tất cả phiếu Mobile Internet TTS Mới đủ điều kiện qua REST API theo quy trình 2 vòng?")) {
+                return;
+            }
+
+            const originalHtml = btnElem ? btnElem.innerHTML : '';
+            if (btnElem) {
+                btnElem.disabled = true;
+                btnElem.innerHTML = `<span class="status-dot processing" style="display:inline-block; margin-right:6px;"></span> Đang xử lý 2 vòng...`;
+            }
+
+            try {
+                const res = await fetch('/api/ttsnew/close_all', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    await fetchStatus();
+                    let checkAttempts = 0;
+                    const interval = setInterval(async () => {
+                        checkAttempts++;
+                        await fetchStatus();
+                        if (checkAttempts > 15) {
+                            clearInterval(interval);
+                            if (btnElem) {
+                                btnElem.disabled = false;
+                                btnElem.innerHTML = originalHtml;
+                            }
+                            await loadTickets(true);
+                        }
+                    }, 2000);
+                } else {
+                    alert("⚠️ " + (data.message || "Không thể thực hiện đóng tự động TTS Mới."));
+                    if (btnElem) {
+                        btnElem.disabled = false;
+                        btnElem.innerHTML = originalHtml;
+                    }
+                }
+            } catch (e) {
+                alert("Lỗi kết nối khi gửi yêu cầu đóng tự động TTS Mới: " + e);
+                if (btnElem) {
+                    btnElem.disabled = false;
+                    btnElem.innerHTML = originalHtml;
+                }
             }
         }
 

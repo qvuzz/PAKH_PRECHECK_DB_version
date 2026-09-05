@@ -62,7 +62,60 @@ def init_db():
             conn.execute("ALTER TABLE tickets ADD COLUMN closed_by TEXT;")
         except Exception:
             pass
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tts_new_stages (
+                phone TEXT PRIMARY KEY,
+                ticket_code TEXT,
+                round INTEGER DEFAULT 1,
+                round1_flow_id INTEGER,
+                round1_done_at TIMESTAMP,
+                round2_flow_id INTEGER,
+                round2_done_at TIMESTAMP,
+                status TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
     conn.close()
+
+def record_ttsnew_stage(phone: str, ticket_code: str = "", round_num: int = 1, flow_id: int = None, status: str = ""):
+    """Lưu vết tiến trình đóng phiếu 2 vòng trên TTS Mới."""
+    from datetime import datetime
+    init_db()
+    conn = get_db_connection()
+    with conn:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        existing = conn.execute("SELECT * FROM tts_new_stages WHERE phone = ?", (phone,)).fetchone()
+        if not existing:
+            conn.execute("""
+                INSERT INTO tts_new_stages (phone, ticket_code, round, round1_flow_id, round1_done_at, status, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (phone, ticket_code, round_num, flow_id if round_num == 1 else None, now_str if round_num == 1 else None, status, now_str))
+        else:
+            if round_num == 1:
+                conn.execute("""
+                    UPDATE tts_new_stages 
+                    SET ticket_code = COALESCE(?, ticket_code), round = 1, round1_flow_id = ?, round1_done_at = ?, status = ?, updated_at = ?
+                    WHERE phone = ?
+                """, (ticket_code, flow_id, now_str, status, now_str, phone))
+            else:
+                conn.execute("""
+                    UPDATE tts_new_stages 
+                    SET ticket_code = COALESCE(?, ticket_code), round = 2, round2_flow_id = ?, round2_done_at = ?, status = ?, updated_at = ?
+                    WHERE phone = ?
+                """, (ticket_code, flow_id, now_str, status, now_str, phone))
+    conn.close()
+
+def get_ttsnew_stage(phone: str) -> dict:
+    """Lấy thông tin stage đóng phiếu của thuê bao trên TTS Mới."""
+    init_db()
+    conn = get_db_connection()
+    row = conn.execute("SELECT * FROM tts_new_stages WHERE phone = ?", (phone,)).fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return None
+
 
 def check_ticket_can_close(t):
     """

@@ -510,6 +510,108 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 state.log("WARN", f"⚠️ Lỗi mở tab TTS Mới: {ex_open}")
                 self._send_json({"success": False, "message": f"Lỗi mở tab TTS Mới: {str(ex_open)}"})
 
+        # 7.1. Đóng / chuyển bước 1 phiếu trên TTS Mới qua REST API (Quy trình 2 vòng)
+        elif parsed.path == "/api/ttsnew/close_one":
+            phone = str(body.get("phone") or "").strip()
+            ticket_code = str(body.get("ticket_code") or "").strip()
+            comment_custom = str(body.get("comment") or "").strip()
+            action_plan_custom = str(body.get("action_plan") or "").strip()
+
+            conn = get_db_connection()
+            row = None
+            if ticket_code:
+                row = conn.execute("SELECT * FROM tickets WHERE ticket_code = ? OR ticket_code LIKE ?", (ticket_code, f"{ticket_code}%")).fetchone()
+            if not row and phone:
+                row = conn.execute("SELECT * FROM tickets WHERE phone = ? AND source = 'tts_new'", (phone,)).fetchone()
+            conn.close()
+
+            ticket_id = row["ticket_id"] if (row and row["ticket_id"]) else None
+            flow_id = row["flow_id"] if (row and row["flow_id"]) else None
+            code = row["ticket_code"] if (row and row["ticket_code"]) else ticket_code
+            clean_code = code.split("\n")[0].strip() if code else ""
+            status_val = str(row["status"] or "") if row else ""
+            comment_val = comment_custom or (str(row["comment"] or "").strip() if row else "")
+            action_plan_val = action_plan_custom or (str(row["action_plan"] or "").strip() if row else "")
+
+            from ttsnew_api import extract_token_from_browser, fetch_active_tickets, api_transfer_ttsnew_ticket
+            tok = extract_token_from_browser()
+            if not tok:
+                self._send_json({"success": False, "message": "Không tìm thấy Bearer Token của TTS Mới. Hãy mở tab tts.vnptnet.vn."})
+                return
+
+            try:
+                raw_active = fetch_active_tickets(tok, limit=1000)
+                for r_it in raw_active:
+                    if (ticket_id and str(r_it.get("ticketId")) == str(ticket_id)) or \
+                       (clean_code and str(r_it.get("ticketCode")) == str(clean_code)) or \
+                       (phone and phone in str(r_it)):
+                        flow_id = r_it.get("id")
+                        ticket_id = r_it.get("ticketId")
+                        break
+            except Exception:
+                pass
+
+            if not flow_id or not ticket_id:
+                self._send_json({"success": False, "message": f"Không tìm thấy luồng xử lý (flow_id/ticket_id) của phiếu {clean_code or phone} trên TTS Mới."})
+                return
+
+            res_close = api_transfer_ttsnew_ticket(
+                token=tok,
+                ticket_flow_id=flow_id,
+                ticket_id=ticket_id,
+                phone=phone or (row["phone"] if row else ""),
+                ticket_code=clean_code,
+                status=status_val,
+                closing_content=comment_val,
+                assign_content=action_plan_val
+            )
+            self._send_json(res_close)
+
+        # 7.2. Tự động đóng hàng loạt phiếu TTS Mới (Quy trình 2 vòng)
+        elif parsed.path == "/api/ttsnew/close_all":
+            from ttsnew_api import extract_token_from_browser, fetch_active_tickets, filter_data_tickets, api_transfer_ttsnew_ticket
+            tok = extract_token_from_browser()
+            if not tok:
+                self._send_json({"success": False, "message": "Không tìm thấy token TTS Mới."})
+                return
+
+            def _run_close_all():
+                state.log("STEP", "🚀 Bắt đầu tự động chuyển bước/đóng tất cả phiếu TTS Mới đủ điều kiện...")
+                try:
+                    raw = fetch_active_tickets(tok, limit=1000)
+                    data_tickets = filter_data_tickets(raw)
+                    conn = get_db_connection()
+                    total_success = 0
+                    for it in data_tickets:
+                        flow_id = it.get("id")
+                        ticket_id = it.get("ticketId")
+                        ticket_code = it.get("ticketCode")
+                        row = conn.execute("SELECT * FROM tickets WHERE ticket_id = ? OR ticket_code = ? OR ticket_code LIKE ?", 
+                                           (ticket_id, ticket_code, f"{ticket_code}%")).fetchone()
+                        if row and row["status"]:
+                            res = api_transfer_ttsnew_ticket(
+                                token=tok,
+                                ticket_flow_id=flow_id,
+                                ticket_id=ticket_id,
+                                phone=row["phone"],
+                                ticket_code=ticket_code,
+                                status=row["status"],
+                                closing_content=row["comment"] or "",
+                                assign_content=row["action_plan"] or ""
+                            )
+                            if res.get("success"):
+                                total_success += 1
+                                state.log("SUCCESS", f"   ↳ [{total_success}] {res.get('message')}")
+                            else:
+                                state.log("WARN", f"   ↳ Phiếu {ticket_code}: {res.get('message')}")
+                    conn.close()
+                    state.log("SUCCESS", f"🎉 Hoàn thành xử lý {total_success}/{len(data_tickets)} phiếu TTS Mới!")
+                except Exception as ex_all:
+                    state.log("ERROR", f"Lỗi khi đóng hàng loạt phiếu TTS Mới: {ex_all}")
+
+            threading.Thread(target=_run_close_all, daemon=True).start()
+            self._send_json({"success": True, "message": "Đang tiến hành tự động chuyển bước/đóng hàng loạt phiếu TTS Mới..."})
+
         # 8. Tiền kiểm thủ công 1 thuê bao (SAPC / Cell / HSS)
         elif parsed.path == "/api/tickets/precheck_one":
             phone = body.get("phone")
