@@ -2157,6 +2157,34 @@
             }
         }
 
+        async function startTtsNewScan() {
+            const btn = document.getElementById('btnTtsNewScan');
+            const originalHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="status-dot processing" style="display:inline-block; margin-right:6px;"></span> Đang quét REST API...';
+            }
+            try {
+                const res = await fetch('/api/ttsnew/run-now', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    await fetchStatus();
+                    setTimeout(() => loadTickets(true), 2500);
+                } else {
+                    alert("⚠️ " + (data.message || "Không thể khởi động quét REST API TTS Mới."));
+                }
+            } catch (e) {
+                alert("Lỗi kết nối khi quét REST API TTS Mới: " + e);
+            } finally {
+                setTimeout(() => {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = originalHtml;
+                    }
+                }, 3000);
+            }
+        }
+
         async function openTtsNewTicketDetail(ticketCode, phone, incidentTime, btnElem) {
             const originalHtml = btnElem ? btnElem.innerHTML : '';
             if (btnElem) {

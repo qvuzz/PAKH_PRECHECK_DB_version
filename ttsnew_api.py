@@ -55,8 +55,28 @@ def extract_token_from_browser(driver=None) -> str:
     """
     token = ""
 
-    # 1. Thử lấy qua Selenium driver nếu đang kết nối
-    if driver:
+    # 1. Ưu tiên đọc từ cache nếu đã có token
+    token = get_cached_token()
+    if token:
+        if not token.startswith("Bearer "):
+            token = "Bearer " + token
+        return token
+
+    # 2. Đọc ngầm qua Playwright CDP tới port 9222 (không chuyển tab, không nhảy cửa sổ)
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
+            for page in browser.contexts[0].pages:
+                if "tts.vnptnet.vn" in page.url.lower():
+                    token = page.evaluate("() => localStorage.getItem('TOKEN')")
+                    if token:
+                        break
+    except Exception:
+        pass
+
+    # 3. Fallback qua Selenium driver nếu không dùng được CDP
+    if not token and driver:
         try:
             current_handle = driver.current_window_handle
             for handle in driver.window_handles:
@@ -74,26 +94,6 @@ def extract_token_from_browser(driver=None) -> str:
                 pass
         except Exception:
             pass
-
-    # 2. Nếu chưa có, thử kết nối nhanh qua Playwright CDP tới port 9222
-    if not token:
-        try:
-            from playwright.sync_api import sync_playwright
-            with sync_playwright() as p:
-                browser = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
-                pages = browser.contexts[0].pages
-                for page in pages:
-                    if "tts.vnptnet.vn" in page.url.lower():
-                        token = page.evaluate("() => localStorage.getItem('TOKEN')")
-                        if token:
-                            break
-                browser.close()
-        except Exception:
-            pass
-
-    # 3. Fallback về cached token
-    if not token:
-        token = get_cached_token()
 
     if token:
         if not token.startswith("Bearer "):
