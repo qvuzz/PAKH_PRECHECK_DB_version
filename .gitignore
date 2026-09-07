@@ -12,6 +12,8 @@ chrome_profile/
 # SQLite database files and runtime logs
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 *.log
