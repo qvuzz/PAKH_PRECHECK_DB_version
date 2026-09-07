@@ -1849,6 +1849,13 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
         if (!confirmed) return;
     }
 
+    const session = getTtsAuthSession();
+    if (!session || !session.token) {
+        alert("Bạn cần đăng nhập tài khoản TTS của mình trước khi thực hiện thao tác đóng phiếu!");
+        openConnectModal();
+        return;
+    }
+
     const row = btnElem ? btnElem.closest('tr') : null;
     let commentVal = '';
     let actionPlanVal = '';
@@ -1877,7 +1884,10 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
                 incident_time: incidentTime,
                 comment: commentVal,
                 action_plan: actionPlanVal,
-                force: (rCount > 0)
+                force: (rCount > 0),
+                token: session.token,
+                user_id: session.userId || 0,
+                user_name: session.displayName || session.username || "Kỹ thuật viên"
             })
         });
         const data = await res.json();

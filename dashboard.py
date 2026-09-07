@@ -655,8 +655,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 })
                 return
 
+            client_ip = self.client_address[0]
+            is_local = client_ip in ("127.0.0.1", "localhost", "::1")
+            client_tok = (body.get("token") or "").strip()
+
             from ttsnew_api import extract_token_from_browser, fetch_active_tickets, api_transfer_ttsnew_ticket
-            tok = extract_token_from_browser()
+            tok = client_tok
+            if not tok:
+                if is_local:
+                    tok = extract_token_from_browser()
+                else:
+                    self._send_json({"success": False, "message": "Bạn chưa kết nối tài khoản TTS Mới của mình trên trình duyệt này. Vui lòng bấm vào nút đăng nhập/kết nối tài khoản để hệ thống ghi nhận đúng tên bạn!"})
+                    return
             if not tok:
                 self._send_json({"success": False, "message": "Không tìm thấy Bearer Token của TTS Mới. Hãy mở tab tts.vnptnet.vn."})
                 return
@@ -1014,6 +1024,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 update_ticket_field(phone, "action_plan", action_plan_input, incident_time=incident_time)
                 ticket_dict["action_plan"] = action_plan_input
 
+            client_ip = self.client_address[0]
+            is_local = client_ip in ("127.0.0.1", "localhost", "::1")
+
             client_token = (body.get("token") or "").strip()
             client_user_id = body.get("user_id")
             client_user_name = (body.get("user_name") or "").strip()
@@ -1023,10 +1036,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             user_name = client_user_name
 
             if not token:
-                token, user_info = extract_token_from_browser()
-                if user_info:
-                    user_id = user_id or user_info.get("Id") or user_info.get("id") or 0
-                    user_name = user_name or user_info.get("HoTen") or user_info.get("TaiKhoan") or "Quản trị viên"
+                if is_local:
+                    token, user_info = extract_token_from_browser()
+                    if user_info:
+                        user_id = user_id or user_info.get("Id") or user_info.get("id") or 0
+                        user_name = user_name or user_info.get("HoTen") or user_info.get("TaiKhoan") or "Quản trị viên"
+                else:
+                    self._send_json({"success": False, "message": "Bạn chưa kết nối tài khoản TTS Cũ của mình trên trình duyệt này. Vui lòng bấm vào nút kết nối tài khoản để hệ thống ghi nhận đúng tên bạn khi đóng phiếu!"})
+                    return
 
             if not token:
                 self._send_json({"success": False, "message": "Không tìm thấy token scnntttoken của TTS Cũ. Vui lòng kết nối tài khoản TTS trước."})
