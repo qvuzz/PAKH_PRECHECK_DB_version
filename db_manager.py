@@ -62,6 +62,14 @@ def init_db():
             conn.execute("ALTER TABLE tickets ADD COLUMN closed_by TEXT;")
         except Exception:
             pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN reopen_count INTEGER DEFAULT 0;")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN last_reopened_date TEXT;")
+        except Exception:
+            pass
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS tts_new_stages (
@@ -124,6 +132,11 @@ def check_ticket_can_close(t):
     """
     if t.get("ticket_status") == "Đã đóng":
         return True, "Đã đóng"
+
+    # THÔNG TIN MỞ LẠI TTS: Nếu số lần mở lại khác 0 (> 0) thì TUYỆT ĐỐI không tự động đóng
+    reopen_count = int(t.get("reopen_count") or 0)
+    if reopen_count > 0:
+        return False, f"⚠️ Phiếu đã mở lại {reopen_count} lần (THÔNG TIN MỞ LẠI TTS) - KHÔNG ĐÓNG TỰ ĐỘNG, yêu cầu KTV kiểm tra kỹ!"
 
     try:
         from update_tts import config as tts_config
@@ -221,13 +234,21 @@ def save_or_update_ticket(t):
             if not ai_summary and "ai_summary" in existing.keys():
                 ai_summary = existing["ai_summary"] or ""
 
+        reopen_count = int(t.get("reopen_count") or 0)
+        last_reopened_date = str(t.get("last_reopened_date") or "").strip()
+        if existing and reopen_count == 0 and "reopen_count" in existing.keys():
+            existing_rc = int(existing["reopen_count"] or 0)
+            if existing_rc > 0:
+                reopen_count = existing_rc
+                last_reopened_date = str(existing["last_reopened_date"] or "")
+
         conn.execute("""
             INSERT INTO tickets (
                 phone, incident_time, package_title, real_packages, rat_types,
                 cem_data, app_usage, ticket_content, status, comment,
                 action_plan, color, ticket_status, created_time, ai_summary,
-                source, ticket_code, ticket_id, flow_id, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                source, ticket_code, ticket_id, flow_id, reopen_count, last_reopened_date, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(phone, incident_time) DO UPDATE SET
                 package_title = excluded.package_title,
                 real_packages = excluded.real_packages,
@@ -246,6 +267,8 @@ def save_or_update_ticket(t):
                 ticket_code = excluded.ticket_code,
                 ticket_id = COALESCE(excluded.ticket_id, tickets.ticket_id),
                 flow_id = COALESCE(excluded.flow_id, tickets.flow_id),
+                reopen_count = excluded.reopen_count,
+                last_reopened_date = excluded.last_reopened_date,
                 updated_at = CURRENT_TIMESTAMP;
         """, (
             phone,
@@ -266,7 +289,9 @@ def save_or_update_ticket(t):
             source,
             ticket_code,
             t.get("ticket_id") or None,
-            t.get("flow_id") or None
+            t.get("flow_id") or None,
+            reopen_count,
+            last_reopened_date
         ))
     conn.close()
 
@@ -403,6 +428,32 @@ def get_system_counts():
 
         ct = conn.execute("SELECT count(*) FROM tickets").fetchone()
         counts["total_all"] = ct[0] if ct else 0
+
+        # Thống kê ngày hiện tại (Hôm nay)
+        today_iso = datetime.now().strftime("%Y-%m-%d")
+        today_dmy = datetime.now().strftime("%d/%m/%Y")
+
+        ctoday = conn.execute("""
+            SELECT count(*) FROM tickets 
+            WHERE SUBSTR(updated_at, 1, 10) = ? 
+               OR updated_at LIKE ? 
+               OR incident_time LIKE ?
+        """, [today_iso, f"{today_iso}%", f"{today_dmy}%"]).fetchone()
+        counts["today_total"] = ctoday[0] if ctoday else 0
+
+        c_closed_today = conn.execute("""
+            SELECT count(*) FROM tickets 
+            WHERE (ticket_status = 'Đã đóng' OR ticket_status = 'Da dong') 
+              AND (SUBSTR(updated_at, 1, 10) = ? OR updated_at LIKE ?)
+        """, [today_iso, f"{today_iso}%"]).fetchone()
+        counts["today_closed"] = c_closed_today[0] if c_closed_today else 0
+
+        c_active_today = conn.execute("""
+            SELECT count(*) FROM tickets 
+            WHERE (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong') 
+              AND (SUBSTR(updated_at, 1, 10) = ? OR updated_at LIKE ? OR incident_time LIKE ?)
+        """, [today_iso, f"{today_iso}%", f"{today_dmy}%"]).fetchone()
+        counts["today_active"] = c_active_today[0] if c_active_today else 0
     except Exception as e:
         print("Lỗi get_system_counts:", e)
     finally:
@@ -438,14 +489,14 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
     if tab_filter == "da_dong":
         query += " AND (ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%')"
     elif tab_filter == "chua_dong":
-        query += " AND (ticket_status LIKE '%Chưa đóng%' OR ticket_status LIKE '%Chua dong%' OR ticket_status IS NULL OR ticket_status = '')"
+        query += " AND (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%' OR ticket_status IS NULL OR ticket_status = '')"
 
     # 2. Lọc theo Nhận định kỹ thuật
     if status_filter and status_filter != "all":
         if status_filter == "da_dong":
             query += " AND (ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%')"
         elif status_filter == "chua_dong":
-            query += " AND (ticket_status LIKE '%Chưa đóng%' OR ticket_status LIKE '%Chua dong%' OR ticket_status IS NULL OR ticket_status = '')"
+            query += " AND (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%' OR ticket_status IS NULL OR ticket_status = '')"
         elif status_filter in ("HOẠT ĐỘNG BÌNH THƯỜNG", "BINH_THUONG"):
             query += " AND (status LIKE '%BÌNH THƯỜNG%' OR status LIKE '%BINH THUONG%')"
         elif status_filter == "SONG_4G":
@@ -464,7 +515,11 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
             query += " AND (status = ? OR status LIKE ?)"
             params.extend([status_filter, f"%{status_filter}%"])
 
-    query += " ORDER BY updated_at DESC"
+    if tab_filter == "all":
+        # Ưu tiên các phiếu Chưa đóng lên đầu trang để người dùng thấy rõ sự khác biệt giữa Toàn bộ DB và Lịch sử đã đóng
+        query += " ORDER BY (CASE WHEN ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%' THEN 1 ELSE 0 END) ASC, updated_at DESC"
+    else:
+        query += " ORDER BY updated_at DESC"
     rows = conn.execute(query, params).fetchall()
     results = []
     for r in rows:
@@ -477,7 +532,7 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
     return results
 
 def update_ticket_field(phone, field, value, incident_time=None):
-    valid_fields = ["comment", "action_plan", "ticket_status", "status", "ai_summary", "closed_by"]
+    valid_fields = ["comment", "action_plan", "ticket_status", "status", "ai_summary", "closed_by", "reopen_count", "last_reopened_date"]
     if field not in valid_fields:
         return False
 
@@ -517,6 +572,157 @@ def delete_all_tickets(source=None):
             conn.execute("DELETE FROM tickets")
     conn.commit()
     conn.close()
+
+def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_filter=None):
+    """
+    Thống kê tổng hợp số liệu phân tích chuyên sâu cho các phiếu đã đóng:
+    - time_filter: 'all', 'today', '7days', '30days'
+    - source_filter: 'all', 'tts_old', 'tts_new'
+    - service_filter: 'all', 'data' (Mobile Internet), 'voice_sms' (Các phiếu còn lại: Thoại/SMS/Gói)
+    """
+    init_db()
+    conn = get_db_connection()
+    try:
+        where = ["(ticket_status = 'Đã đóng' OR ticket_status = 'Da dong')"]
+        params = []
+        today_str = datetime.now().strftime("%Y-%m-%d")
+
+        if time_filter == "today":
+            where.append("(SUBSTR(updated_at, 1, 10) = ? OR updated_at LIKE ?)")
+            params.extend([today_str, f"{today_str}%"])
+        elif time_filter == "7days":
+            where.append("DATE(SUBSTR(updated_at, 1, 10)) >= DATE(?, '-7 days')")
+            params.append(today_str)
+        elif time_filter == "30days":
+            where.append("DATE(SUBSTR(updated_at, 1, 10)) >= DATE(?, '-30 days')")
+            params.append(today_str)
+
+        if source_filter and source_filter != 'all':
+            if source_filter in ('tts_old', 'tts_old_api'):
+                where.append("(source IN ('tts_old', 'tts_old_api') OR source IS NULL)")
+            else:
+                where.append("source = ?")
+                params.append(source_filter)
+
+        if service_filter and service_filter != 'all':
+            if service_filter == 'data':
+                where.append(DATA_PKG_SQL)
+            elif service_filter == 'voice_sms':
+                where.append(VOICE_PKG_SQL)
+            elif service_filter == 'thoai':
+                where.append("(package_title LIKE '%Gọi%' OR package_title LIKE '%Cuộc gọi%')")
+            elif service_filter == 'sms':
+                where.append("(package_title LIKE '%Tin nhắn%' OR package_title LIKE '%SMS%')")
+            elif service_filter == 'goi_cuoc':
+                where.append("package_title LIKE '%Gói cước%'")
+
+        where_sql = " AND ".join(where)
+
+        # 1. Tổng quan số lượng
+        q_totals = f"""
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN closed_by IS NOT NULL AND closed_by != '' AND closed_by NOT LIKE '%Tự động%' THEN 1 ELSE 0 END) as manual_cnt,
+                SUM(CASE WHEN closed_by IS NULL OR closed_by = '' OR closed_by LIKE '%Tự động%' THEN 1 ELSE 0 END) as auto_cnt,
+                SUM(CASE WHEN source = 'tts_new' THEN 1 ELSE 0 END) as tts_new_cnt,
+                SUM(CASE WHEN source IN ('tts_old', 'tts_old_api') OR source IS NULL THEN 1 ELSE 0 END) as tts_old_cnt,
+                SUM(CASE WHEN {DATA_PKG_SQL} THEN 1 ELSE 0 END) as data_cnt,
+                SUM(CASE WHEN {VOICE_PKG_SQL} THEN 1 ELSE 0 END) as voice_cnt
+            FROM tickets WHERE {where_sql}
+        """
+        row = conn.execute(q_totals, params).fetchone()
+        total = row["total"] or 0
+        manual_cnt = row["manual_cnt"] or 0
+        auto_cnt = row["auto_cnt"] or 0
+        tts_new_cnt = row["tts_new_cnt"] or 0
+        tts_old_cnt = row["tts_old_cnt"] or 0
+        data_cnt = row["data_cnt"] or 0
+        voice_cnt = row["voice_cnt"] or 0
+
+        # Hôm nay đóng bao nhiêu
+        today_q = "SELECT COUNT(*) FROM tickets WHERE (ticket_status = 'Đã đóng' OR ticket_status = 'Da dong') AND SUBSTR(updated_at, 1, 10) = ?"
+        today_row = conn.execute(today_q, [today_str]).fetchone()
+        today_cnt = today_row[0] if today_row else 0
+
+        # 2. Phân bổ theo nhận định
+        q_diag = f"""
+            SELECT 
+                CASE 
+                    WHEN status IS NULL OR TRIM(status) = '' THEN 'Khác / Chưa ghi nhận'
+                    ELSE status 
+                END as diag,
+                COUNT(*) as cnt
+            FROM tickets WHERE {where_sql}
+            GROUP BY diag ORDER BY cnt DESC LIMIT 8
+        """
+        by_diagnosis = [
+            {
+                "label": r["diag"], 
+                "count": r["cnt"], 
+                "percentage": round(r["cnt"] * 100.0 / total, 1) if total else 0
+            } 
+            for r in conn.execute(q_diag, params).fetchall()
+        ]
+
+        # 3. Xu hướng đóng theo ngày (10 ngày gần nhất)
+        q_trend = f"""
+            SELECT SUBSTR(updated_at, 1, 10) as dt, COUNT(*) as cnt
+            FROM tickets WHERE {where_sql} AND updated_at IS NOT NULL AND updated_at != ''
+            GROUP BY dt ORDER BY dt ASC
+        """
+        daily_rows = conn.execute(q_trend, params).fetchall()
+        daily_trend = []
+        for r in daily_rows[-10:]:
+            dt_raw = r["dt"]
+            try:
+                parts = dt_raw.split("-")
+                label = f"{parts[2]}/{parts[1]}"
+            except Exception:
+                label = dt_raw
+            daily_trend.append({"date": dt_raw, "label": label, "count": r["cnt"]})
+
+        # 4. Top gói cước / phân loại
+        q_pkg = f"""
+            SELECT package_title, COUNT(*) as cnt
+            FROM tickets WHERE {where_sql} AND package_title IS NOT NULL AND TRIM(package_title) != ''
+            GROUP BY package_title ORDER BY cnt DESC LIMIT 5
+        """
+        top_packages = [{"name": r["package_title"], "count": r["cnt"]} for r in conn.execute(q_pkg, params).fetchall()]
+
+        # 5. Danh sách KTV đóng thủ công
+        q_staff = f"""
+            SELECT closed_by, COUNT(*) as cnt
+            FROM tickets 
+            WHERE {where_sql} AND closed_by IS NOT NULL AND closed_by != '' AND closed_by NOT LIKE '%Tự động%'
+            GROUP BY closed_by ORDER BY cnt DESC
+        """
+        staff_list = [{"name": r["closed_by"], "count": r["cnt"]} for r in conn.execute(q_staff, params).fetchall()]
+
+        return {
+            "total": total,
+            "auto_cnt": auto_cnt,
+            "auto_percent": round(auto_cnt * 100.0 / total, 1) if total else 0,
+            "manual_cnt": manual_cnt,
+            "manual_percent": round(manual_cnt * 100.0 / total, 1) if total else 0,
+            "today_cnt": today_cnt,
+            "tts_new_cnt": tts_new_cnt,
+            "tts_old_cnt": tts_old_cnt,
+            "data_cnt": data_cnt,
+            "voice_cnt": voice_cnt,
+            "by_diagnosis": by_diagnosis,
+            "daily_trend": daily_trend,
+            "top_packages": top_packages,
+            "staff_list": staff_list
+        }
+    except Exception as ex:
+        print("Lỗi get_closed_tickets_analytics:", ex)
+        return {
+            "total": 0, "auto_cnt": 0, "auto_percent": 0, "manual_cnt": 0, "manual_percent": 0,
+            "today_cnt": 0, "tts_new_cnt": 0, "tts_old_cnt": 0, "data_cnt": 0, "voice_cnt": 0,
+            "by_diagnosis": [], "daily_trend": [], "top_packages": [], "staff_list": []
+        }
+    finally:
+        conn.close()
 
 if __name__ == "__main__":
     init_db()

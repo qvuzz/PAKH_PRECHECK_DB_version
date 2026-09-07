@@ -63,38 +63,51 @@ def _decode_user_str(user_str: str) -> dict:
     return {}
 
 
+def _extract_tts_old_via_cdp_ws(port: int = 9222):
+    """Trích xuất token & user_info từ tab tts.vnpt.vn qua CDP WebSocket hoàn toàn ngầm."""
+    try:
+        import urllib.request, json, asyncio, websockets
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=2) as r:
+            tabs = json.loads(r.read().decode("utf-8"))
+        ws_url = None
+        for t in tabs:
+            if "tts.vnpt.vn" in t.get("url", "").lower():
+                ws_url = t.get("webSocketDebuggerUrl")
+                break
+        if not ws_url:
+            return "", {}
+
+        async def _query():
+            async with websockets.connect(ws_url) as ws:
+                msg1 = {"id": 1, "method": "Runtime.evaluate", "params": {"expression": "localStorage.getItem('scnntttoken')"}}
+                await ws.send(json.dumps(msg1))
+                res1 = json.loads(await ws.recv())
+                token = res1.get("result", {}).get("result", {}).get("value") or ""
+
+                msg2 = {"id": 2, "method": "Runtime.evaluate", "params": {"expression": "localStorage.getItem('userInfo')"}}
+                await ws.send(json.dumps(msg2))
+                res2 = json.loads(await ws.recv())
+                user_str = res2.get("result", {}).get("result", {}).get("value") or ""
+                user_info = _decode_user_str(user_str) if user_str else {}
+                return token, user_info
+
+        return asyncio.run(_query())
+    except Exception:
+        return "", {}
+
+
 def extract_token_from_browser(driver=None) -> tuple:
     """
-    Trích xuất token scnntttoken và userInfo trực tiếp từ Chrome tab tts.vnpt.vn.
-    Trả về: (token, user_info)
+    Trích xuất token và thông tin user từ trình duyệt Chrome (tab tts.vnpt.vn) 100% ngầm.
+    Tuyệt đối không dùng driver.switch_to.window() để không làm gián đoạn người dùng.
     """
     token = ""
     user_info = {}
 
-    # 1. Thử lấy qua Selenium driver nếu đang kết nối
-    if driver:
-        try:
-            current_handle = driver.current_window_handle
-            for handle in driver.window_handles:
-                try:
-                    driver.switch_to.window(handle)
-                    if "tts.vnpt.vn" in driver.current_url.lower():
-                        token = driver.execute_script("return localStorage.getItem('scnntttoken');")
-                        user_str = driver.execute_script("return localStorage.getItem('userInfo');")
-                        if user_str:
-                            user_info = _decode_user_str(user_str)
-                        if token:
-                            break
-                except Exception:
-                    pass
-            try:
-                driver.switch_to.window(current_handle)
-            except Exception:
-                pass
-        except Exception:
-            pass
+    # 1. Thử lấy ngầm siêu tốc qua CDP WebSocket (0 tab switch)
+    token, user_info = _extract_tts_old_via_cdp_ws()
 
-    # 2. Nếu chưa có, kết nối nhanh qua Playwright CDP tới port 9222
+    # 2. Nếu chưa có, kết nối qua Playwright CDP tới port 9222 (không chuyển tab)
     if not token:
         try:
             from playwright.sync_api import sync_playwright
@@ -113,7 +126,31 @@ def extract_token_from_browser(driver=None) -> tuple:
         except Exception:
             pass
 
-    # 3. Fallback về cache nếu không lấy được từ browser
+    # 2.5 Nếu chưa có, trích xuất từ Firefox (nếu người dùng đăng nhập trên Firefox)
+    if not token:
+        try:
+            from auth_extractor import extract_firefox_local_storage
+            tok_ff = extract_firefox_local_storage("tts.vnpt.vn", "scnntttoken")
+            user_str_ff = extract_firefox_local_storage("tts.vnpt.vn", "userInfo")
+            if tok_ff:
+                token = tok_ff
+                if user_str_ff:
+                    user_info = _decode_user_str(user_str_ff)
+        except Exception:
+            pass
+
+    # 3. Fallback qua Selenium driver NẾU tab hiện tại đã là tts.vnpt.vn (không switch window)
+    if not token and driver:
+        try:
+            if "tts.vnpt.vn" in driver.current_url.lower():
+                token = driver.execute_script("return localStorage.getItem('scnntttoken');")
+                user_str = driver.execute_script("return localStorage.getItem('userInfo');")
+                if user_str:
+                    user_info = _decode_user_str(user_str)
+        except Exception:
+            pass
+
+    # 4. Fallback về cache nếu không lấy được từ browser
     if not token:
         token, cached_user = get_cached_auth()
         if not user_info:
@@ -226,6 +263,34 @@ def fetch_tts_old_tickets_api(token: str, limit: int = 200, from_date: str = Non
             is_data = any(k in title_lower for k in DATA_SERVICE_KEYWORDS)
         service_type = "data" if is_data else "voice_sms"
 
+        # Chuẩn hóa MaCCOS về dạng chuỗi không có đuôi .0
+        raw_ccos = t.get("MaCCOS")
+        clean_ccos = ""
+        if raw_ccos is not None:
+            try:
+                clean_ccos = str(int(float(raw_ccos)))
+            except Exception:
+                clean_ccos = str(raw_ccos).strip()
+
+        # Chuẩn hóa PhanHoiHeThong và IdHeThong về int
+        raw_ph = t.get("PhanHoiHeThong")
+        try:
+            clean_ph = int(float(raw_ph)) if raw_ph is not None else 1
+        except Exception:
+            clean_ph = 1
+
+        raw_ht = t.get("IdHeThong")
+        try:
+            clean_ht = int(float(raw_ht)) if raw_ht is not None else 0
+        except Exception:
+            clean_ht = 0
+
+        raw_id = t.get("Id")
+        clean_id = int(raw_id) if raw_id is not None else None
+
+        raw_yc = t.get("IdYeuCau")
+        clean_yc = int(raw_yc) if raw_yc is not None else None
+
         ticket_item = {
             "phone": phone_84,
             "raw_phone": phone_raw,
@@ -236,11 +301,11 @@ def fetch_tts_old_tickets_api(token: str, limit: int = 200, from_date: str = Non
             "service_type": service_type,
             "source": "tts_old_api",
             # Các trường kỹ thuật phục vụ đóng phiếu API
-            "ticket_id": t.get("Id"),
-            "id_yeu_cau": t.get("IdYeuCau"),
-            "ma_ccos": t.get("MaCCOS"),
-            "phan_hoi_he_thong": t.get("PhanHoiHeThong") or 1,
-            "id_he_thong": t.get("IdHeThong") or 0,
+            "ticket_id": clean_id,
+            "id_yeu_cau": clean_yc,
+            "ma_ccos": clean_ccos,
+            "phan_hoi_he_thong": clean_ph,
+            "id_he_thong": clean_ht,
             "total_rows": t.get("TotalRows") or 0
         }
         standard_tickets.append(ticket_item)
@@ -306,18 +371,59 @@ def close_tts_old_ticket_api(
 
     headers = get_request_headers(token)
 
+    try:
+        t_id = int(ticket_id)
+    except Exception:
+        t_id = ticket_id
+
+    try:
+        y_id = int(id_yeu_cau)
+    except Exception:
+        y_id = id_yeu_cau
+
+    try:
+        u_id = int(user_id) if user_id else 0
+    except Exception:
+        u_id = 0
+
+    try:
+        nn_id = int(id_nguyen_nhan) if id_nguyen_nhan else 1016
+    except Exception:
+        nn_id = 1016
+
+    # MaCCOS
+    raw_ccos = ticket.get("ma_ccos") or ma_ccos or ""
+    try:
+        clean_ccos = str(int(float(raw_ccos))) if raw_ccos else ""
+    except Exception:
+        clean_ccos = str(raw_ccos).strip() if raw_ccos else ""
+
+    # PhanHoiHeThong
+    raw_ph = ticket.get("phan_hoi_he_thong") or phan_hoi_ht
+    try:
+        clean_ph = int(float(raw_ph)) if raw_ph is not None else 1
+    except Exception:
+        clean_ph = 1
+
+    # IdHeThong
+    raw_ht = ticket.get("id_he_thong") or id_he_thong
+    try:
+        clean_ht = int(float(raw_ht)) if raw_ht is not None else 0
+    except Exception:
+        clean_ht = 0
+
     # Bước 1: POST luu_CapNhatTrangThaiPhieu
     url_step1 = f"{API_BASE_URL}/XLXuLy/luu_CapNhatTrangThaiPhieu"
     payload_step1 = {
-        "Id": ticket_id,
-        "IdNhanVien": user_id or 0,
-        "IdYeuCau": id_yeu_cau,
-        "IdNguyenNhan": id_nguyen_nhan,
+        "Id": t_id,
+        "IdNhanVien": u_id,
+        "IdYeuCau": y_id,
+        "IdNguyenNhan": nn_id,
         "NoiDung": noi_dung,
         "Op": 0,
-        "MaCCOS": ticket.get("ma_ccos"),
-        "PhanHoiHeThong": ticket.get("phan_hoi_he_thong") or 1,
-        "IdHeThong": ticket.get("id_he_thong") or 0
+        "MaCCOS": clean_ccos,
+        "PhanHoiHeThong": clean_ph,
+        "IdHeThong": clean_ht
     }
 
     try:
@@ -330,24 +436,53 @@ def close_tts_old_ticket_api(
     except Exception as ex1:
         return False, f"Ngoại lệ khi gọi luu_CapNhatTrangThaiPhieu: {ex1}"
 
-    # Bước 2: Phản hồi CCOS nếu có MaCCOS và PhanHoiHeThong == 1
-    phan_hoi_ht = ticket.get("phan_hoi_he_thong") or 1
-    ma_ccos = ticket.get("ma_ccos")
-    if phan_hoi_ht == 1 and ma_ccos:
-        url_step2 = f"{API_BASE_URL}/XLXuLy/phanHoi_Ccos1"
-        payload_step2 = {
-            "IdYeuCau": id_yeu_cau,
-            "IdXuLy": ticket_id,
-            "dsFile": "[]"
-        }
-        try:
+    # Bước 2: Chuyển khiếu nại / phản hồi hệ thống (CCOS, PMS, FMS, CTS)
+    feedback_msg = ""
+    try:
+        if clean_ph == 1 and clean_ccos:
+            # Hệ thống CCOS: Gọi APICOSS/ChuyenKhieuNai
+            url_step2 = f"{API_BASE_URL}/APICOSS/ChuyenKhieuNai"
+            payload_step2 = {
+                "IdYeuCau": y_id,
+                "IdXuLy": t_id,
+                "dsFile": "[]"
+            }
             res2 = requests.post(url_step2, headers=headers, json=payload_step2, timeout=15)
             if res2.status_code == 200:
                 data2 = res2.json()
-                if data2.get("codeField") == -1:
-                    print(f"⚠️ Cảnh báo CCOS cho {phone}: {data2.get('messageField')}")
-                    return True, f"✅ Đã đóng phiếu trên TTS thành công (Lưu ý CCOS: {data2.get('messageField')})."
-        except Exception as ex2:
-            print(f"⚠️ Cảnh báo phản hồi CCOS cho {phone}: {ex2}")
+                cf = data2.get("codeField")
+                mf = data2.get("messageField", "")
+                if cf == 1:
+                    feedback_msg = f" (CCOS: {mf})"
+                elif cf == -1:
+                    feedback_msg = f" (CCOS phản hồi: {mf})"
+            else:
+                feedback_msg = f" (Lỗi CCOS HTTP {res2.status_code})"
 
-    return True, f"✅ Đã đóng phiếu thành công qua REST API cho SĐT {phone} (Mã CCOS: {ma_ccos or '--'})."
+        elif clean_ph == 2:
+            # Hệ thống PMS
+            url_step2 = f"{API_BASE_URL}/APIPMS/PhanHoiPMS"
+            payload_step2 = {
+                "TTS_ID": y_id,
+                "STATUS": 1,
+                "MESSAGE": noi_dung
+            }
+            requests.post(url_step2, headers=headers, json=payload_step2, timeout=15)
+
+        elif clean_ph == 3:
+            # Hệ thống FMS
+            url_step2 = f"{API_BASE_URL}/APIFMS/PhanHoiFMS"
+            payload_step2 = {
+                "GLOBAL_ID": clean_ht,
+                "TTS_ID": y_id,
+                "STATUS": 1,
+                "MESSAGE": noi_dung
+            }
+            requests.post(url_step2, headers=headers, json=payload_step2, timeout=15)
+
+    except Exception as ex2:
+        print(f"⚠️ Cảnh báo phản hồi hệ thống cho {phone}: {ex2}")
+        feedback_msg = f" (Cảnh báo gửi hệ thống: {ex2})"
+
+    return True, f"✅ Đã đóng phiếu thành công cho SĐT {phone} (Mã CCOS: {clean_ccos or '--'}){feedback_msg}."
+

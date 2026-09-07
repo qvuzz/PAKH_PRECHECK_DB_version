@@ -34,7 +34,9 @@ class AutomationState:
         self.status_message = "Sẵn sàng khởi động"
         self.interval_minutes = 15  # Mặc định chu kỳ 15 phút
         self.auto_close = True
-        self.engine = "api"  # 'api' (TTS Old REST API) hoặc 'selenium' (Chrome 9222)
+        self.scan_scopes = ["tts_old_data", "tts_new_data"]  # Danh sách phạm vi quét: 'tts_old_data', 'tts_old_voice', 'tts_new_data', 'tts_new_voice'
+        self.auto_close_mode = "all"  # 'all', 'tts_old', 'tts_new', 'none'
+        self.engine = "api"  # 'api' (TTS Cũ) hoặc 'tts_new' (TTS Mới)
         self.dry_run = False
         self.observe = False
         self.open_excel = False
@@ -43,6 +45,7 @@ class AutomationState:
         self.total_cycles = 0
         self.total_scanned = 0
         self.total_closed = 0
+        self.closed_count = 0
         self.last_run_time = None
         self.countdown_seconds = 0
         self.current_step = ""
@@ -76,6 +79,30 @@ class AutomationState:
             except Exception:
                 pass
 
+    def clear_logs(self):
+        with self.lock:
+            self.logs = []
+
+    def should_auto_close(self, source: str) -> bool:
+        """
+        Kiểm tra xem nguồn phiếu (source: 'tts_old' hoặc 'tts_new') có được phép tự động đóng hay không.
+        Dựa trên cấu hình auto_close_mode:
+        - 'all': Đóng cả 2 hệ thống
+        - 'tts_old': Chỉ đóng TTS Cũ
+        - 'tts_new': Chỉ đóng TTS Mới
+        - 'none': Đóng thủ công (Không tự đóng hệ thống nào)
+        """
+        mode = getattr(self, "auto_close_mode", "all")
+        if mode == "all":
+            return True
+        elif mode == "tts_old":
+            return source == "tts_old"
+        elif mode == "tts_new":
+            return source == "tts_new"
+        elif mode == "none":
+            return False
+        return getattr(self, "auto_close", True)
+
     def get_snapshot(self):
         with self.lock:
             return {
@@ -84,6 +111,8 @@ class AutomationState:
                 "status_message": self.status_message,
                 "interval_minutes": self.interval_minutes,
                 "auto_close": self.auto_close,
+                "auto_close_mode": getattr(self, "auto_close_mode", "all"),
+                "scan_scopes": list(getattr(self, "scan_scopes", ["tts_old_data", "tts_new_data"])),
                 "engine": getattr(self, "engine", "api"),
                 "dry_run": self.dry_run,
                 "observe": self.observe,

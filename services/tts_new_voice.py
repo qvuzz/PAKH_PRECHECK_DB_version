@@ -21,18 +21,15 @@ import ttsnew_api
 def execute_ttsnew_voice_cycle():
     state.status = "PROCESSING"
     state.status_message = "Đang quét phiếu Thoại / SMS TTS Mới..."
-    state.current_step = "Đang kết nối REST API TTS Mới để lấy phiếu Thoại / SMS"
-    state.log("STEP", "⚡ Bắt đầu quét danh sách phiếu Thoại / SMS từ TTS Mới (REST API)...")
+    state.current_step = "Đang lấy danh sách phiếu Thoại / SMS TTS Mới"
+    state.log("STEP", "⚡ Bắt đầu quét danh sách phiếu Thoại / SMS từ TTS Mới...")
 
     try:
-        from selenium import webdriver
-        from selenium.webdriver.chrome.options import Options
         from ttsnew_api import get_ttsnew_tickets_for_precheck
         from db_manager import save_or_update_ticket, sync_active_tickets_state
 
-        options = Options()
-        options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
-        driver = webdriver.Chrome(options=options)
+        from auth_extractor import get_chrome_debug_driver
+        driver = get_chrome_debug_driver()
 
         voice_tickets, total_scanned = get_ttsnew_tickets_for_precheck(driver=driver, service_type="voice_sms")
         if not voice_tickets:
@@ -124,6 +121,17 @@ def execute_ttsnew_voice_cycle():
 
                 # Đối với Thoại / SMS / Gói: không gọi AI tóm tắt, chỉ dùng trực tiếp nội dung phản ánh
                 ticket_content = t.get("content", "")
+                reopen_count = int(t.get("reopen_count") or 0)
+                last_reopened_date = str(t.get("last_reopened_date") or "").strip()
+
+                ai_summary_val = ticket_content
+                if reopen_count > 0:
+                    warn_prefix = f"⚠️ [CẢNH BÁO: Phiếu mở lại {reopen_count} lần"
+                    if last_reopened_date:
+                        warn_prefix += f" (Lần cuối: {last_reopened_date})"
+                    warn_prefix += " - Yêu cầu KTV kiểm tra kỹ!]\n"
+                    ai_summary_val = warn_prefix + (ticket_content or "")
+                    state.log("WARN", f"⚠️ Phiếu Thoại/SMS {code} ({phone_84}) mở lại {reopen_count} lần -> Cảnh báo KTV kiểm tra!")
 
                 cell_desc = info_result.get("Cell ID") or info_result.get("ECGI") or "--"
                 rat_type_str = info_result.get("Radio") or "Sóng di động"
@@ -139,13 +147,15 @@ def execute_ttsnew_voice_cycle():
                     "rat_types": rat_type_str,
                     "cem_data": f"Cell: {cell_desc}",
                     "app_usage": "--",
-                    "ai_summary": ticket_content,
+                    "ai_summary": ai_summary_val,
                     "comment": "",
                     "action_plan": "",
                     "ticket_status": "Chưa đóng",
                     "source": "tts_new",
                     "ticket_code": code,
-                    "flow_id": t.get("flow_id", "")
+                    "flow_id": t.get("flow_id", ""),
+                    "reopen_count": reopen_count,
+                    "last_reopened_date": last_reopened_date
                 }
                 save_or_update_ticket(rec_update)
                 state.log("SUCCESS", f"[{idx}/{len(voice_tickets)}] Hoàn tất tra cứu Core cho {phone_84} ({code})")

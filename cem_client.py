@@ -24,7 +24,7 @@ class LegacySSLAdapter(HTTPAdapter):
 
 
 CEM_URL = os.getenv("CEM_API_URL", "https://api-cem.vnptmedia.vn/api2/getSubHistoryInfo")
-DEFAULT_API_KEY = "net_ktm_quangvu%dQpWVpQzaWTyNz5dT5Y0Dijwd0m2u6emBS1yWmZv"
+DEFAULT_API_KEY = "net_ktm_quangvu%seQyfEELlCD19c2CljcOLfolTBsHfwSEUSSDFNVw"
 CEM_API_KEY = os.getenv("CEM_API_KEY", DEFAULT_API_KEY)
 
 CEM_HEADERS = {
@@ -89,37 +89,27 @@ class CEMClient:
         self.load_cookies_from_chrome(driver=driver)
 
     def load_cookies_from_chrome(self, driver=None):
-        """Tự động trích xuất apikey và toàn bộ cookie của CEM từ Chrome Debugging."""
+        """Tự động trích xuất apikey và toàn bộ cookie của CEM từ trình duyệt (Firefox, Chrome, Edge)."""
         try:
-            import urllib.parse
-            all_cookies = []
-            if driver is not None:
-                all_cookies = driver.execute_cdp_cmd("Network.getAllCookies", {}).get("cookies", [])
-            else:
-                # Kết nối trực tiếp qua CDP port 9222
-                from selenium import webdriver
-                from selenium.webdriver.chrome.options import Options
-                chrome_options = Options()
-                chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
-                temp_driver = webdriver.Chrome(options=chrome_options)
-                all_cookies = temp_driver.execute_cdp_cmd("Network.getAllCookies", {}).get("cookies", [])
+            from auth_extractor import get_universal_cem_auth
+            extracted_key, cookies_dict = get_universal_cem_auth(driver=driver)
 
-            for c in all_cookies:
+            for name, val in cookies_dict.items():
                 self.session.cookies.set(
-                    c['name'],
-                    c['value'],
-                    domain=c.get('domain'),
-                    path=c.get('path', '/')
+                    name,
+                    val,
+                    domain="cem.vnptmedia.vn",
+                    path="/"
                 )
-                if c.get('name') == 'apikey' and 'vnptmedia' in c.get('domain', '').lower():
-                    extracted_key = urllib.parse.unquote(c.get('value'))
-                    if extracted_key:
-                        self.api_key = extracted_key
-                        print(f"🔑 [CEM] Đã tự động lấy API Key từ Cookie Chrome: {self.api_key[:25]}...")
-            return True
+
+            if extracted_key:
+                self.api_key = extracted_key
+                print(f"🔑 [CEM] Đã tự động lấy API Key từ Cookie trình duyệt: {self.api_key[:25]}...")
+                return True
         except Exception as e:
-            # Fallback nếu Chrome không mở CDP lúc này
-            return False
+            print(f"⚠️ [CEM] Không thể trích xuất cookie tự động: {e}")
+
+        return False
 
     def get_subscriber_history_5days(self, msisdn, days=5):
         """
@@ -181,6 +171,7 @@ class CEMClient:
                 continue
             cell_name = (
                 r.get("cell_name")
+                or r.get("cell_name_5g")
                 or r.get("cellName")
                 or r.get("cell_id")
                 or r.get("cellId")
@@ -189,6 +180,7 @@ class CEMClient:
                 or r.get("site_name")
                 or r.get("siteName")
                 or r.get("enodeb_id")
+                or (f"ECI:{r.get('eci')}" if r.get("eci") else None)
             )
             if cell_name:
                 cell_identifiers.append(str(cell_name).strip())

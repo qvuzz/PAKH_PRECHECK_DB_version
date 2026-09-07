@@ -1,6 +1,5 @@
 # services/tts_old_api_voice.py
-# Chu kỳ quét & tiền kiểm Thoại / SMS / Gói trên Hệ Thống TTS Cũ qua REST API siêu tốc
-
+# Chu kỳ quét & tiền kiểm Thoại / SMS / Gói trên Hệ Thống TTS Cũ ngầm tự động
 import os
 import sys
 import json
@@ -19,7 +18,7 @@ import update_tts.excel_reader as excel_reader
 
 def execute_tts_old_api_voice_cycle(driver=None):
     """
-    Thực hiện quét & tiền kiểm danh sách phiếu Thoại / SMS / Gói trên TTS Cũ qua REST API.
+    Thực hiện quét & tiền kiểm danh sách phiếu Thoại / SMS / Gói trên TTS Cũ.
     Không tóm tắt AI (lưu trực tiếp nội dung phản ánh khách hàng).
     """
     if state.status == "PROCESSING":
@@ -28,8 +27,8 @@ def execute_tts_old_api_voice_cycle(driver=None):
 
     state.status = "PROCESSING"
     state.stop_requested = False
-    state.status_message = "Đang quét phiếu Thoại / SMS qua REST API TTS Cũ..."
-    state.log("STEP", "📞 [TTS CŨ REST API - VOICE/SMS] Khởi động quét danh sách sự cố ngoài Data...")
+    state.status_message = "Đang quét phiếu Thoại / SMS TTS Cũ..."
+    state.log("STEP", "📞 [TTS CŨ - VOICE/SMS] Khởi động quét danh sách sự cố ngoài Data...")
 
     try:
         # 1. Trích xuất token từ Chrome hoặc cache
@@ -41,8 +40,8 @@ def execute_tts_old_api_voice_cycle(driver=None):
         user_id = user_info.get("Id") or user_info.get("id") or 0
         nguyen_nhan_map = fetch_nguyen_nhan_list_api(token)
 
-        # 2. Quét danh sách phiếu qua REST API
-        state.current_step = "Đang tải danh sách phiếu Thoại/SMS từ REST API..."
+        # 2. Quét danh sách phiếu
+        state.current_step = "Đang tải danh sách phiếu Thoại/SMS..."
         raw_tickets = fetch_tts_old_tickets_api(token, limit=250)
 
         # Lọc các phiếu KHÔNG thuộc Mobile Internet
@@ -53,7 +52,7 @@ def execute_tts_old_api_voice_cycle(driver=None):
             sync_active_tickets_state([], source="tts_old_api", key_type="phone", service_type="voice_sms")
             return 0
 
-        state.log("SUCCESS", f"⚡ REST API phát hiện {len(voice_tickets)} phiếu Thoại / SMS / Gói cước. Đang nạp nhanh lên bảng...")
+        state.log("SUCCESS", f"⚡ Đã phát hiện {len(voice_tickets)} phiếu Thoại / SMS / Gói cước. Đang nạp nhanh lên bảng...")
 
         # Bước 1: Nạp nhanh toàn bộ phiếu vào Database trước
         active_phones = set()
@@ -92,7 +91,7 @@ def execute_tts_old_api_voice_cycle(driver=None):
         return len(voice_tickets)
 
     except Exception as e:
-        state.log("ERROR", f"Lỗi chu kỳ quét REST API Thoại/SMS TTS Cũ: {e}")
+        state.log("ERROR", f"Lỗi chu kỳ quét Thoại/SMS TTS Cũ: {e}")
         return 0
     finally:
         state.current_step = "Hoàn tất chu kỳ"

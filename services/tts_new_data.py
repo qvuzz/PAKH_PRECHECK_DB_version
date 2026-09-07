@@ -1,5 +1,5 @@
 # services/tts_new_data.py
-# Nghiệp vụ: Hệ thống TTS Mới - Mobile Internet (REST API 1.000 phiếu)
+# Nghiệp vụ: Hệ thống TTS Mới - Mobile Internet
 
 import os
 import sys
@@ -20,26 +20,23 @@ import ttsnew_api
 
 def execute_tts_new_data_cycle():
     """
-    Quy trình tiền kiểm tra phiếu sự cố từ hệ thống TTS Mới qua REST API:
-    1. Gọi REST API lấy 1.000 phiếu đang xử lý.
+    Quy trình tiền kiểm tra phiếu sự cố từ hệ thống TTS Mới:
+    1. Lấy danh sách phiếu đang xử lý.
     2. Lọc riêng các phiếu Mobile Internet (Data).
     3. Lấy số điện thoại thuê bao song song.
     4. Tra cứu Core: SAPC, CEM, BTools.
     5. Chạy Scenarios Engine & AI Summarizer để đưa ra nhận định, ý kiến và hướng xử lý.
     6. Lưu vào Database SQLite với source='tts_new' và xuất Excel báo cáo.
-    7. TUYỆT ĐỐI KHÔNG TỰ ĐỘNG ĐÓNG PHIẾU (Chỉ tiền kiểm & hiển thị).
     """
     if state.status == "PROCESSING":
         state.log("WARN", "Hệ thống đang bận thực hiện chu kỳ khác.")
         return
 
     state.status = "PROCESSING"
-    state.status_message = "Đang chạy tiền kiểm TTS Mới (REST API)..."
-    state.current_step = "Kết nối REST API TTS Mới"
+    state.status_message = "Đang chạy tiền kiểm TTS Mới..."
+    state.current_step = "Kết nối TTS Mới"
 
     try:
-        from selenium import webdriver
-        from selenium.webdriver.chrome.options import Options
         from crawler_btools import extract_btools_single_phone
         from data_processor import standardize_btools_data
         from report_bot import (
@@ -59,26 +56,23 @@ def execute_tts_new_data_cycle():
         from ai_interpreter import analyze_ticket_with_ai
 
         from ttsnew_api import get_ttsnew_tickets_for_precheck, api_transfer_ttsnew_ticket, extract_token_from_browser
-        state.log("STEP", "Đang kết nối REST API TTS Mới (gw-oneoss.vnpt.vn)...")
+        state.log("STEP", "Đang kết nối hệ thống TTS Mới...")
 
-        options = Options()
-        options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
-        try:
-            driver = webdriver.Chrome(options=options)
-        except Exception as e:
-            state.log("ERROR", f"Không thể kết nối tới Chrome cổng 9222: {e}")
-            return
+        from auth_extractor import get_chrome_debug_driver
+        driver = get_chrome_debug_driver()
 
         token = extract_token_from_browser(driver=driver)
         enriched_tickets, total_scanned = get_ttsnew_tickets_for_precheck(driver=driver)
         if not enriched_tickets:
             state.log("WARN", f"Đã quét {total_scanned} phiếu trên TTS Mới nhưng không tìm thấy phiếu Mobile Internet nào đang xử lý.")
+            from db_manager import sync_active_tickets_state
+            sync_active_tickets_state([], source="tts_new", key_type="ticket_code")
             return
 
         total_tickets = len(enriched_tickets)
         state.log("SUCCESS", f"Thu được {total_tickets} thuê bao Mobile Internet từ TTS Mới (Tổng {total_scanned} phiếu). Bắt đầu tra cứu Core...")
 
-        # Đồng bộ danh sách phiếu hiện hữu với thực tế trên REST API TTS Mới
+        # Đồng bộ danh sách phiếu hiện hữu với thực tế trên TTS Mới
         active_codes = {str(t.get("ticket_code", "")).strip() for t in enriched_tickets if t.get("ticket_code")}
         if active_codes:
             from db_manager import sync_active_tickets_state
@@ -156,6 +150,19 @@ def execute_tts_new_data_cycle():
                         "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     }, hf, ensure_ascii=False, indent=4)
 
+                # Kiểm tra hành vi bổ sung Case 2: Nếu gói ĐK trước 5 ngày và BTools 5 ngày không có data
+                try:
+                    from report_bot import get_sapc_package_validity
+                    from crawler_btools import fetch_supplementary_btools_if_needed
+                    active_pkgs, _ = get_sapc_package_validity(phone_84)
+                    commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date")]
+                    earliest_reg_dt = min([p["reg_dt"] for p in commercial_pkgs if p.get("reg_dt")], default=None)
+                    start_scan_date = (datetime.now() - timedelta(days=4)).date()
+                    if earliest_reg_dt and earliest_reg_dt.date() < start_scan_date:
+                        clean_data = fetch_supplementary_btools_if_needed(driver, phone_84, clean_data, earliest_reg_dt, start_scan_date)
+                except Exception as ex_case2:
+                    state.log("WARN", f"Lỗi tra cứu bổ sung Case 2: {ex_case2}")
+
             # Tra cứu CEM & App Usage
             cem_records = []
             app_events = []
@@ -177,9 +184,20 @@ def execute_tts_new_data_cycle():
             # Tóm tắt thông tin bằng AI / NLP Offline
             ai_summary = analyze_ticket_with_ai(json_filename)
 
+            # Kiểm tra THÔNG TIN MỞ LẠI TTS / Số lần mở lại
+            reopen_count = int(ticket.get("reopen_count") or 0)
+            last_reopened_date = str(ticket.get("last_reopened_date") or "").strip()
+            if reopen_count > 0:
+                reopen_warn = f"⚠️ [CẢNH BÁO: Phiếu mở lại {reopen_count} lần"
+                if last_reopened_date:
+                    reopen_warn += f" (Lần cuối: {last_reopened_date})"
+                reopen_warn += " - KHÔNG TỰ ĐỘNG ĐÓNG, yêu cầu KTV kiểm tra kỹ!]\n"
+                ai_summary = reopen_warn + (ai_summary if ai_summary and ai_summary != "null" else "")
+                state.log("WARN", f"⚠️ Phiếu {ticket_code} ({phone_84}) có THÔNG TIN MỞ LẠI TTS: Số lần mở lại = {reopen_count} -> KHÔNG TỰ ĐỘNG ĐÓNG!")
+
             # Phân tích kịch bản
             status, comment, action_plan, color = analyze_subscriber_status(
-                clean_data, title, content, phone_84=phone_84, cem_records=cem_records, app_events=app_events, incident_time_str=incident_time_str
+                clean_data, title, content, phone_84=phone_84, cem_records=cem_records, app_events=app_events, incident_time_str=incident_time_str, driver=driver
             )
             state.log("INFO", f"   ↳ Nhận định: [{status}]")
 
@@ -225,36 +243,47 @@ def execute_tts_new_data_cycle():
                 "ticket_status": "Chưa đóng",
                 "force_update_status": True,
                 "source": "tts_new",
-                "ai_summary": ai_summary if ai_summary else "null"
+                "ai_summary": ai_summary if ai_summary else "null",
+                "reopen_count": reopen_count,
+                "last_reopened_date": last_reopened_date
             }
             excel_summary_list.append(rec)
             save_or_update_ticket(rec)
 
-            # Tự động đóng phiếu qua REST API 2 vòng nếu đang bật chế độ auto_close
-            if state.auto_close and ticket.get("flow_id") and ticket.get("ticket_id"):
-                state.log("STEP", f"🤖 [Tự Động Đóng] Đang xử lý phiếu TTS Mới cho {phone_84}...")
-                try:
-                    close_res = api_transfer_ttsnew_ticket(
-                        token=token,
-                        ticket_flow_id=ticket.get("flow_id"),
-                        ticket_id=ticket.get("ticket_id"),
-                        phone=phone_84,
-                        ticket_code=ticket_code,
-                        status=status,
-                        closing_content=comment,
-                        assign_content=action_plan
-                    )
-                    if close_res.get("success"):
-                        state.log("SUCCESS", f"   ↳ {close_res.get('message')}")
-                        if close_res.get("round") == 1:
-                            rec["ticket_status"] = "Chờ đóng lần 2"
+            # Tự động đóng phiếu 2 vòng nếu được phép theo chế độ auto_close_mode
+            if state.should_auto_close("tts_new") and ticket.get("flow_id") and ticket.get("ticket_id"):
+                from db_manager import check_ticket_can_close
+                can_close, reason = check_ticket_can_close(rec)
+                if not can_close:
+                    state.log("INFO", f"   ↳ ⏸️ Giữ nguyên phiếu {phone_84}: Chưa đủ điều kiện đóng ({reason})")
+                else:
+                    state.log("STEP", f"🤖 [Tự Động Đóng] Đang xử lý phiếu TTS Mới cho {phone_84}...")
+                    try:
+                        close_res = api_transfer_ttsnew_ticket(
+                            token=token,
+                            ticket_flow_id=ticket.get("flow_id"),
+                            ticket_id=ticket.get("ticket_id"),
+                            phone=phone_84,
+                            ticket_code=ticket_code,
+                            status=status,
+                            closing_content=comment,
+                            assign_content=action_plan
+                        )
+                        if close_res.get("success"):
+                            state.log("SUCCESS", f"   ↳ {close_res.get('message')}")
+                            if close_res.get("round") == 1:
+                                rec["ticket_status"] = "Chờ đóng lần 2"
+                            else:
+                                rec["ticket_status"] = "Đã đóng"
+                            save_or_update_ticket(rec)
                         else:
-                            rec["ticket_status"] = "Đã đóng"
+                            state.log("WARN", f"   ↳ ⚠️ [Phiếu lỗi] Không thể tự động chuyển bước phiếu {phone_84}: {close_res.get('message')}")
+                            rec["ticket_status"] = "Phiếu lỗi"
+                            save_or_update_ticket(rec)
+                    except Exception as ex_auto:
+                        state.log("WARN", f"   ↳ ⚠️ [Phiếu lỗi] Lỗi khi tự động đóng phiếu {phone_84}: {ex_auto}")
+                        rec["ticket_status"] = "Phiếu lỗi"
                         save_or_update_ticket(rec)
-                    else:
-                        state.log("WARN", f"   ↳ Không thể tự động chuyển bước phiếu {phone_84}: {close_res.get('message')}")
-                except Exception as ex_auto:
-                    state.log("WARN", f"   ↳ Lỗi khi tự động đóng phiếu {phone_84}: {ex_auto}")
 
         # Xuất file Excel báo cáo riêng cho TTS Mới
         if excel_summary_list:
@@ -264,14 +293,16 @@ def execute_tts_new_data_cycle():
             saved_excel_file = export_diagnostics_to_excel(excel_summary_list, excel_name, start_d, end_d)
             state.log("SUCCESS", f"Báo cáo Excel TTS Mới đã lưu: {saved_excel_file}")
 
-        state.log("SUCCESS", f"✅ Hoàn tất tiền kiểm tra {len(excel_summary_list)} phiếu TTS Mới. Dữ liệu đã hiển thị trên Dashboard (Chế độ chỉ hiển thị, không đóng phiếu).")
+        mode_str = "Tự động đóng 2 vòng" if state.should_auto_close("tts_new") else "Chỉ hiển thị, đóng thủ công"
+        state.log("SUCCESS", f"✅ Hoàn tất chu kỳ tiền kiểm {len(excel_summary_list)} phiếu TTS Mới (Chế độ: {mode_str}).")
 
     except Exception as e:
         state.log("ERROR", f"Lỗi trong chu kỳ tiền kiểm TTS Mới: {e}")
     finally:
-        state.status = "IDLE"
-        state.status_message = "Đã dừng. Sẵn sàng nhận lệnh."
         state.current_step = "Hoàn tất tiền kiểm TTS Mới"
+        if not state.is_running:
+            state.status = "IDLE"
+            state.status_message = "Đã dừng. Sẵn sàng nhận lệnh."
 
 
 

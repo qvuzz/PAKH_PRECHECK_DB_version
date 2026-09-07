@@ -80,6 +80,23 @@ class SAPCClient:
         except Exception as e:
             print(f"[INFO] Cannot connect to Chrome CDP ({cdp_url}): {e}")
 
+        # 1.5 Try loading from Firefox cookies.sqlite
+        try:
+            import sys
+            from pathlib import Path
+            root_dir = str(Path(__file__).resolve().parent.parent)
+            if root_dir not in sys.path:
+                sys.path.insert(0, root_dir)
+            from auth_extractor import extract_firefox_cookies
+            ff_cookies = extract_firefox_cookies("10.155.42")
+            if ff_cookies:
+                for name, val in ff_cookies.items():
+                    self.session.cookies.set(name, val, domain="10.155.42.218", path="/")
+                print(f"[OK] Loaded {len(ff_cookies)} SAPC cookies from Firefox.")
+                return
+        except Exception:
+            pass
+
         # 2. Try loading from fallback cookies.json
         if os.path.exists(COOKIE_FILE):
             try:

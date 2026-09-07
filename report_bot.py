@@ -147,14 +147,22 @@ def get_sapc_package_validity(phone_84):
             is_home = "home" in pkg_name.lower()
             is_paygo = "paygo" in pkg_name.lower() or pkg_name.lower() == "m0"
 
-            # Trường hợp đặc biệt: Gói HOME, PAYGO hoặc gói không có ngày tháng
-            if not exp_str or is_paygo:
-                if is_home:
-                    desc = "Gói tích hợp Home (Không có thông tin ngày)"
-                elif is_paygo:
-                    desc = "Gói mặc định Pay As You Go"
-                else:
-                    desc = "Không có thông tin ngày ĐK/HSD"
+            # Trường hợp đặc biệt: Gói PAYGO hoặc gói hoàn toàn không có ngày tháng
+            if is_paygo:
+                active_packages.append({
+                    "name": pkg_name,
+                    "reg_str": "Chưa có thông tin",
+                    "exp_str": "Gói mặc định Pay As You Go",
+                    "reg_dt": None,
+                    "exp_dt": None,
+                    "is_no_date": True,
+                    "is_paygo": True,
+                    "is_home": False
+                })
+                continue
+
+            if not exp_str and not reg_str:
+                desc = "Gói tích hợp Home (Không có thông tin ngày)" if is_home else "Không có thông tin ngày ĐK/HSD"
                 active_packages.append({
                     "name": pkg_name,
                     "reg_str": "Chưa có thông tin",
@@ -162,7 +170,7 @@ def get_sapc_package_validity(phone_84):
                     "reg_dt": None,
                     "exp_dt": None,
                     "is_no_date": True,
-                    "is_paygo": is_paygo,
+                    "is_paygo": False,
                     "is_home": is_home
                 })
                 continue
@@ -324,7 +332,121 @@ def parse_dt_safe(val):
     return None
 
 
-def analyze_subscriber_status(clean_data, package_title, ticket_content="", phone_84="", cem_records=None, app_events=None, incident_time_str=None):
+def extract_packages_from_text(text):
+    """
+    Bóc tách danh sách tất cả các gói cước từ nội dung text (AI summary, ticket_content, package_title).
+    Ví dụ: 'Gói cước: HOME_KN, VD120N' -> ['HOME_KN', 'VD120N']
+           'gói VD120 và gói D5' -> ['VD120', 'D5']
+    """
+    if not text:
+        return []
+    pkgs = []
+    # 1. Tìm sau nhãn 'gói cước:' hoặc 'gói:'
+    m = re.findall(r'(?:gói(?:\s+(?:cước|data))?[:\s]+)([A-Za-z0-9_, -]+?)(?=(?:\n|\.|\b(?:tình trạng|lỗi|khi|không|từ|ngày|lưu lượng|thuê bao)\b|$))', text, flags=re.IGNORECASE)
+    for chunk in m:
+        for p in re.split(r'[,;\s+và/]+', chunk):
+            p_clean = p.strip().upper()
+            if p_clean and len(p_clean) >= 2 and p_clean not in ['KHÔNG', 'KHONG', 'NULL', 'NONE', 'CHƯA', 'CHUA', 'CƯỚC', 'DATA', 'SỬ', 'DỤNG']:
+                if p_clean not in pkgs:
+                    pkgs.append(p_clean)
+    # 2. Tìm theo pattern tên gói phổ biến
+    m2 = re.findall(r'\b(vd\d+[a-z]*|d\d+[a-z]*|big\d*[a-z0-9_]*|yolo\d+[a-z]*|thaga\d*[a-z]*|mim\d+[a-z]*|home[a-z0-9_]*|td\d+|dt\d+|sg120|vocuc|d159[a-z]*)\b', text, flags=re.IGNORECASE)
+    for p in m2:
+        p_clean = p.strip().upper()
+        if p_clean not in pkgs:
+            pkgs.append(p_clean)
+    return pkgs
+
+
+def get_expected_service_codes_for_pkg(pkg_name):
+    """
+    Xác định mã Service ID dự kiến của gói cước để đối chiếu với BTools.
+    Hỗ trợ một gói có thể có nhiều Service ID (ví dụ: mã chính, mã phụ, mã hạ băng thông).
+    Ví dụ:
+    VD120, VD120N, BIG, YOLO, D159V -> {"3000", "0000003000", "3601", "0000003601"...}
+    HOME, GD, GIA DINH -> {"5000", "0000005000", "3605", "0000003605", "9301", "10002", "10003"...}
+    TD3, TD5, TD49 -> {"3600", "0000003600", "8301", "0000008301"}
+    D5, D7, D15 -> {"3632", "0000003632"}
+    """
+    if not pkg_name:
+        return set()
+    p_clean = pkg_name.strip().upper()
+    codes = set()
+
+    # Nhóm HOME / Gia đình / GD
+    if "HOME" in p_clean or "GD" in p_clean or "GIA DINH" in p_clean or "GIADINH" in p_clean:
+        codes.update({"5000", "0000005000", "3605", "0000003605", "9301", "0000009301", "10002", "0000010002", "10003", "0000010003"})
+
+    # Nhóm VD (VD120, VD120N, VD90, VD150, VD89...)
+    if "VD" in p_clean:
+        if p_clean in ["VD2", "VD2K"]:
+            codes.update({"3001", "0000003001"})
+        else:
+            codes.update({"3000", "0000003000", "3601", "0000003601", "3602", "0000003602"})
+
+    # Nhóm BIG (BIG, BIG70, BIG90, BIG120, ODA_BIG_OCS...)
+    if "BIG" in p_clean:
+        codes.update({"3000", "0000003000", "3601", "0000003601", "3602", "0000003602", "3603", "0000003603", "6000", "0000006000"})
+
+    # Nhóm YOLO / D159 / D159V
+    if "YOLO" in p_clean or "D159" in p_clean:
+        codes.update({"3000", "0000003000"})
+
+    # Nhóm Tiêu dùng TD (TD3, TD5, TD49...)
+    if "TD" in p_clean or re.search(r'\bTD\d+\b', p_clean):
+        codes.update({"3600", "0000003600", "8301", "0000008301"})
+
+    # Nhóm gói ngày D5, D7, D15, FIM, P1-P4
+    if any(re.search(rf'\b{d}\b', p_clean) or p_clean.startswith(d) for d in ["D5", "D7", "D15", "FIM", "P1", "P2", "P3", "P4"]):
+        codes.update({"3632", "0000003632"})
+
+    # Nhóm D3, 3D5, VX3
+    if "D3" in p_clean or "3D5" in p_clean or "VX3" in p_clean:
+        codes.update({"3622", "0000003622"})
+
+    # Nhóm DT20, DT30, VX7
+    if "DT" in p_clean or "VX7" in p_clean:
+        codes.update({"3623", "0000003623"})
+
+    # Nhóm D1PLUS - D10PLUS
+    if "PLUS" in p_clean and "D" in p_clean:
+        codes.update({"8604", "0000008604"})
+
+    # Nhóm THAGA, M0, PAYGO
+    if any(k in p_clean for k in ["THAGA", "THẢ GA", "M0", "PAYGO"]):
+        codes.update({"3001", "0000003001"})
+
+    # Nhóm SG120, VOCUC
+    if "SG120" in p_clean or "VOCUC" in p_clean:
+        codes.update({"5800", "0000005800", "3000", "0000003000"})
+
+    # Nhóm gói mở rộng X, X1, X2 (mua thêm data khi hết data gói chính / HOME)
+    if p_clean in ["X", "X1", "X2"] or p_clean.startswith("X_") or "X(" in p_clean or "X (" in p_clean or "HOMED" in p_clean:
+        codes.update({"6000", "0000006000", "4000", "0000004000", "9301", "0000009301"})
+
+    # Nhóm MAX, THMAX
+    if "MAX" in p_clean:
+        codes.update({"5500", "0000005500"})
+
+    # Tra cứu bổ sung từ serviceid.json
+    try:
+        cfg_p = os.path.join(os.path.dirname(__file__), "serviceid.json")
+        if os.path.exists(cfg_p):
+            with open(cfg_p, "r", encoding="utf-8") as f:
+                svc_dict = json.load(f)
+            tokens = [t for t in re.split(r'[^A-Za-z0-9]+', p_clean) if len(t) >= 2]
+            for code, desc in svc_dict.items():
+                desc_upper = desc.upper()
+                if p_clean in desc_upper or any(t in desc_upper for t in tokens if len(t) >= 3):
+                    codes.add(code)
+                    codes.add(code.lstrip("0"))
+    except Exception:
+        pass
+
+    return codes
+
+
+def analyze_subscriber_status(clean_data, package_title, ticket_content="", phone_84="", cem_records=None, app_events=None, incident_time_str=None, driver=None):
     """
     CHIẾN LƯỢC PHÂN TÍCH ƯU TIÊN NGÀY GẦN NHẤT VÀ SIẾT CHẶT ĐIỀU KIỆN THEO PHẢN ÁNH:
     1. Kiểm tra kịch bản trống dữ liệu 2 ngày gần nhất trước.
@@ -527,20 +649,72 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             if all(p.get("is_home") or p.get("is_no_date") for p in active_pkgs):
                 pkg_names = ", ".join([p["name"] for p in active_pkgs])
                 return (
-                    "THEO DÕI THÊM",
-                    f"Thuê bao đang sử dụng gói tích hợp {pkg_names} (chưa có thông tin chu kỳ ngày ĐK/HSD trên hệ thống). Lịch sử dữ liệu BTools 5 ngày qua không ghi nhận lưu lượng phát sinh.",
-                    f"Kiểm tra lại trạng thái gói cước {pkg_names} trên hệ thống quản lý thuê bao, hướng dẫn khách hàng kiểm tra dữ liệu di động và khởi động lại thiết bị." + ALERT_ACTION,
-                    "E2EFDA"
+                    "LỖI GÓI HOME / NGHẼN BĂNG THÔNG",
+                    f"Thuê bao sử dụng gói tích hợp {pkg_names} nhưng BTools 5 ngày qua hoàn toàn không phát sinh mã dịch vụ data và không có phiên kết nối nào trên 1MB. Nghi ngờ bị bóp băng thông hoặc gói HOME bị lỗi chia sẻ data.",
+                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {pkg_names} và luồng chia sẻ data của thuê bao trên hệ thống.",
+                    "FFF2CC"
                 )
 
+            commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date")]
+            if commercial_pkgs:
+                act_names = ", ".join([p["name"] for p in commercial_pkgs])
+                act_exp_dates = ", ".join([p["exp_str"] for p in commercial_pkgs])
+                act_reg_dates = ", ".join([p["reg_str"] for p in commercial_pkgs if p.get("reg_str") != "N/A"]) or "trước đó"
+                earliest_reg_dt = min([p["reg_dt"] for p in commercial_pkgs if p.get("reg_dt")], default=None)
+                start_scan_date = (datetime.now() - timedelta(days=4)).date()
+
+                # Case 1: Gói mới đăng ký trong 5 ngày qua -> ĐÓNG PHIẾU LUÔN
+                if earliest_reg_dt and earliest_reg_dt.date() >= start_scan_date:
+                    return (
+                        "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
+                        f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
+                        f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                        "FFF2CC"
+                    )
+
+                # Case 2: Gói đăng ký trước chu kỳ 5 ngày -> Thực hiện hành vi bổ sung tra thêm BTools
+                elif earliest_reg_dt and earliest_reg_dt.date() < start_scan_date:
+                    try:
+                        from crawler_btools import fetch_supplementary_btools_if_needed
+                        clean_data = fetch_supplementary_btools_if_needed(driver, phone_84, clean_data, earliest_reg_dt, start_scan_date)
+                    except Exception:
+                        pass
+                    prior_rows = []
+                    for r in (clean_data or []):
+                        t_str = r.get("RECORD_OPENING_TIME", "")
+                        if t_str:
+                            try:
+                                d = datetime.strptime(t_str.split()[0], "%d/%m/%Y").date()
+                                if d < start_scan_date:
+                                    prior_rows.append(r)
+                            except Exception:
+                                pass
+                    prior_mb = sum((float(r.get("DATA_VOLUME_DOWNLINK") or 0) + float(r.get("DATA_VOLUME_UPLINK") or 0))/(1024*1024) for r in prior_rows)
+
+                    # Nhánh 2A: Từ khi đăng ký đến nay cũng không có phát sinh data -> Giống Case 1, ĐÓNG PHIẾU LUÔN
+                    if prior_mb < 1.0:
+                        return (
+                            "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
+                            f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu (kể cả trước 5 ngày gần đây), nghi ngờ lỗi luồng cước/profile gói.",
+                            f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                            "FFF2CC"
+                        )
+                    else:
+                        # Trước đó có data, 5 ngày gần đây hoàn toàn không có phiên nào
+                        return (
+                            "KHÔNG CÓ DỮ LIỆU",
+                            f"Thuê bao có gói cước {act_names} đã từng phát sinh dữ liệu trước đó ({prior_mb:.1f}MB), tuy nhiên 5 ngày gần đây hoàn toàn không phát sinh phiên kết nối nào trên BTools." + ALERT_COMMENT,
+                            "Nghi ngờ do thiết bị của khách hàng bị treo data hoặc tắt máy. Nhờ khách hàng thử tắt/bật thiết bị và data, đổi sim sang máy khác và kiểm tra SPEEDTEST giúp." + ALERT_ACTION,
+                            "FFF2CC"
+                        )
+
+            # Fallback nếu gói thương mại không có ngày tháng cụ thể
             act_names = ", ".join([p["name"] for p in active_pkgs if not p.get("is_paygo")])
             act_exp_dates = ", ".join([p["exp_str"] for p in active_pkgs if not p.get("is_paygo")])
             act_reg_dates = ", ".join([p["reg_str"] for p in active_pkgs if not p.get("is_paygo") and p["reg_str"] != "N/A"]) or "trước đó"
-            
-            # Vì clean_data = 0 nên chắc chắn từ ngày ĐK đến nay không phát sinh data
             return (
                 "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
-                f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay hoàn toàn không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
+                f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
                 f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                 "FFF2CC"
             )
@@ -654,8 +828,13 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         sc = str(row.get("SERVICE_ID_CODE", "")).strip().lower()
         if sc:
             all_days_service_codes.add(sc)
-            
-    is_pure_system_codes_only = all(code in excluded_system_codes for code in all_days_service_codes)
+
+    has_active_sapc_pkgs = False
+    if phone_84:
+        act_p, _ = get_sapc_package_validity(phone_84)
+        has_active_sapc_pkgs = any(not p.get("is_paygo") for p in act_p)
+
+    is_pure_system_codes_only = bool(all_days_service_codes) and all(code in excluded_system_codes for code in all_days_service_codes) and not has_active_sapc_pkgs
     
     if is_pure_system_codes_only:
         return (
@@ -855,17 +1034,93 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 "FFF2CC"
             )
 
-    # 🎯 KỊCH BẢN ĐI NHIỀU NƠI BỊ LỖI (CHỈ KHI THỰC SỰ KHÔNG LOAD ĐƯỢC DATA TRÊN NHIỀU TRẠM KHÁC NHAU)
-    if is_reported_multiple_places and not dominant_cell:
-        return (
-            "LỖI THIẾT BỊ / ĐI NHIỀU NƠI BỊ LỖI",
-            "Khách hàng phản ánh đi nhiều nơi đều bị lỗi, dữ liệu mạng ghi nhận thuê bao đổi trạm liên tục qua nhiều khu vực khác nhau nhưng đều không load được data (<1MB). Nguyên nhân do xung đột cài đặt mạng, lỗi SIM hoặc thiết bị đầu cuối của khách hàng.",
-            "Hướng dẫn khách hàng khởi động lại máy, bật/tắt chế độ máy bay, vệ sinh lại khay SIM hoặc mang SIM qua điểm giao dịch VinaPhone gần nhất để kiểm tra đổi SIM." + action_suffix,
-            "FFF2CC"
-        )
+    # =========================================================================
+    # 🔍 PHÂN TÍCH LƯU LƯỢNG BTOOLS NHIỀU NGÀY & ĐỐI CHIẾU GÓI CƯỚC 3 NGUỒN
+    # (Tóm tắt AI/Phản ánh KH vs Gói SAPC vs Service ID BTools)
+    # =========================================================================
+    
+    # 1. Phân tích lưu lượng data BTools theo từng ngày
+    daily_traffic = {}  # date -> total_mb
+    all_btools_services = set()
+    btools_service_codes = set()
+    btools_service_volumes = {}       # code -> total MB
+    btools_service_max_session = {}   # code -> max session MB
+    max_session_mb = 0.0
 
-    # 🎯 TRƯỜNG HỢP CÒN LẠI: KIỂM TRA LẠI GÓI CƯỚC SAPC
+    for row in (clean_data or []):
+        t_str = row.get("RECORD_OPENING_TIME", "")
+        if not t_str:
+            continue
+        try:
+            d_str = t_str.split(" ")[0]
+            d_obj = datetime.strptime(d_str, "%d/%m/%Y").date()
+        except Exception:
+            continue
+        try:
+            dl = float(row.get("DATA_VOLUME_DOWNLINK") or 0)
+            ul = float(row.get("DATA_VOLUME_UPLINK") or 0)
+            mb = (dl + ul) / (1024 * 1024)
+        except Exception:
+            mb = 0.0
+        daily_traffic[d_obj] = daily_traffic.get(d_obj, 0.0) + mb
+        if mb > max_session_mb:
+            max_session_mb = mb
+        
+        sc_name = str(row.get("SERVICE_NAME") or "").strip()
+        sc_code = str(row.get("SERVICE_ID_CODE") or row.get("SERVICE_ID") or "").strip()
+        if sc_name and sc_name.lower() != "none":
+            all_btools_services.add(sc_name)
+        elif sc_code and sc_code.lower() != "none":
+            all_btools_services.add(sc_code)
+
+        if sc_code and sc_code.lower() not in ["none", "null", ""]:
+            c_clean = sc_code.lstrip("0") or "0"
+            btools_service_codes.add(sc_code)
+            btools_service_codes.add(c_clean)
+            btools_service_volumes[sc_code] = btools_service_volumes.get(sc_code, 0.0) + mb
+            btools_service_volumes[c_clean] = btools_service_volumes.get(c_clean, 0.0) + mb
+            btools_service_max_session[sc_code] = max(btools_service_max_session.get(sc_code, 0.0), mb)
+            btools_service_max_session[c_clean] = max(btools_service_max_session.get(c_clean, 0.0), mb)
+
+    sorted_dates = sorted(daily_traffic.keys())
+    latest_traffic_date = sorted_dates[-1] if sorted_dates else latest_date_in_log
+    recent_traffic_mb = daily_traffic.get(latest_traffic_date, 0.0) if latest_traffic_date else 0.0
+    prior_traffic_dates = [d for d in sorted_dates if d < latest_traffic_date] if latest_traffic_date else []
+    prior_traffic_mb = sum(daily_traffic[d] for d in prior_traffic_dates)
+
+    # 2. Bóc tách danh sách gói cước & dung lượng từ Tóm tắt AI / Nội dung phản ánh
+    vol_ai = None
+    combined_text = f"{package_title} {ticket_content}"
+    if phone_84:
+        try:
+            from db_manager import get_db_connection
+            conn = get_db_connection()
+            with conn:
+                row = conn.execute("SELECT ai_summary, ticket_content FROM tickets WHERE phone = ?", (phone_84,)).fetchone()
+                if row:
+                    combined_text = f"{combined_text} {row[0] or ''} {row[1] or ''}"
+        except Exception:
+            pass
+
+    extracted_pkgs_ai = extract_packages_from_text(combined_text)
+    pkg_ai = extracted_pkgs_ai[0] if extracted_pkgs_ai else None
+
+    content_lower = combined_text.lower()
+    m_vol = re.search(r'(?:dung lượng còn|còn|đã sử dụng)[:\s]*([\d.,]+)\s*(gb|mb|g)\b', content_lower)
+    if m_vol:
+        vol_ai = f"{m_vol.group(1)}{m_vol.group(2).upper()}"
+
+    # 3. Lấy thông tin gói cước SAPC
     active_pkgs, expired_pkgs = get_sapc_package_validity(phone_84)
+
+    # Dịch vụ thương mại thực sự đang hoạt động trên BTools (loại bỏ app miễn cước bypass)
+    APP_SERVICES = {"momo", "zalo", "mytv", "vieon", "facebook", "tiktok", "youtube"}
+    active_btools_commercial = [
+        s for s in all_btools_services
+        if not any(app in s.lower() for app in APP_SERVICES)
+    ]
+
+    # A: Toàn bộ gói cước đã hết hạn trên SAPC
     if not active_pkgs and expired_pkgs:
         exp_names = ", ".join([p["name"] for p in expired_pkgs])
         exp_dates = ", ".join([p["exp_str"] for p in expired_pkgs])
@@ -875,48 +1130,250 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             f"Thông báo khách hàng gói cước ({exp_names}) đã hết hạn sử dụng. Tư vấn khách hàng nạp tiền gia hạn hoặc đăng ký gói cước mới phù hợp." + action_suffix,
             "FFF2CC"
         )
-    elif active_pkgs:
-        if all(p.get("is_paygo") for p in active_pkgs):
+
+    # B: Chỉ có gói cước mặc định PAYGO
+    if active_pkgs and all(p.get("is_paygo") for p in active_pkgs):
+        return (
+            "CHỈ CÓ GÓI PAYGO",
+            f"Thuê bao hiện chỉ có gói cước mặc định (PAYGO/M0), không có gói data ưu đãi và tài khoản chính không đủ để trừ cước truy cập ngoài gói.",
+            "Hướng dẫn khách hàng kiểm tra số dư tài khoản chính, đồng thời tư vấn đăng ký các gói cước Data VinaPhone ưu đãi để sử dụng." + action_suffix,
+            "FFF2CC"
+        )
+
+    # C: XỬ LÝ CASE 1 & CASE 2 THEO GÓI CƯỚC THƯƠNG MẠI SAPC VÀ LƯU LƯỢNG BTOOLS
+    commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date")]
+    earliest_reg_dt = min([p["reg_dt"] for p in commercial_pkgs if p.get("reg_dt")], default=None)
+    act_names = ", ".join([p["name"] for p in commercial_pkgs])
+    act_exp_dates = ", ".join([p["exp_str"] for p in commercial_pkgs])
+    act_reg_dates = ", ".join([p["reg_str"] for p in commercial_pkgs if p.get("reg_str") != "N/A"]) or "trước đó"
+    start_scan_date = (datetime.now() - timedelta(days=4)).date()
+
+    # Tính tổng lưu lượng trong chu kỳ 5 ngày gần đây và trước đó
+    prior_rows = []
+    recent_5d_rows = []
+    for r in (clean_data or []):
+        t_str = r.get("RECORD_OPENING_TIME", "")
+        if not t_str:
+            continue
+        try:
+            d = datetime.strptime(t_str.split()[0], "%d/%m/%Y").date()
+            if d < start_scan_date:
+                prior_rows.append(r)
+            else:
+                recent_5d_rows.append(r)
+        except Exception:
+            recent_5d_rows.append(r)
+
+    prior_mb = sum((float(r.get("DATA_VOLUME_DOWNLINK") or 0) + float(r.get("DATA_VOLUME_UPLINK") or 0))/(1024*1024) for r in prior_rows)
+    recent_5d_mb = sum((float(r.get("DATA_VOLUME_DOWNLINK") or 0) + float(r.get("DATA_VOLUME_UPLINK") or 0))/(1024*1024) for r in recent_5d_rows)
+    has_4g_recent = any(
+        str(r.get("RAT_TYPE") or r.get("RAT_TYPE_CODE") or "") in ["6", "7"] 
+        or "4G" in str(r.get("RAT_TYPE_NAME") or "").upper() 
+        or "LTE" in str(r.get("RAT_TYPE_NAME") or "").upper() 
+        for r in recent_5d_rows
+    )
+
+    if commercial_pkgs and recent_5d_mb < 1.0:
+        all_act_names = ", ".join([p["name"] for p in active_pkgs])
+        extra_ai_note = f", khách hàng phản ánh gói [{pkg_ai}]" if (pkg_ai and pkg_ai not in act_names) else ""
+        rec_codes = [c for c in sorted(list(btools_service_codes)) if len(c) <= 5 and c not in ["0", "00"]]
+        rec_codes_str = f" (BTools chỉ ghi nhận mã {', '.join(rec_codes[:3])})" if rec_codes else " (BTools không ghi nhận mã cước data hợp lệ)"
+        # Case 1: Gói mới đăng ký trong 5 ngày qua -> ĐÓNG PHIẾU LUÔN
+        if earliest_reg_dt and earliest_reg_dt.date() >= start_scan_date:
             return (
-                "CHỈ CÓ GÓI PAYGO",
-                f"Thuê bao hiện chỉ có gói cước mặc định (PAYGO/M0), không có gói data ưu đãi và tài khoản chính không đủ để trừ cước truy cập ngoài gói.",
-                "Hướng dẫn khách hàng kiểm tra số dư tài khoản chính, đồng thời tư vấn đăng ký các gói cước Data VinaPhone ưu đãi để sử dụng." + action_suffix,
+                "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
+                f"Hồ sơ SAPC ghi nhận gói [{all_act_names}]{extra_ai_note} đăng ký ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu sử dụng thực tế{rec_codes_str}, nghi ngờ lỗi luồng cước/profile gói.",
+                f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {all_act_names}{f' và gói {pkg_ai}' if (pkg_ai and pkg_ai not in act_names) else ''} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                 "FFF2CC"
             )
 
-        if all(p.get("is_home") or p.get("is_no_date") for p in active_pkgs):
+        # Case 2: Gói đăng ký trước chu kỳ 5 ngày -> Thực hiện hành vi bổ sung tra thêm BTools
+        elif earliest_reg_dt and earliest_reg_dt.date() < start_scan_date:
+            if not prior_rows:
+                try:
+                    from crawler_btools import fetch_supplementary_btools_if_needed
+                    clean_data = fetch_supplementary_btools_if_needed(driver, phone_84, clean_data, earliest_reg_dt, start_scan_date)
+                except Exception:
+                    pass
+                prior_rows = []
+                for r in (clean_data or []):
+                    t_str = r.get("RECORD_OPENING_TIME", "")
+                    if t_str:
+                        try:
+                            d = datetime.strptime(t_str.split()[0], "%d/%m/%Y").date()
+                            if d < start_scan_date:
+                                prior_rows.append(r)
+                        except Exception:
+                            pass
+                prior_mb = sum((float(r.get("DATA_VOLUME_DOWNLINK") or 0) + float(r.get("DATA_VOLUME_UPLINK") or 0))/(1024*1024) for r in prior_rows)
+
+            # Nhánh 2A: Sau khi tra bổ sung, từ lúc đăng ký đến nay cũng KHÔNG CÓ PHÁT SINH DATA (<1MB) -> Giống Case 1, ĐÓNG PHIẾU LUÔN
+            if prior_mb < 1.0:
+                return (
+                    "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
+                    f"Hồ sơ SAPC ghi nhận gói [{all_act_names}]{extra_ai_note} đăng ký ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu sử dụng thực tế{rec_codes_str}, nghi ngờ lỗi luồng cước/profile gói.",
+                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {all_act_names}{f' và gói {pkg_ai}' if (pkg_ai and pkg_ai not in act_names) else ''} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                    "FFF2CC"
+                )
+            # Nhánh 2B: Có phát sinh data trước đó, chỉ 5 ngày gần đây không phát sinh dù bắt RAT TYPE = 6 (4G) bình thường -> ĐÓNG PHIẾU LUÔN
+            elif has_4g_recent:
+                return (
+                    "LỖI THIẾT BỊ / SIM TREO DATA",
+                    f"Thuê bao có gói cước {act_names} đã từng phát sinh dữ liệu bình thường từ khi đăng ký ({act_reg_dates}), tuy nhiên 5 ngày gần đây không phát sinh data dù thiết bị vẫn bắt sóng 4G bình thường (RAT TYPE = 6). Có thể do thiết bị hoặc SIM của khách hàng bị treo data.",
+                    "Có thể do thiết bị hoặc SIM, nhờ kiểm tra SIM và thiết bị giúp (thử khởi động lại máy, bật/tắt dữ liệu di động hoặc tháo lắp SIM sang máy khác kiểm tra).",
+                    "FFF2CC"
+                )
+            else:
+                return (
+                    "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ",
+                    f"Lịch sử BTools các ngày trước phát sinh data bình thường ({prior_mb:.1f}MB), nhưng 5 ngày gần đây không phát sinh lưu lượng data (dưới 1MB).",
+                    "Nghi ngờ do thiết bị của khách hàng bị treo data. Nhờ khách hàng thử tắt/bật thiết bị và data, speedtest lại giúp." + action_suffix,
+                    "FFF2CC"
+                )
+
+    # D: Trường hợp đi nhiều nơi bị lỗi (Chỉ kết luận do máy khi các ngày trước ĐÃ DÙNG DATA BÌNH THƯỜNG >= 1MB)
+    if is_reported_multiple_places and not dominant_cell and prior_traffic_mb >= 1.0:
+        return (
+            "LỖI THIẾT BỊ / ĐI NHIỀU NƠI BỊ LỖI",
+            "Khách hàng phản ánh đi nhiều nơi đều bị lỗi, dữ liệu mạng ghi nhận thuê bao đổi trạm liên tục qua nhiều khu vực khác nhau nhưng đều không load được data (<1MB). Nguyên nhân do xung đột cài đặt mạng, lỗi SIM hoặc thiết bị đầu cuối của khách hàng.",
+            "Hướng dẫn khách hàng khởi động lại máy, bật/tắt chế độ máy bay, vệ sinh lại khay SIM hoặc mang SIM qua điểm giao dịch VinaPhone gần nhất để kiểm tra đổi SIM." + action_suffix,
+            "FFF2CC"
+        )
+
+    # E: Gói tích hợp HOME / nhiều gói cước (Case 2: check serviceid & phiên > 1MB)
+    VALID_DATA_SERVICE_CODES = {
+        "3000", "0000003000", "3001", "0000003001", "3600", "0000003600",
+        "3601", "0000003601", "3602", "0000003602", "3603", "0000003603",
+        "3605", "0000003605", "3622", "0000003622", "3623", "0000003623",
+        "3632", "0000003632", "4000", "0000004000", "5000", "0000005000",
+        "5500", "0000005500", "5800", "0000005800", "6000", "0000006000",
+        "8301", "0000008301", "8604", "0000008604", "9301", "0000009301"
+    }
+    THROTTLING_SERVICE_CODES = {"10002", "0000010002", "10003", "0000010003"}
+    has_throttling_code = bool(THROTTLING_SERVICE_CODES.intersection(btools_service_codes))
+    has_session_over_1mb = max_session_mb >= 1.0
+
+    # Gom danh sách tất cả các gói cước đang có (SAPC active packages + AI summary packages)
+    all_pkg_names = set(p["name"] for p in active_pkgs)
+    for p_name in (extracted_pkgs_ai or []):
+        all_pkg_names.add(p_name)
+
+    # Gom toàn bộ expected service IDs của các gói mà KH sở hữu
+    all_expected_codes = set()
+    for p_name in all_pkg_names:
+        all_expected_codes.update(get_expected_service_codes_for_pkg(p_name))
+
+    # CẨN THẬN KHI SO SÁNH: Kiểm tra xem có gói thương mại nào đang chạy data tốt không
+    # (Có Service ID trong BTools và có lưu lượng >= 1MB hoặc phiên >= 1MB)
+    has_working_commercial_pkg = False
+    for p_name in all_pkg_names:
+        exp_c = get_expected_service_codes_for_pkg(p_name)
+        comm_codes = exp_c - THROTTLING_SERVICE_CODES
+        for code in comm_codes:
+            if btools_service_volumes.get(code, 0.0) >= 1.0 or btools_service_max_session.get(code, 0.0) >= 1.0:
+                has_working_commercial_pkg = True
+                break
+        if has_working_commercial_pkg:
+            break
+
+    # 1. Phát hiện mã hạ băng thông trên BTools (10002 / 10003)
+    if has_throttling_code and not has_working_commercial_pkg:
+        pkg_names = ", ".join(sorted(list(all_pkg_names))) if all_pkg_names else "HOME/Gia đình"
+        return (
+            "LỖI GÓI HOME / NGHẼN BĂNG THÔNG",
+            f"Lịch sử BTools ghi nhận mã dịch vụ 10002/10003 (Hạ băng thông gói HOME/Gia đình). Thuê bao {pkg_names} đang bị bóp băng thông nên không thể truy cập Internet tốc độ cao.",
+            f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {pkg_names} và khôi phục lưu lượng tốc độ cao cho thuê bao.",
+            "FFF2CC"
+        )
+
+    # 2. Case 2: Thuê bao có gói tích hợp HOME (kể cả có thêm gói cước khác)
+    has_home_pkg = any("HOME" in p.upper() or "GD" in p.upper() or "GIA DINH" in p.upper() for p in all_pkg_names)
+    if has_home_pkg and not has_working_commercial_pkg:
+        has_pkg_working = any(btools_service_volumes.get(c, 0.0) >= 1.0 or btools_service_max_session.get(c, 0.0) >= 1.0 for c in all_expected_codes)
+        has_comm_working = any(btools_service_volumes.get(c, 0.0) >= 1.0 or btools_service_max_session.get(c, 0.0) >= 1.0 for c in VALID_DATA_SERVICE_CODES)
+
+        if not has_pkg_working and not has_comm_working and not has_session_over_1mb:
+            sapc_str = ", ".join([p["name"] for p in active_pkgs]) if active_pkgs else ""
+            ai_str = ", ".join(extracted_pkgs_ai) if extracted_pkgs_ai else ""
+            if sapc_str and ai_str and ai_str != sapc_str:
+                pkg_desc = f"Hồ sơ SAPC ghi nhận gói [{sapc_str}], khách hàng phản ánh gói [{ai_str}]"
+            elif sapc_str:
+                pkg_desc = f"Hồ sơ thuê bao sử dụng gói [{sapc_str}]"
+            else:
+                pkg_desc = f"Khách hàng phản ánh gói [{ai_str}]"
+            
+            rec_codes = [c for c in sorted(list(btools_service_codes)) if len(c) <= 5 and c not in ["0", "00"]]
+            rec_str = f"BTools chỉ ghi nhận mã {', '.join(rec_codes[:3])} nhưng không có mã Service ID data của các gói cước này" if rec_codes else "BTools không ghi nhận mã dịch vụ data của các gói cước này"
+
+            return (
+                "LỖI GÓI HOME / NGHẼN BĂNG THÔNG",
+                f"{pkg_desc}, tuy nhiên {rec_str} và không có phiên kết nối nào trên 1MB (phiên lớn nhất đạt {max_session_mb:.2f}MB). Nghi ngờ bị bóp băng thông hoặc gói HOME bị lỗi chia sẻ data.",
+                f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình các gói [{sapc_str or ai_str}] trên hệ thống và luồng chia sẻ data của thuê bao.",
+                "FFF2CC"
+            )
+        elif active_pkgs and all(p.get("is_home") or p.get("is_no_date") for p in active_pkgs):
             pkg_names = ", ".join([p["name"] for p in active_pkgs])
             return (
                 "THEO DÕI THÊM",
-                f"Thuê bao sử dụng gói tích hợp ({pkg_names}), hệ thống chưa ghi nhận phát sinh lưu lượng trong ngày gần nhất. Nghi ngờ thiết bị tắt data hoặc đang sử dụng Wifi.",
+                f"Thuê bao sử dụng gói tích hợp ({pkg_names}), hệ thống ghi nhận phát sinh lưu lượng data. Nghi ngờ thiết bị tắt data hoặc đang sử dụng Wifi.",
                 f"Hướng dẫn khách hàng bật Dữ liệu di động (Data), khởi động lại thiết bị và theo dõi sử dụng." + action_suffix,
                 "E2EFDA"
             )
 
-        act_names = ", ".join([p["name"] for p in active_pkgs if not p.get("is_paygo")])
-        act_exp_dates = ", ".join([p["exp_str"] for p in active_pkgs if not p.get("is_paygo")])
-        act_reg_dates = ", ".join([p["reg_str"] for p in active_pkgs if not p.get("is_paygo") and p["reg_str"] != "N/A"]) or "trước đó"
-        earliest_reg_dt = min([p["reg_dt"] for p in active_pkgs if p["reg_dt"] and not p.get("is_paygo")], default=None)
+    # 3. 🎯 XỬ LÝ CASE 1: KH PHẢN ÁNH CÓ GÓI CƯỚC (AI TÓM TẮT HOẶC PHẢN ÁNH)
+    # Check Service ID của gói cước, nếu BTools không thấy mã này (hoặc code chưa rõ nhưng data BTools < 1MB)
+    # -> BÁO LỖI DO GÓI CƯỚC VÀ ĐÓNG LUÔN!
+    if extracted_pkgs_ai and not has_working_commercial_pkg:
+        for p_cand in extracted_pkgs_ai:
+            expected_codes = get_expected_service_codes_for_pkg(p_cand)
+            has_expected_code = bool(expected_codes.intersection(btools_service_codes))
+
+            sapc_str = ", ".join([p["name"] for p in active_pkgs]) if active_pkgs else ""
+            sapc_note = f" (Hồ sơ SAPC ghi nhận gói [{sapc_str}])" if (sapc_str and p_cand not in sapc_str) else ""
+
+            rec_codes = [c for c in sorted(list(btools_service_codes)) if len(c) <= 5 and c not in ["0", "00"]]
+
+            if expected_codes and not has_expected_code and not has_session_over_1mb:
+                sample_c = ", ".join(sorted(list(expected_codes))[:3])
+                rec_str = f"BTools chỉ ghi nhận mã {', '.join(rec_codes[:3])}, không thấy mã Service ID {sample_c} của gói" if rec_codes else f"BTools không ghi nhận mã Service ID {sample_c} của gói"
+                return (
+                    "LỖI DO GÓI CƯỚC",
+                    f"Khách hàng phản ánh sử dụng gói [{p_cand}]{sapc_note}, tuy nhiên {rec_str} và không phát sinh phiên nào trên 1MB (phiên lớn nhất đạt {max_session_mb:.2f}MB). Nghi ngờ lỗi luồng cước / chưa kích hoạt profile gói.",
+                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {p_cand}{f' và gói {sapc_str}' if sapc_note else ''} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                    "FFF2CC"
+                )
+            elif not expected_codes and (recent_5d_mb < 1.0 or recent_traffic_mb < 1.0 or not has_session_over_1mb):
+                rec_str = f"BTools chỉ ghi nhận mã {', '.join(rec_codes[:3])} và lưu lượng không đáng kể (<1MB)" if rec_codes else "lịch sử dữ liệu BTools không phát sinh lưu lượng data đáng kể (<1MB)"
+                return (
+                    "LỖI DO GÓI CƯỚC",
+                    f"Khách hàng phản ánh sử dụng gói [{p_cand}]{sapc_note}, tuy nhiên {rec_str}. Nghi ngờ lỗi luồng cước / gói cước chưa được kích hoạt quyền truy cập data.",
+                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {p_cand}{f' và gói {sapc_str}' if sapc_note else ''} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                    "FFF2CC"
+                )
+
+    # F: ĐÁNH GIÁ LƯU LƯỢNG NGÀY GẦN NHẤT < 1MB (CĂN CỨ MULTI-DAY BTOOLS)
+    if recent_traffic_mb < 1.0:
+        recent_day_str = latest_traffic_date.strftime('%d/%m/%Y') if latest_traffic_date else "gần nhất"
         
-        # Kiểm tra xem từ ngày đăng ký đến nay thuê bao đã từng dùng data chưa
-        has_used_since_reg = check_data_used_since_registration(clean_data, earliest_reg_dt)
-        
-        if not has_used_since_reg:
-            # Từ ngày ĐK đến nay hoàn toàn không phát sinh data -> Lỗi do gói
+        # Nếu các ngày trước đó BTools KHÔNG CÓ DATA hoặc TỔNG DATA < 1MB -> Khó khẳng định do gói hay thiết bị -> KHÔNG ĐÓNG TỰ ĐỘNG
+        if prior_traffic_mb < 1.0:
             return (
-                "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
-                f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay hoàn toàn không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
-                f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao." + action_suffix,
+                "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ - CHƯA RÕ NGUYÊN NHÂN",
+                f"Lịch sử BTools ngày gần nhất ({recent_day_str}) và các ngày trước đó đều không phát sinh lưu lượng đáng kể (<1MB). "
+                f"Chưa đủ cơ sở để khẳng định nguyên nhân do thiết bị của khách hàng bị treo data hay do gói cước/dịch vụ mạng.",
+                "Yêu cầu KTV liên hệ khách hàng kiểm tra thực tế thiết bị và tình trạng gói cước. Không đóng phiếu tự động.",
                 "FFF2CC"
             )
         else:
-            # Trước đó từng dùng bình thường, chỉ gần đây không thấy data -> Do sóng yếu / máy treo / tắt data
+            # Các ngày trước đó có data >= 1MB (đã từng dùng bình thường), chỉ ngày gần nhất sụt giảm < 1MB -> Nghi ngờ treo data
             return (
-                "THEO DÕI THÊM",
-                f"Thuê bao có gói cước {act_names} (HSD: {act_exp_dates}), lịch sử trước đó vẫn dùng bình thường nhưng ngày gần đây không thấy phát sinh data. Khả năng do khách hàng tắt data, chuyển sang dùng Wifi hoặc thiết bị treo tạm thời.",
-                f"Hướng dẫn khách hàng kiểm tra lại dung lượng gói {act_names}, tắt/bật lại dữ liệu di động hoặc khởi động lại thiết bị để tiếp tục theo dõi." + action_suffix,
-                "E2EFDA"
+                "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ",
+                f"Lịch sử BTools các ngày trước phát sinh data bình thường ({prior_mb:.1f}MB), "
+                f"nhưng ngày gần nhất ({recent_day_str}) gần như không phát sinh lưu lượng sử dụng thực tế (dưới 1MB).",
+                "Nghi ngờ do thiết bị của khách hàng bị treo data. Nhờ khách hàng thử tắt/bật thiết bị và data, speedtest lại giúp." + action_suffix,
+                "FFF2CC"
             )
+
     return (
         "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ",
         f"Lịch sử truy cập ngày gần nhất ({recent_day_str}) gần như không phát sinh lưu lượng sử dụng thực tế (dưới 1MB).",

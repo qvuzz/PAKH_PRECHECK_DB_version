@@ -28,7 +28,8 @@ AUTO_CLOSE_STATUSES_NO_ACCESS_CHECK = {
     "lỗi gói vd2 - thiếu paygo",        # Dùng VD2 nhưng không có gói PAYGO
     "lưu lượng yếu - tập trung 1 cell", # CEM Cell > 50%
     "gói cước đã hết hạn",              # SAPC toàn bộ gói hết hạn
-    "gói còn hạn - không dùng được",    # SAPC còn gói nhưng mất data hoàn toàn
+    "gói còn hạn - không dùng được",    # Case 1 & Case 2A: Từ khi đăng ký gói không phát sinh data
+    "lỗi thiết bị / sim treo data",     # Case 2B: Trước có data, 5 ngày gần đây mất data dù bắt 4G
     "sóng 4g kém / chỉ có 3g",          # 1: KH phản ánh sóng 4G kém / chỉ 3G
     "bị khóa gprs",                     # 3: NAM = 1
     "hss chưa có 5g",                   # 4: Profile HSS chưa mở 5G
@@ -38,6 +39,10 @@ AUTO_CLOSE_STATUSES_NO_ACCESS_CHECK = {
     "theo dõi thêm",                    # Row 2: THEO DÕI THÊM
     "không có dữ liệu",                 # Row 4: KHÔNG CÓ DỮ LIỆU
     "không có lưu lượng đáng kể",        # Row 8: KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ
+    "lỗi do gói cước",                  # Báo lỗi do gói cước đóng luôn (Case 1 sai service id / data < 1MB)
+    "lỗi gói cước - sai service id",    # Case 1: AI ghi nhận gói nhưng BTools không thấy Service ID
+    "lỗi gói home / nghẽn băng thông",  # Case 2: Gói HOME không có mã data và không có phiên > 1MB
+    "nghi ngờ lỗi gói cước",            # Đóng tự động chuyển KTV/Tính cước
 }
 
 LEVEL_LUU_LUONG_YEU_STATUS = "lưu lượng yếu"

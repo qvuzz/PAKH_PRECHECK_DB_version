@@ -4,6 +4,7 @@
 import os
 import json
 import time
+import requests
 import urllib.request
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
@@ -48,50 +49,70 @@ def get_cached_token() -> str:
     return ""
 
 
-def extract_token_from_browser(driver=None) -> str:
+def _extract_token_via_cdp_ws(domain_keyword: str = "tts.vnptnet.vn", storage_key: str = "TOKEN", port: int = 9222) -> str:
+    """Trích xuất token trực tiếp từ Chrome qua CDP WebSocket không chuyển tab, không nhảy cửa sổ."""
+    try:
+        import urllib.request, json, asyncio, websockets
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=2) as r:
+            tabs = json.loads(r.read().decode("utf-8"))
+        ws_url = None
+        for t in tabs:
+            if domain_keyword in t.get("url", "").lower():
+                ws_url = t.get("webSocketDebuggerUrl")
+                break
+        if not ws_url:
+            return ""
+
+        async def _query():
+            async with websockets.connect(ws_url) as ws:
+                msg = {
+                    "id": 1,
+                    "method": "Runtime.evaluate",
+                    "params": {"expression": f"localStorage.getItem('{storage_key}')"}
+                }
+                await ws.send(json.dumps(msg))
+                resp = await ws.recv()
+                data = json.loads(resp)
+                return data.get("result", {}).get("result", {}).get("value") or ""
+
+        return asyncio.run(_query())
+    except Exception:
+        return ""
+
+
+def extract_token_from_browser(driver=None, force_refresh: bool = False) -> str:
     """
-    Trích xuất token trực tiếp từ trình duyệt Chrome (tab tts.vnptnet.vn).
-    Hỗ trợ cả Selenium driver truyền vào lẫn Playwright CDP fallback.
+    Trích xuất token trực tiếp từ bất kỳ trình duyệt nào (Chrome, Edge, Firefox) 100% ngầm.
+    Tuyệt đối không chuyển tab hay nhảy cửa sổ làm gián đoạn người dùng.
     """
     token = ""
 
-    # 1. Ưu tiên đọc từ cache nếu đã có token
-    token = get_cached_token()
-    if token:
-        if not token.startswith("Bearer "):
-            token = "Bearer " + token
-        return token
+    # 1. Ưu tiên đọc từ cache nếu đã có token và không yêu cầu làm mới
+    if not force_refresh:
+        token = get_cached_token()
+        if token:
+            if not token.startswith("Bearer "):
+                token = "Bearer " + token
+            return token
 
-    # 2. Đọc ngầm qua Playwright CDP tới port 9222 (không chuyển tab, không nhảy cửa sổ)
+    # 2. Quét tự động đa trình duyệt qua auth_extractor (Chrome/Edge port 9222, Firefox SQLite, etc.)
     try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
-            for page in browser.contexts[0].pages:
-                if "tts.vnptnet.vn" in page.url.lower():
-                    token = page.evaluate("() => localStorage.getItem('TOKEN')")
-                    if token:
-                        break
+        from auth_extractor import get_universal_ttsnew_token
+        token = get_universal_ttsnew_token(driver=driver)
     except Exception:
         pass
 
-    # 3. Fallback qua Selenium driver nếu không dùng được CDP
-    if not token and driver:
+    # 3. Fallback qua Playwright CDP tới port 9222 nếu có
+    if not token:
         try:
-            current_handle = driver.current_window_handle
-            for handle in driver.window_handles:
-                try:
-                    driver.switch_to.window(handle)
-                    if "tts.vnptnet.vn" in driver.current_url.lower():
-                        token = driver.execute_script("return localStorage.getItem('TOKEN');")
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                browser = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
+                for page in browser.contexts[0].pages:
+                    if "tts.vnptnet.vn" in page.url.lower():
+                        token = page.evaluate("() => localStorage.getItem('TOKEN')")
                         if token:
                             break
-                except Exception:
-                    pass
-            try:
-                driver.switch_to.window(current_handle)
-            except Exception:
-                pass
         except Exception:
             pass
 
@@ -113,11 +134,21 @@ def make_api_request(url: str, token: str, timeout: int = 15) -> dict:
         "Authorization": token,
         "Origin": "https://tts.vnptnet.vn",
         "Referer": "https://tts.vnptnet.vn/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     }
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as res:
-        return json.loads(res.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as res:
+            return json.loads(res.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            # Token hết hạn -> xóa file cache để buộc trích xuất token mới ở lần tiếp theo
+            if TOKEN_CACHE_FILE.exists():
+                try:
+                    os.remove(TOKEN_CACHE_FILE)
+                except Exception:
+                    pass
+        raise
 
 
 def fetch_active_tickets(token: str, limit: int = 1000, offset: int = 0) -> list:
@@ -183,14 +214,32 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
     else:
         combined_code = raw_code
 
-    url = f"{API_BASE_URL}/get-customer-by-ticketflowid/{flow_id}"
+    url_cust = f"{API_BASE_URL}/get-customer-by-ticketflowid/{flow_id}"
+    url_info = f"{API_BASE_URL}/get-ticket-info?ticketTypeId=2&ticketFlowId={flow_id}"
+    reopen_count = int(it.get("reopenCount") or 0)
+    last_reopened_date = str(it.get("lastReopenedDate") or "").strip()
+
     try:
-        resp = make_api_request(url, token, timeout=10)
+        resp = make_api_request(url_cust, token, timeout=10)
         cust = resp.get("data") or {}
         raw_phone = str(cust.get("phone") or cust.get("contactPhone") or "").strip()
 
         # Chuẩn hóa SĐT về dạng 84xxxxxxxxx
         phone = normalize_phone_number(raw_phone)
+
+        # Lấy THÔNG TIN MỞ LẠI TTS (reopenCount, lastReopenedDate)
+        try:
+            resp_info = make_api_request(url_info, token, timeout=8)
+            info_data = resp_info.get("data") or {}
+            if isinstance(info_data, dict):
+                rc = info_data.get("reopenCount")
+                if rc is not None:
+                    reopen_count = int(rc or 0)
+                lrd = info_data.get("lastReopenedDate")
+                if lrd:
+                    last_reopened_date = str(lrd).strip()
+        except Exception:
+            pass
 
         return {
             "flow_id": flow_id,
@@ -209,6 +258,8 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "created_time": it.get("requestDate", ""),
             "assigned_unit": it.get("assignedUnitName", ""),
             "source": "tts_new",
+            "reopen_count": reopen_count,
+            "last_reopened_date": last_reopened_date,
         }
     except Exception as e:
         return {
@@ -228,6 +279,8 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "created_time": it.get("requestDate", ""),
             "assigned_unit": it.get("assignedUnitName", ""),
             "source": "tts_new",
+            "reopen_count": reopen_count,
+            "last_reopened_date": last_reopened_date,
             "error": str(e),
         }
 
@@ -256,9 +309,18 @@ def get_ttsnew_tickets_for_precheck(driver=None, max_workers: int = 8, service_t
     """
     token = extract_token_from_browser(driver)
     if not token:
-        raise ValueError("Không tìm thấy Bearer Token của TTS Mới. Hãy chắc chắn bạn đã mở và đăng nhập tab https://tts.vnptnet.vn trên Chrome.")
+        raise ValueError("Không tìm thấy Bearer Token của TTS Mới. Hãy chắc chắn bạn đã đăng nhập https://tts.vnptnet.vn trên trình duyệt (Firefox, Chrome, Edge).")
 
-    raw_tickets = fetch_active_tickets(token, limit=1000)
+    try:
+        raw_tickets = fetch_active_tickets(token, limit=1000)
+    except urllib.error.HTTPError as he:
+        if he.code == 401:
+            token = extract_token_from_browser(driver, force_refresh=True)
+            if not token:
+                raise
+            raw_tickets = fetch_active_tickets(token, limit=1000)
+        else:
+            raise
     if service_type == "data":
         target_tickets = filter_data_tickets(raw_tickets)
     elif service_type == "voice_sms":
@@ -293,8 +355,8 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
     - Vòng 1: Chọn bước "2.4 Đánh giá kết quả xử lý PAKH dịch vụ Data (SOC2)", Đơn vị: Tổ Dịch vụ.
               Sau khi đóng vòng 1 -> lưu cache / DB chờ vòng 2.
     - Vòng 2: Khi phiếu xuất hiện lần 2:
-              + Nếu status là BÌNH THƯỜNG hoặc THEO DÕI THÊM -> Chọn bước "2.6 Đóng phiếu Trên TTS".
-              + Các trường hợp khác -> Chọn bước "5.1" (Xây dựng PA xử lý) và đóng.
+              + Chỉ khi nội dung phản hồi là "Nhờ tạo phiếu CLM chuyển VTT xử lý" -> Chọn bước "5.1" (Xây dựng PA xử lý).
+              + Còn lại tất cả các trường hợp khác -> Chọn bước "2.6" (Đóng phiếu Trên TTS).
     """
     if not token.startswith("Bearer "):
         token = "Bearer " + token
@@ -337,26 +399,28 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         else:
             # ---> VÒNG 2: Xuất hiện lần 2
             round_num = 2
-            st_upper = (status or "").upper()
-            is_normal_case = (
-                "BÌNH THƯỜNG" in st_upper or 
-                "BINH THUONG" in st_upper or 
-                "THEO DÕI THÊM" in st_upper or 
-                "THEO DOI THEM" in st_upper
+            # Quy định: CHỈ KHI nội dung phản hồi là "Nhờ tạo phiếu CLM chuyển VTT xử lý" mới chuyển bước 5.1
+            resp_content = (assign_content or "").strip().lower()
+            is_step_5_1 = (
+                "nhờ tạo phiếu clm chuyển vtt xử lý" in resp_content or 
+                "nhờ tạo phiếu clm chuyển vtt" in resp_content or
+                "chuyển vtt xử lý" in resp_content or
+                "chuyển vtt" in resp_content or
+                "nhờ tạo phiếu clm chuyển kỹ thuật địa bàn" in resp_content
             )
 
-            if is_normal_case:
-                # Tìm bước 2.6 Đóng phiếu Trên TTS
-                chosen_node = next((n for n in next_node_list if "2.6" in str(n.get("name", "")) or str(n.get("processData", {}).get("stepCode", "")) == "2.6"), None)
-                if not chosen_node:
-                    chosen_node = next((n for n in next_node_list if "đóng phiếu" in str(n.get("name", "")).lower()), None)
-                action_label = f"Vòng 2 (Bình thường / Theo dõi): Chuyển bước '{chosen_node.get('name') if chosen_node else '2.6'}' để đóng phiếu"
-            else:
-                # Các trường hợp khác: Chọn bước 5.1
+            if is_step_5_1:
+                # Chọn bước 5.1 (Xây dựng PA xử lý)
                 chosen_node = next((n for n in next_node_list if "5.1" in str(n.get("name", "")) or str(n.get("processData", {}).get("stepCode", "")).startswith("5.1")), None)
                 if not chosen_node:
                     chosen_node = next((n for n in next_node_list if "xây dựng pa" in str(n.get("name", "")).lower() or "phương án" in str(n.get("name", "")).lower()), None)
-                action_label = f"Vòng 2 (Sự cố / Kém sóng): Chuyển bước '{chosen_node.get('name') if chosen_node else '5.1'}'"
+                action_label = f"Vòng 2 (Chuyển VTT): Chuyển bước '{chosen_node.get('name') if chosen_node else '5.1'}'"
+            else:
+                # Còn lại: Chọn bước 2.6 Đóng phiếu Trên TTS
+                chosen_node = next((n for n in next_node_list if "2.6" in str(n.get("name", "")) or str(n.get("processData", {}).get("stepCode", "")) == "2.6"), None)
+                if not chosen_node:
+                    chosen_node = next((n for n in next_node_list if "đóng phiếu" in str(n.get("name", "")).lower()), None)
+                action_label = f"Vòng 2: Chuyển bước '{chosen_node.get('name') if chosen_node else '2.6'}' để đóng phiếu"
 
         if not chosen_node:
             available_names = [n.get("name") for n in next_node_list]
@@ -375,7 +439,14 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         except Exception:
             pass
 
-        # 4. Đóng gói Payload
+        # 4. Đóng gói Payload (Theo quy định: cả "Nội dung xử lý" và "Nội dung chuyển giao" đều là Cột 10 + 11 cho cả 2 vòng đóng)
+        c10 = str(closing_content or "").strip()
+        c11 = str(assign_content or "").strip()
+        if c10 and c11 and c10 != c11:
+            combined_content = f"{c10}\n{c11}"
+        else:
+            combined_content = c10 or c11 or ""
+
         form_id = chosen_node.get("processData", {}).get("formId") or curr_node.get("processData", {}).get("formId")
         payload = {
             "ticketFlowId": ticket_flow_id,
@@ -383,8 +454,8 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
             "formId": form_id,
             "processNodeInstanceId": curr_node.get("id"),
             "processDefinitionId": step_data.get("processInstanceId"),
-            "closingContent": closing_content,
-            "assignContent": assign_content,
+            "closingContent": combined_content,
+            "assignContent": combined_content,
             "columnJson": {"formId": form_id} if form_id else {},
             "newTicketFlow": {
                 "ticketFlowParentId": ticket_flow_id,

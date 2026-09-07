@@ -189,6 +189,19 @@ def execute_tts_old_data_cycle():
                         "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     }, hf, ensure_ascii=False, indent=4)
 
+                # Kiểm tra hành vi bổ sung Case 2: Nếu gói ĐK trước 5 ngày và BTools 5 ngày không có data
+                try:
+                    from report_bot import get_sapc_package_validity
+                    from crawler_btools import fetch_supplementary_btools_if_needed
+                    active_pkgs, _ = get_sapc_package_validity(phone_84)
+                    commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date")]
+                    earliest_reg_dt = min([p["reg_dt"] for p in commercial_pkgs if p.get("reg_dt")], default=None)
+                    start_scan_date = (datetime.now() - timedelta(days=4)).date()
+                    if earliest_reg_dt and earliest_reg_dt.date() < start_scan_date:
+                        clean_data = fetch_supplementary_btools_if_needed(driver, phone_84, clean_data, earliest_reg_dt, start_scan_date)
+                except Exception as ex_case2:
+                    state.log("WARN", f"Lỗi tra cứu bổ sung Case 2: {ex_case2}")
+
             # Tra cứu CEM & App Usage
             cem_records = []
             app_events = []
@@ -216,7 +229,7 @@ def execute_tts_old_data_cycle():
 
             # Kịch bản phân tích kỹ thuật (kết hợp BTools + SAPC + CEM + App Usage + Mốc thời gian tiếp nhận)
             status, comment, action_plan, color = analyze_subscriber_status(
-                clean_data, title, content, phone_84=phone_84, cem_records=cem_records, app_events=app_events, incident_time_str=incident_time_str
+                clean_data, title, content, phone_84=phone_84, cem_records=cem_records, app_events=app_events, incident_time_str=incident_time_str, driver=driver
             )
             state.log("INFO", f"   ↳ Nhận định: [{status}]")
 

@@ -1,6 +1,17 @@
+import sys
 import time
 import urllib.request
 import re
+import os
+import json
+from datetime import datetime, timedelta
+
+if sys.platform == "win32":
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    except Exception:
+        pass
 
 # Global cache cho session cookie BTools
 _BTOOLS_COOKIE_CACHE = None
@@ -50,56 +61,73 @@ def _normalize_date_btools(d_str):
     return clean
 
 
+def _get_btools_cookie_via_cdp_ws(port=9222):
+    """Trích xuất cookie của BTools trực tiếp qua CDP WebSocket không chuyển tab."""
+    try:
+        import urllib.request, json, asyncio, websockets
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=2) as r:
+            tabs = json.loads(r.read().decode("utf-8"))
+        ws_url = None
+        for t in tabs:
+            if t.get("type") == "page" and t.get("webSocketDebuggerUrl"):
+                ws_url = t.get("webSocketDebuggerUrl")
+                break
+        if not ws_url:
+            return ""
+
+        async def _query():
+            async with websockets.connect(ws_url) as ws:
+                msg = {"id": 1, "method": "Network.getAllCookies", "params": {}}
+                await ws.send(json.dumps(msg))
+                resp = await ws.recv()
+                data = json.loads(resp)
+                cookies = data.get("result", {}).get("cookies", [])
+                btools_cookies = [f"{c['name']}={c['value']}" for c in cookies if "10.159.21.241" in c.get("domain", "")]
+                return "; ".join(btools_cookies)
+
+        return asyncio.run(_query())
+    except Exception:
+        return ""
+
+
 def get_btools_cookie(driver=None, force_refresh=False):
     """
-    Lấy cookie JSESSIONID từ Chrome tab BTools và cache lại.
-    Nếu chưa có, mở nhẹ page BTools qua Playwright CDP để tạo phiên.
+    Lấy chuỗi cookie xác thực của BTools từ bất kỳ trình duyệt nào (Chrome, Edge, Firefox).
+    Tuyệt đối KHÔNG gọi driver.switch_to.window() để không làm gián đoạn người dùng.
     """
     global _BTOOLS_COOKIE_CACHE
     if _BTOOLS_COOKIE_CACHE and not force_refresh:
         return _BTOOLS_COOKIE_CACHE
 
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.connect_over_cdp("http://localhost:9222")
-            context = browser.contexts[0]
-            cookies = context.cookies()
-            btools_cookies = [f"{c['name']}={c['value']}" for c in cookies if "10.159.21.241" in c.get("domain", "")]
-            if btools_cookies:
-                _BTOOLS_COOKIE_CACHE = "; ".join(btools_cookies)
-            browser.close()
-    except Exception:
-        pass
 
-    if not driver:
-        return _BTOOLS_COOKIE_CACHE
-
-    orig_handle = None
+    # 1. Trích xuất đa trình duyệt (Chrome, Edge, Firefox, browser_cookie3)
     try:
-        orig_handle = driver.current_window_handle
+        from auth_extractor import get_universal_btools_cookie
+        cookie_val = get_universal_btools_cookie(driver=driver)
+        if cookie_val:
+            _BTOOLS_COOKIE_CACHE = cookie_val
+            return _BTOOLS_COOKIE_CACHE
     except Exception:
         pass
 
     cookie_val = None
-    try:
-        for handle in driver.window_handles:
-            try:
-                driver.switch_to.window(handle)
-                if "10.159.21.241" in driver.current_url:
-                    cookies = driver.get_cookies()
-                    cookie_parts = [f"{c['name']}={c['value']}" for c in cookies]
-                    if cookie_parts:
-                        cookie_val = "; ".join(cookie_parts)
-                        break
-            except Exception:
-                continue
-    finally:
-        if orig_handle:
-            try:
-                driver.switch_to.window(orig_handle)
-            except Exception:
-                pass
+
+    # 2. Fallback qua CDP Network.getAllCookies từ Selenium driver (nếu có)
+    if driver:
+        try:
+            cookies = driver.execute_cdp_cmd("Network.getAllCookies", {}).get("cookies", [])
+            btools_cookies = [f"{c['name']}={c['value']}" for c in cookies if "10.159.21.241" in c.get("domain", "")]
+            if btools_cookies:
+                cookie_val = "; ".join(btools_cookies)
+        except Exception:
+            pass
+
+    # 3. Fallback qua CDP WebSocket tới port 9222
+    if not cookie_val:
+        try:
+            cookie_val = _get_btools_cookie_via_cdp_ws()
+        except Exception:
+            pass
 
     if cookie_val:
         _BTOOLS_COOKIE_CACHE = cookie_val
@@ -235,115 +263,84 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
                     print(f"[BTools HTTP Ngầm] Thuê bao {target_phone} không phát sinh phiên dữ liệu BTools.")
                 return data_rows
             else:
+                global _BTOOLS_COOKIE_CACHE
+                _BTOOLS_COOKIE_CACHE = None
                 print(f"[BTools HTTP Ngầm] Phản hồi không hợp lệ: {err_reason}")
         except Exception as ex_http:
-            print(f"[BTools] Chạy ngầm HTTP gặp lỗi ({ex_http}), chuyển sang phương án dự phòng...")
+            print(f"[BTools] Lỗi gửi request ngầm HTTP: {ex_http}")
 
-    # --- PHƯƠNG ÁN 2: SILENT FETCH QUA JAVASCRIPT TRÊN TAB BTOOLS (KHÔNG RELOAD TRANG) ---
-    if driver:
-        try:
-            btools_handle = None
-            orig_h = driver.current_window_handle
-            for h in driver.window_handles:
-                try:
-                    driver.switch_to.window(h)
-                    if "10.159.21.241" in driver.current_url:
-                        btools_handle = h
-                        break
-                except Exception:
-                    continue
-
-            if btools_handle:
-                driver.switch_to.window(btools_handle)
-                js_fetch = f"""
-                var done = arguments[arguments.length - 1];
-                fetch('{query_url}')
-                    .then(r => r.text())
-                    .then(html => done(html))
-                    .catch(err => done(''));
-                """
-                html = driver.execute_async_script(js_fetch)
-                driver.switch_to.window(orig_h)
-                
-                valid, err_reason = is_valid_btools_html(html)
-                if valid:
-                    data_rows = parse_btools_table_html(html)
-                    if data_rows:
-                        print(f"[BTools Silent Fetch] Đã cào thành công {len(data_rows)} dòng dữ liệu.")
-                    else:
-                        print(f"[BTools Silent Fetch] Thuê bao {target_phone} không phát sinh phiên dữ liệu.")
-                    return data_rows
-                else:
-                    print(f"[BTools Silent Fetch] Phản hồi không hợp lệ: {err_reason}")
-            else:
-                driver.switch_to.window(orig_h)
-        except Exception as ex_fetch:
-            print(f"[BTools] Silent Fetch gặp lỗi: {ex_fetch}")
-
-    # --- PHƯƠNG ÁN 3: DỰ PHÒNG CUỐI CÙNG (CHỈ TẢI TRỰC TIẾP NẾU CÓ SẴN TAB BTOOLS) ---
-    if driver:
-        orig_h = None
-        try:
-            orig_h = driver.current_window_handle
-            btools_h = None
-            for h in driver.window_handles:
-                try:
-                    driver.switch_to.window(h)
-                    if "10.159.21.241" in driver.current_url:
-                        btools_h = h
-                        break
-                except Exception:
-                    continue
-
-            if btools_h:
-                driver.switch_to.window(btools_h)
-                print(f"[BTools Legacy] Tải trang trực tiếp trên tab BTools cho: {target_phone}")
-                driver.get(query_url)
-                table_loaded = False
-                for _ in range(20):
-                    time.sleep(0.4)
-                    has_table = driver.execute_script("""
-                        var tbl = document.querySelector('table');
-                        if(!tbl) return false;
-                        return tbl.innerText.toUpperCase().includes("RAT_TYPE") || tbl.innerText.toUpperCase().includes("MSISDN");
-                    """)
-                    if has_table:
-                        table_loaded = True
-                        break
-                if table_loaded:
-                    html = driver.page_source
-                    valid, err_reason = is_valid_btools_html(html)
-                    if orig_h:
-                        try:
-                            driver.switch_to.window(orig_h)
-                        except Exception:
-                            pass
-                    if valid:
-                        data_rows = parse_btools_table_html(html)
-                        print(f"[BTools Legacy] Đã cào thành công {len(data_rows)} dòng dữ liệu.")
-                        return data_rows
-                    else:
-                        print(f"[BTools Legacy] Phản hồi không hợp lệ: {err_reason}")
-                else:
-                    if orig_h:
-                        try:
-                            driver.switch_to.window(orig_h)
-                        except Exception:
-                            pass
-            else:
-                if orig_h:
-                    try:
-                        driver.switch_to.window(orig_h)
-                    except Exception:
-                        pass
-        except Exception as ex_nav:
-            print(f"[BTools Legacy] Lỗi tải trang: {ex_nav}")
-            if orig_h:
-                try:
-                    driver.switch_to.window(orig_h)
-                except Exception:
-                    pass
-
-    # BTOOLS LỖI HOẶC CHƯA ĐĂNG NHẬP -> TRẢ VỀ None ĐỂ BÁO LỖI VÀ KHÔNG TỰ ĐỘNG ĐÓNG PHIẾU
+    # BTOOLS LỖI HOẶC CHƯA ĐĂNG NHẬP -> TRẢ VỀ None ĐỂ BÁO LỖI VÀ KHÔNG TỰ ĐỘNG ĐÓNG PHIẾU (KHÔNG NHẢY TAB TRÌNH DUYỆT)
     print(f"[BTools] ⚠️ CẢNH BÁO: Không thể truy cập dữ liệu BTools cho {target_phone} (Chưa đăng nhập hoặc lỗi máy chủ). Trả về None!")
     return None
+
+
+def fetch_supplementary_btools_if_needed(driver, phone_84, clean_data, earliest_reg_dt, start_scan_date):
+    """
+    Hành vi bổ sung cho Case 2: Tra cứu bổ sung BTools từ lúc đăng ký gói (earliest_reg_dt)
+    đến trước chu kỳ quét (start_scan_date - 1 ngày).
+    Nếu clean_data đã chứa dữ liệu trước start_scan_date thì giữ nguyên không tra lại.
+    Trả về: clean_data đã được hợp nhất (merged).
+    """
+    if not phone_84 or not earliest_reg_dt:
+        return clean_data
+
+    # 1. Kiểm tra xem clean_data đã có dữ liệu trước start_scan_date chưa
+    for r in (clean_data or []):
+        t_str = r.get("RECORD_OPENING_TIME", "")
+        if t_str:
+            try:
+                d = datetime.strptime(t_str.split()[0], "%d/%m/%Y").date()
+                if d < start_scan_date:
+                    return clean_data
+            except Exception:
+                pass
+
+    # 2. Xác định khoảng thời gian cần tra cứu bổ sung
+    reg_date = earliest_reg_dt.date() if isinstance(earliest_reg_dt, datetime) else earliest_reg_dt
+    if reg_date >= start_scan_date:
+        return clean_data
+
+    # Giới hạn tối đa 30 ngày trước start_scan_date
+    supp_start_date = max(reg_date, start_scan_date - timedelta(days=30))
+    supp_end_date = start_scan_date - timedelta(days=1)
+    if supp_start_date > supp_end_date:
+        return clean_data
+
+    supp_start_str = supp_start_date.strftime("%d%m%Y")
+    supp_end_str = supp_end_date.strftime("%d%m%Y")
+
+    print(f"[BTools Supplementary] 🔍 [Case 2] Tra cứu bổ sung cho {phone_84} từ {supp_start_str} đến {supp_end_str} (Gói ĐK {reg_date.strftime('%d/%m/%Y')})")
+
+    try:
+        from data_processor import standardize_btools_data
+        raw_supp = extract_btools_single_phone(driver, phone_84, supp_start_str, supp_end_str)
+        supp_clean = standardize_btools_data(raw_supp)
+        if supp_clean:
+            # Hợp nhất và loại bỏ trùng lặp nếu có
+            seen_keys = set()
+            merged = []
+            for r in list(clean_data or []) + list(supp_clean or []):
+                key = (r.get("RECORD_OPENING_TIME"), r.get("SERVICE_ID"), r.get("DATA_VOLUME_DOWNLINK"))
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    merged.append(r)
+
+            # Cập nhật lại file number/{phone_84}.json nếu tồn tại
+            out_dir = os.path.join(os.getcwd(), "number")
+            j_path = os.path.join(out_dir, f"{phone_84}.json")
+            if os.path.exists(j_path):
+                try:
+                    with open(j_path, "r", encoding="utf-8") as jf:
+                        jd = json.load(jf)
+                    jd["btools_technical_data"] = merged
+                    jd["data"] = merged
+                    with open(j_path, "w", encoding="utf-8") as jf:
+                        json.dump(jd, jf, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+            print(f"[BTools Supplementary] Đã hợp nhất {len(supp_clean)} dòng bổ sung vào clean_data (Tổng: {len(merged)} dòng).")
+            return merged
+    except Exception as e:
+        print(f"[BTools Supplementary] ⚠️ Lỗi tra cứu bổ sung: {e}")
+
+    return clean_data

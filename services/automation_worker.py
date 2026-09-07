@@ -17,8 +17,34 @@ def automation_worker_loop():
         state.is_running = True
         state.trigger_now_requested = False
 
-        # Thực thi chu kỳ tự động ngầm 100% bằng REST API siêu tốc (không kích hoạt code Selenium)
-        execute_tts_old_api_data_cycle()
+        # Thực thi chu kỳ tự động ngầm theo danh sách phạm vi (scan_scopes) đã chọn
+        scopes = getattr(state, "scan_scopes", ["tts_old_data", "tts_new_data"])
+        if not scopes:
+            scopes = ["tts_old_data"]
+
+        state.log("INFO", f"🔄 Bắt đầu chu kỳ quét tự động. Phạm vi: {', '.join(scopes)}")
+
+        for sc in scopes:
+            if not state.is_running or state.stop_requested:
+                break
+            try:
+                if sc == "tts_old_data":
+                    state.log("STEP", "--- BẮT ĐẦU QUÉT: TTS CŨ - MOBILE INTERNET ---")
+                    execute_tts_old_api_data_cycle()
+                elif sc == "tts_old_voice":
+                    state.log("STEP", "--- BẮT ĐẦU QUÉT: TTS CŨ - THOẠI / SMS / GÓI ---")
+                    from services.tts_old_api_voice import execute_tts_old_api_voice_cycle
+                    execute_tts_old_api_voice_cycle()
+                elif sc == "tts_new_data":
+                    state.log("STEP", "--- BẮT ĐẦU QUÉT: TTS MỚI - MOBILE INTERNET ---")
+                    from services.tts_new_data import execute_tts_new_data_cycle
+                    execute_tts_new_data_cycle()
+                elif sc == "tts_new_voice":
+                    state.log("STEP", "--- BẮT ĐẦU QUÉT: TTS MỚI - THOẠI / SMS / GÓI ---")
+                    from services.tts_new_voice import execute_tts_new_voice_cycle
+                    execute_tts_new_voice_cycle()
+            except Exception as e:
+                state.log("ERROR", f"Lỗi khi thực thi quét phạm vi {sc}: {e}")
 
         if not state.is_running or state.stop_requested:
             state.is_running = False
