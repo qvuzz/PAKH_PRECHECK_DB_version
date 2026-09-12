@@ -167,7 +167,9 @@ class SAPCClient:
         print("CONTENT-TYPE:", response.headers.get("Content-Type"))
 
         if "json" not in response.headers.get("Content-Type", "").lower():
-            with open("debug_response.html", "w", encoding="utf-8") as f:
+            out_path = Path(__file__).resolve().parent.parent / "output" / "debug_response.html"
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
                 f.write(response.text)
             raise Exception(
                 "Chưa đăng nhập hệ thống Core/SAPC (http://10.155.42.218) hoặc phiên đăng nhập đã hết hạn. "

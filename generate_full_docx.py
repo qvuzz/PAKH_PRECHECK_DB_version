@@ -73,6 +73,12 @@ def add_subheading(doc, text):
     return p
 
 def add_picture_with_caption(doc, img_path, caption_text, width_inches=6.0, space_before=6, space_after=8):
+    if not os.path.exists(img_path):
+        for sub in ("docs", "static/img", "static"):
+            cand = os.path.join(os.path.dirname(__file__), sub, img_path)
+            if os.path.exists(cand):
+                img_path = cand
+                break
     if os.path.exists(img_path):
         p_img = doc.add_paragraph()
         format_para(p_img, align=WD_ALIGN_PARAGRAPH.CENTER, space_before=space_before, space_after=2, line_spacing=1.0, first_line_indent=0)
@@ -572,13 +578,15 @@ def build_full_docx():
     r_sign_name = cp_r.add_run("[Họ và tên tác giả chủ trì]")
     set_run_font(r_sign_name, font_name="Times New Roman", size_pt=13, bold=True)
 
-    # Save to VNPT PRECHECK.docx or fallback if open in Word
-    output_filename = "VNPT PRECHECK.docx"
+    # Save to docs/VNPT PRECHECK.docx or fallback if open in Word
+    docs_dir = os.path.join(os.path.dirname(__file__), "docs")
+    os.makedirs(docs_dir, exist_ok=True)
+    output_filename = os.path.join(docs_dir, "VNPT PRECHECK.docx")
     try:
         doc.save(output_filename)
         print(f"Document successfully generated and saved to {output_filename}!")
     except PermissionError:
-        output_filename = "VNPT PRECHECK_HoanThien.docx"
+        output_filename = os.path.join(docs_dir, "VNPT PRECHECK_HoanThien.docx")
         doc.save(output_filename)
         print(f"VNPT PRECHECK.docx is open in Word, saved to: {output_filename}!")
 

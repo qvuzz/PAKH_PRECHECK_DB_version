@@ -49,7 +49,9 @@ for route_path in SPA_ROUTES:
 
 @router.get("/vnpt-logo.svg", include_in_schema=False)
 def get_logo_svg():
-    logo_path = BASE_DIR / "vnpt-logo.svg"
+    logo_path = BASE_DIR / "static" / "img" / "vnpt-logo.svg"
+    if not logo_path.exists():
+        logo_path = BASE_DIR / "vnpt-logo.svg"
     if logo_path.exists():
         return FileResponse(logo_path, media_type="image/svg+xml")
     return Response(status_code=404)
@@ -57,7 +59,9 @@ def get_logo_svg():
 
 @router.get("/vnpt-logo-horizontal.svg", include_in_schema=False)
 def get_logo_horizontal_svg():
-    logo_path = BASE_DIR / "vnpt-logo-horizontal.svg"
+    logo_path = BASE_DIR / "static" / "img" / "vnpt-logo-horizontal.svg"
+    if not logo_path.exists():
+        logo_path = BASE_DIR / "vnpt-logo-horizontal.svg"
     if logo_path.exists():
         return FileResponse(logo_path, media_type="image/svg+xml")
     return get_logo_svg()
