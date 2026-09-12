@@ -47,7 +47,10 @@ def get_tickets_api(
         service_type=srv_f
     )
     sys_counts = get_system_counts()
-    all_raw = get_all_tickets(source=src_f, service_type=srv_f)
+    if not search and not status and not tab:
+        all_raw = tickets
+    else:
+        all_raw = get_all_tickets(source=src_f, service_type=srv_f)
     closed_cnt = sum(1 for t in all_raw if t.get("ticket_status") == "Đã đóng")
     active_cnt = len(all_raw) - closed_cnt
 

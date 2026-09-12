@@ -145,7 +145,8 @@ def check_ticket_can_close(t):
     Kiểm tra xem 1 phiếu có đủ điều kiện để đóng tự động / thủ công hay không.
     Trả về tuple: (can_close: bool, reason: str)
     """
-    if t.get("ticket_status") == "Đã đóng":
+    ticket_st = str(t.get("ticket_status") or "")
+    if ticket_st in ("Đã đóng", "Da dong"):
         return True, "Đã đóng"
 
     # THÔNG TIN MỞ LẠI TTS: Nếu số lần mở lại khác 0 (> 0) thì TUYỆT ĐỐI không tự động đóng
@@ -155,24 +156,22 @@ def check_ticket_can_close(t):
 
     # BẢO VỆ AN TOÀN TUYỆT ĐỐI: Chỉ tự động đóng cho phiếu thuộc dịch vụ Mobile Internet / Data
     pkg_title_raw = str(t.get("package_title") or t.get("title") or "").strip()
-    if pkg_title_raw:
-        pkg_lower = pkg_title_raw.lower()
-        from ttsnew_api import DATA_SERVICE_KEYWORDS
-        is_data = any(k in pkg_lower for k in DATA_SERVICE_KEYWORDS) and "gói cước mobile internet" not in pkg_lower
-        if not is_data:
-            return False, f"Phiếu thuộc dịch vụ [{pkg_title_raw}] (ngoài Data/Mobile Internet) - KHÔNG ĐÓNG TỰ ĐỘNG, KTV xử lý thủ công!"
+    if pkg_title_raw and not is_mobile_internet_ticket(pkg_title_raw):
+        return False, f"Phiếu thuộc dịch vụ [{pkg_title_raw}] (ngoài Data/Mobile Internet) - KHÔNG ĐÓNG TỰ ĐỘNG, KTV xử lý thủ công!"
+
+    status = str(t.get("status", "")).strip()
+    if not status or status.upper() in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI", "--", "NONE", "NULL"):
+        return False, "Chưa có kết quả tiền kiểm tra kỹ thuật"
 
     # PHẢN ÁNH LỖI ỨNG DỤNG CỤ THỂ (ZALO, TIKTOK...): Bắt buộc KTV review, tuyệt đối không đóng tự động
-    st_raw = str(t.get("status", "")).strip().lower()
+    st_raw = status.lower()
     sum_raw = str(t.get("ai_summary", "") or t.get("ticket_content", "")).lower()
     if "lỗi ứng dụng" in st_raw or "lỗi ứng dụng cụ thể" in sum_raw:
         return False, "Khách hàng phản ánh lỗi ứng dụng cụ thể (Zalo, TikTok...) - Dành cho KTV kiểm tra xử lý, không đóng tự động!"
 
     try:
-        from update_tts import config as tts_config
         from update_tts import excel_reader
 
-        status = str(t.get("status", "")).strip()
         norm_status = excel_reader.normalize_text(status)
 
         ai_sum = t.get("ai_summary") or t.get("ticket_content") or ""
