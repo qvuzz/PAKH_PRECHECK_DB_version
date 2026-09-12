@@ -3002,7 +3002,7 @@ async function recheckCurrentModule(btn) {
     if (btn) {
         btn.disabled = true;
         btn.style.opacity = '0.7';
-        btn.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 0.8s linear infinite;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg> <span>Đang tiền kiểm...</span>`;
+        btn.innerText = 'Đang tiền kiểm...';
     }
 
     try {
@@ -3016,7 +3016,7 @@ async function recheckCurrentModule(btn) {
             if (btn) {
                 btn.disabled = false;
                 btn.style.opacity = '1';
-                btn.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> <span>Tiền kiểm lại</span>`;
+                btn.innerText = 'Tiền kiểm lại';
             }
             await fetchStatus();
             await loadTickets(true);
