@@ -809,3 +809,165 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         }
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
+                            phone: str = "", ticket_code: str = "") -> dict:
+    """
+    Thực hiện chuyển phiếu từ bước 2.3 sang bước 2.4 trên hệ thống TTS Mới:
+    - B0: Kiểm tra tính chính xác của phân loại phiếu: True
+    - Nội dung xử lý (closingContent): "Chuyển 2.4"
+    - Bước tiếp theo: "2.4 Đánh giá, báo cáo tình hình xử lý"
+    - Đơn vị nhận (clUnitId): Trung tâm Vận hành khai thác mạng Khu vực miền Nam/Tổ Dịch vụ (SOC2) (418)
+    - Nội dung chuyển giao (assignContent): "Chuyển 2.4"
+    """
+    if not token or not str(token).strip():
+        return {"success": False, "message": "❌ Thiếu token xác thực OneOSS của TTS Mới. Vui lòng đăng nhập TTS Mới trên trình duyệt!"}
+
+    if not ticket_flow_id or not ticket_id:
+        return {"success": False, "message": f"❌ Thiếu định danh bắt buộc (ticket_flow_id={ticket_flow_id}, ticket_id={ticket_id}) để xử lý phiếu TTS Mới."}
+
+    if not token.startswith("Bearer "):
+        token = "Bearer " + token
+
+    u_info = decode_jwt_user(token)
+    actor_name = u_info.get("displayName") or u_info.get("userName") or "KTV"
+
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "Authorization": token,
+        "Origin": "https://tts.vnptnet.vn",
+        "Referer": "https://tts.vnptnet.vn/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+
+    try:
+        # 1. Lấy thông tin bước hiện tại và các bước tiếp theo khả dụng
+        url_step = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={ticket_flow_id}"
+        res_step = requests.get(url_step, headers=headers, timeout=12).json()
+        if res_step.get("isError"):
+            return {"success": False, "message": res_step.get("message", "Lỗi lấy bước kế tiếp từ OneOSS Gateway")}
+
+        step_data = res_step.get("data", {})
+        curr_nodes = step_data.get("currentNodes", [])
+        curr_node = curr_nodes[0] if curr_nodes else {}
+        curr_node_name = str(curr_node.get("name") or "")
+        next_node_list = step_data.get("nextNodeData", [])
+
+        # Kiểm tra bước hiện tại
+        if "2.3" not in curr_node_name and "2.3" not in str((curr_node.get("processData") or {}).get("stepCode", "")):
+            # Vẫn cho phép nếu có node 2.4 trong danh sách bước tiếp theo
+            has_2_4_next = any("2.4" in str(n.get("name", "")) for n in next_node_list)
+            if not has_2_4_next:
+                return {
+                    "success": False,
+                    "message": f"⚠️ Phiếu đang ở bước '{curr_node_name}', không hỗ trợ chuyển sang 2.4. Các bước tiếp theo: {[n.get('name') for n in next_node_list]}"
+                }
+
+        # 2. Tìm node bước đích 2.4
+        chosen_node = None
+        for n in next_node_list:
+            n_name = str(n.get("name") or "")
+            n_code = str((n.get("processData") or {}).get("stepCode") or "")
+            if "2.4" in n_name or "2.4" in n_code or "đánh giá" in n_name.lower():
+                chosen_node = n
+                break
+
+        if not chosen_node and next_node_list:
+            # Fallback lấy node đầu tiên nếu chỉ có 1 node
+            if len(next_node_list) == 1:
+                chosen_node = next_node_list[0]
+
+        if not chosen_node:
+            valid_targets = [str(n.get("name")) for n in next_node_list]
+            return {
+                "success": False,
+                "message": f"Không tìm thấy bước đích 2.4 từ bước hiện tại '{curr_node_name}'. Các bước tiếp theo: {valid_targets}"
+            }
+
+        next_step_name = chosen_node.get("name") or "2.4 Đánh giá, báo cáo tình hình xử lý"
+
+        # 3. Xác định đơn vị tiếp nhận (Trung tâm Vận hành khai thác mạng Khu vực miền Nam/Tổ Dịch vụ (SOC2) - clUnitId: 418)
+        cl_unit_id = 418
+        if (chosen_node.get("processData") or {}).get("unitId"):
+            try:
+                cl_unit_id = int(chosen_node["processData"]["unitId"])
+            except Exception:
+                pass
+        else:
+            try:
+                url_msc = f"https://gw-oneoss.vnpt.vn/oss/tts/cl/cl-tts-api/CfUnitTypeUnit/get-by-msc?ticketId={ticket_id}"
+                res_msc = requests.get(url_msc, headers=headers, timeout=10).json()
+                if not res_msc.get("isError") and res_msc.get("data"):
+                    # Tìm đơn vị có tên SOC2 hoặc miền Nam
+                    soc_unit = next((u for u in res_msc["data"] if "soc2" in str(u.get("unitName", "")).lower() or "miền nam" in str(u.get("unitName", "")).lower()), None)
+                    if soc_unit:
+                        cl_unit_id = soc_unit.get("clUnitId", 418)
+                    else:
+                        cl_unit_id = res_msc["data"][0].get("clUnitId", 418)
+            except Exception:
+                pass
+
+        form_id = (chosen_node.get("processData") or {}).get("formId") or (curr_node.get("processData") or {}).get("formId")
+        
+        column_json = {}
+        if form_id:
+            column_json["formId"] = form_id
+        # B0: Kiểm tra tính chính xác của phân loại phiếu: True
+        column_json["b0"] = True
+        column_json["b0_kiem_tra_phan_loai"] = True
+        column_json["checkClassification"] = True
+
+        payload = {
+            "ticketFlowId": ticket_flow_id,
+            "ticketId": ticket_id,
+            "formId": form_id,
+            "processNodeInstanceId": curr_node.get("id"),
+            "processDefinitionId": step_data.get("processInstanceId"),
+            "closingContent": "Chuyển 2.4",
+            "assignContent": "Chuyển 2.4",
+            "columnJson": column_json,
+            "newTicketFlow": {
+                "ticketFlowParentId": ticket_flow_id,
+                "processDefinitionId": chosen_node.get("processInstanceId"),
+                "processDefinitionName": chosen_node.get("processInstanceName"),
+                "parentProcessNodeId": curr_node.get("id"),
+                "processNodeId": chosen_node.get("id"),
+                "processNodeName": chosen_node.get("name") or next_step_name,
+                "clUnitId": cl_unit_id if chosen_node.get("nodeType") != "endEvent" else None,
+                "clTicketStatusId": None,
+                "clProcessingSystemId": 5,
+                "precheckCode": None
+            },
+            "fileUpload": []
+        }
+
+        url_submit = "https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/ticket-processing"
+        post_res = requests.post(url_submit, headers=headers, json=payload, timeout=15).json()
+        if post_res.get("isError"):
+            return {"success": False, "message": post_res.get("message", f"Lỗi từ hệ thống TTS khi chuyển sang bước {next_step_name}")}
+
+        # 4. Cập nhật trạng thái phiếu trong DB tickets.db
+        try:
+            from db_manager import get_db_connection
+            conn = get_db_connection()
+            conn.execute("""
+                UPDATE tickets 
+                SET ticket_status = 'Đã chuyển 2.4', closed_by = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
+            """, (actor_name, ticket_id, f"{ticket_code}%", phone))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "step_name": next_step_name,
+            "actor": actor_name,
+            "message": f"✅ [{actor_name}] Đã chuyển phiếu {ticket_code or ticket_id} ({phone}) sang bước '{next_step_name}' thành công!"
+        }
+    except Exception as e:
+        return {"success": False, "message": f"Lỗi ngoại lệ khi chuyển bước 2.4: {str(e)}"}
+

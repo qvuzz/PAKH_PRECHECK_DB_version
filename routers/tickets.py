@@ -745,3 +745,71 @@ async def precheck_one_ticket(request: Request):
     except Exception as ex_pre:
         state.log("WARN", f"⚠️ Lỗi tiền kiểm tra cho {phone}: {ex_pre}")
         return {"success": False, "error": str(ex_pre)}
+
+
+@router.post("/tickets/move_to_2_4")
+async def move_ticket_to_step_2_4(request: Request):
+    """
+    API tiếp nhận yêu cầu chuyển phiếu TTS Mới từ bước 2.3 sang bước 2.4.
+    """
+    body = await request.json()
+    phone = str(body.get("phone") or "").strip()
+    ticket_code = str(body.get("ticket_code") or "").strip()
+    clean_code = ticket_code.split("\n")[0].strip()
+    if clean_code.endswith(".0") and clean_code[:-2].isdigit():
+        clean_code = clean_code[:-2]
+
+    ticket_id = body.get("ticket_id")
+    flow_id = body.get("flow_id")
+    client_tok = (body.get("token") or "").strip()
+
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    is_local = client_ip in ("127.0.0.1", "localhost", "::1")
+
+    from ttsnew_api import fetch_active_tickets, api_move_step_2_3_to_2_4
+    tok, ktv_user = resolve_ttsnew_token(client_ip, is_local, client_tok)
+    if not tok:
+        return {
+            "success": False,
+            "message": "Không tìm thấy phiên đăng nhập TTS Mới. Vui lòng kết nối tài khoản KTV trên thanh công cụ trước khi chuyển bước!"
+        }
+
+    ktv_name = ktv_user.get("displayName") or ktv_user.get("userName") or "Kỹ thuật viên"
+
+    # Nếu thiếu flow_id hoặc ticket_id, tra cứu từ active tickets trên OneOSS
+    if not flow_id or not ticket_id:
+        try:
+            raw_active = fetch_active_tickets(tok, limit=1000)
+            for r_it in raw_active:
+                r_code = str(r_it.get("ticketCode") or "")
+                r_phone = str(r_it.get("phone") or r_it.get("contactPhone") or "")
+                if (ticket_id and str(r_it.get("ticketId")) == str(ticket_id)) or \
+                   (clean_code and clean_code in r_code) or \
+                   (phone and phone in r_phone or phone in str(r_it)):
+                    flow_id = r_it.get("id")
+                    ticket_id = r_it.get("ticketId")
+                    break
+        except Exception:
+            pass
+
+    if not flow_id or not ticket_id:
+        return {
+            "success": False,
+            "message": f"Không tìm thấy luồng xử lý (flow_id/ticket_id) của phiếu {clean_code or phone} trên hệ thống TTS Mới."
+        }
+
+    state.log("STEP", f"Đang gửi yêu cầu chuyển bước 2.4 cho phiếu {clean_code or phone} bởi [{ktv_name}]...")
+    res = api_move_step_2_3_to_2_4(
+        token=tok,
+        ticket_flow_id=int(flow_id),
+        ticket_id=int(ticket_id),
+        phone=phone,
+        ticket_code=clean_code
+    )
+
+    if res.get("success"):
+        state.log("SUCCESS", res.get("message", f"✅ Đã chuyển phiếu {clean_code} sang bước 2.4"))
+    else:
+        state.log("WARN", f"⚠️ {res.get('message', 'Lỗi chuyển bước 2.4')}")
+
+    return res

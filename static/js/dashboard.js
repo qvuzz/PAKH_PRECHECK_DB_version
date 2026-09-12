@@ -1898,6 +1898,41 @@ function renderTicketsTable(force = false) {
                         `;
             }
 
+            // Nút "Chuyển 2.4" cho phiếu bước 2.3 của TTS Mới (áp dụng cho Mobile Internet & Cuộc gọi)
+            const isEligibleModule24 = (currentService === 'data' || currentService === 'call' || (!currentService && isDataTicket));
+            const isStep2_3 = (stepName && stepName.includes('2.3')) || 
+                              (t.ticket_code && t.ticket_code.includes('2.3')) || 
+                              (procName && procName.includes('2.3')) ||
+                              (t.step_name && t.step_name.includes('2.3'));
+            const isClosedTicket = (t.ticket_status === 'Đã đóng' || t.ticket_status === 'Da dong');
+            const isMoved24 = (t.ticket_status === 'Đã chuyển 2.4');
+
+            let move24Html = '';
+            let compactMove24Html = '';
+
+            if (isTtsNew && isEligibleModule24 && !isClosedTicket) {
+                if (isMoved24) {
+                    move24Html = `<div style="margin-top:5px;"><span class="badge-status" style="background:#e0e7ff; color:#4338ca; border:1px solid #c7d2fe; font-size:9.5px; padding:2px 6px; font-weight:700; border-radius:3px;">ĐÃ CHUYỂN 2.4</span></div>`;
+                    compactMove24Html = `<span class="badge-status" style="background:#e0e7ff; color:#4338ca; border:1px solid #c7d2fe; font-size:9px; padding:1px 4px; font-weight:700; border-radius:3px; margin-left:4px;">ĐÃ 2.4</span>`;
+                } else if (isStep2_3) {
+                    move24Html = `
+                        <div style="margin-top:5px;">
+                            <button type="button" class="btn-move-2-4" onclick="handleMoveToStep24('${escapeHtml(mainCode)}', '${t.phone}', '${t.ticket_id || ''}', '${t.flow_id || ''}', this)" title="Chuyển phiếu từ bước 2.3 sang bước 2.4 (SOC2)">
+                                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                Chuyển 2.4
+                            </button>
+                        </div>
+                    `;
+                    compactMove24Html = `
+                        <div style="margin-top:3px;">
+                            <button type="button" class="btn-move-2-4-sm" onclick="handleMoveToStep24('${escapeHtml(mainCode)}', '${t.phone}', '${t.ticket_id || ''}', '${t.flow_id || ''}', this)" title="Chuyển phiếu từ bước 2.3 sang bước 2.4 (SOC2)">
+                                Chuyển 2.4 ↗
+                            </button>
+                        </div>
+                    `;
+                }
+            }
+
             ticketCodeHtml = `
                         <div>
                             <span style="color:#0f172a; font-weight:700; font-size:11.5px;">
@@ -1905,6 +1940,7 @@ function renderTicketsTable(force = false) {
                             </span>
                             ${extraHtml}
                             ${reopenBadgeHtml}
+                            ${move24Html}
                         </div>
                     `;
 
@@ -1926,7 +1962,7 @@ function renderTicketsTable(force = false) {
 
             compactTicketCodeHtml = `
                         <div style="display:flex; flex-direction:column; justify-content:center; gap:2px; padding:2px 0; min-width:155px;">
-                            <!-- Dòng 1: Mã phiếu trọn vẹn + Reopen badge -->
+                            <!-- Dòng 1: Mã phiếu trọn vẹn + Reopen badge + Chuyển 2.4 -->
                             <div style="display:flex; align-items:center; gap:5px; line-height:1.2; white-space:nowrap;">
                                 <span style="color:#0f172a; font-weight:700; font-size:11.5px; font-family:'JetBrains Mono', monospace; white-space:nowrap; letter-spacing:-0.2px;" title="Mã phiếu: ${escapeHtml(mainCode)}">
                                     ${escapeHtml(mainCode)}
@@ -1947,6 +1983,8 @@ function renderTicketsTable(force = false) {
                                     : `<span style="color:#94a3b8; font-size:10px; font-style:italic;">--</span>`
                                 }
                             </div>
+                            <!-- Dòng 4: Nút Chuyển 2.4 nếu ở bước 2.3 -->
+                            ${compactMove24Html}
                         </div>
                     `;
         }
@@ -2489,6 +2527,69 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
         if (btnElem) {
             btnElem.disabled = false;
             btnElem.innerHTML = originalHtml;
+            btnElem.style.opacity = '1';
+        }
+    }
+}
+
+async function handleMoveToStep24(ticketCode, phone, ticketId, flowId, btnElem) {
+    if (btnElem && btnElem.disabled) return;
+
+    const ttsNewToken = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+    if (!ttsNewToken && !isSystemAdmin) {
+        alert("⚠️ Bạn chưa kết nối tài khoản TTS Mới. Vui lòng bấm vào nút 'TTS (MỚI)' trên thanh công cụ để đăng nhập trước khi chuyển bước!");
+        if (typeof openTtsNewModal === 'function') openTtsNewModal();
+        return;
+    }
+
+    const confirmMsg = `XÁC NHẬN CHUYỂN BƯỚC 2.4 (TTS MỚI):\n\n` +
+        `• Mã phiếu: ${ticketCode}\n` +
+        `• Số điện thoại: ${phone}\n` +
+        `• Chuyển từ: Bước 2.3  ➔  Bước: 2.4 Đánh giá, báo cáo tình hình xử lý\n` +
+        `• Đơn vị nhận: Trung tâm Vận hành khai thác mạng Khu vực miền Nam/Tổ Dịch vụ (SOC2)\n` +
+        `• Nội dung xử lý & chuyển giao: "Chuyển 2.4"\n\n` +
+        `Bạn có chắc chắn muốn chuyển phiếu này sang bước 2.4 không?`;
+
+    if (!confirm(confirmMsg)) return;
+
+    const origHtml = btnElem ? btnElem.innerHTML : '';
+    if (btnElem) {
+        btnElem.disabled = true;
+        btnElem.innerHTML = `<span class="status-dot processing" style="width:7px; height:7px; display:inline-block;"></span> Đang chuyển...`;
+        btnElem.style.opacity = '0.75';
+    }
+
+    try {
+        const res = await fetch('/api/tickets/move_to_2_4', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ticket_code: ticketCode,
+                phone: phone,
+                ticket_id: ticketId || null,
+                flow_id: flowId || null,
+                token: ttsNewToken || ''
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            alert(data.message || `Đã chuyển thành công phiếu ${ticketCode} sang bước 2.4!`);
+            lastTicketsSignature = "";
+            await loadTickets(true);
+            await fetchStatus();
+        } else {
+            alert("Lỗi chuyển bước: " + (data.message || "Không thể chuyển bước 2.4"));
+            if (btnElem) {
+                btnElem.disabled = false;
+                btnElem.innerHTML = origHtml;
+                btnElem.style.opacity = '1';
+            }
+        }
+    } catch (err) {
+        alert("Lỗi kết nối khi gửi yêu cầu chuyển bước: " + err);
+        if (btnElem) {
+            btnElem.disabled = false;
+            btnElem.innerHTML = origHtml;
             btnElem.style.opacity = '1';
         }
     }
