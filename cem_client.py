@@ -99,7 +99,7 @@ class CEMClient:
         self.last_auth_error = False
         self.api_key = api_key or os.getenv("CEM_API_KEY", DEFAULT_API_KEY)
         self.session = requests.Session()
-        self.session.mount("https://", LegacySSLAdapter())
+        self.session.mount("https://", LegacySSLAdapter(pool_connections=20, pool_maxsize=20))
         self.load_cookies_from_chrome(driver=driver)
 
     def load_cookies_from_chrome(self, driver=None):
