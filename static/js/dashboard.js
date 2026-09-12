@@ -18,6 +18,21 @@ function escapeHtml(str) {
         .replace(/'/g, '&#039;');
 }
 
+// Cập nhật số lượng và hiệu ứng chớp đỏ khi có phiếu mới ở từng module Loại PAKH
+function updateNavBadge(elem, count) {
+    if (!elem) return;
+    const num = parseInt(count) || 0;
+    elem.innerText = num;
+    const navItem = elem.closest('.nav-item');
+    if (num > 0) {
+        elem.classList.add('has-new');
+        if (navItem) navItem.classList.add('has-new-tickets');
+    } else {
+        elem.classList.remove('has-new');
+        if (navItem) navItem.classList.remove('has-new-tickets');
+    }
+}
+
 function updateModeUI(autoClose) {
     currentAutoClose = !!autoClose;
     const chk = document.getElementById('chkAutoClose');
@@ -252,15 +267,15 @@ async function fetchStatus() {
             const bTotalClosed = document.getElementById('badgeTotalClosed');
             const bTotalAll = document.getElementById('badgeTotalAll');
 
-            if (bOldData) bOldData.innerText = sc.tts_old_data || 0;
-            if (bOldVoice) bOldVoice.innerText = sc.tts_old_voice || 0;
-            if (bOldApiData) bOldApiData.innerText = sc.tts_old_api_data || 0;
-            if (bOldApiVoice) bOldApiVoice.innerText = sc.tts_old_api_voice || 0;
-            if (bNewData) bNewData.innerText = sc.tts_new_data || 0;
-            if (bNewCall) bNewCall.innerText = sc.tts_new_call || 0;
-            if (bNewSms) bNewSms.innerText = sc.tts_new_sms || 0;
-            if (bNewOther) bNewOther.innerText = sc.tts_new_other || 0;
-            if (bNewVoice) bNewVoice.innerText = sc.tts_new_voice || 0;
+            updateNavBadge(bOldData, sc.tts_old_data);
+            updateNavBadge(bOldVoice, sc.tts_old_voice);
+            updateNavBadge(bOldApiData, sc.tts_old_api_data);
+            updateNavBadge(bOldApiVoice, sc.tts_old_api_voice);
+            updateNavBadge(bNewData, sc.tts_new_data);
+            updateNavBadge(bNewCall, sc.tts_new_call);
+            updateNavBadge(bNewSms, sc.tts_new_sms);
+            updateNavBadge(bNewOther, sc.tts_new_other);
+            updateNavBadge(bNewVoice, sc.tts_new_voice);
             if (bTotalClosed) bTotalClosed.innerText = sc.total_closed || 0;
             if (bTotalAll) bTotalAll.innerText = sc.total_all || 0;
 
@@ -1065,15 +1080,15 @@ async function loadTickets(force = false, resetPage = false) {
             const bTotalClosed = document.getElementById('badgeTotalClosed');
             const bTotalAll = document.getElementById('badgeTotalAll');
 
-            if (bOldData) bOldData.innerText = sc.tts_old_data || 0;
-            if (bOldVoice) bOldVoice.innerText = sc.tts_old_voice || 0;
-            if (bOldApiData) bOldApiData.innerText = sc.tts_old_api_data || 0;
-            if (bOldApiVoice) bOldApiVoice.innerText = sc.tts_old_api_voice || 0;
-            if (bNewData) bNewData.innerText = sc.tts_new_data || 0;
-            if (bNewCall) bNewCall.innerText = sc.tts_new_call || 0;
-            if (bNewSms) bNewSms.innerText = sc.tts_new_sms || 0;
-            if (bNewOther) bNewOther.innerText = sc.tts_new_other || 0;
-            if (bNewVoice) bNewVoice.innerText = sc.tts_new_voice || 0;
+            updateNavBadge(bOldData, sc.tts_old_data);
+            updateNavBadge(bOldVoice, sc.tts_old_voice);
+            updateNavBadge(bOldApiData, sc.tts_old_api_data);
+            updateNavBadge(bOldApiVoice, sc.tts_old_api_voice);
+            updateNavBadge(bNewData, sc.tts_new_data);
+            updateNavBadge(bNewCall, sc.tts_new_call);
+            updateNavBadge(bNewSms, sc.tts_new_sms);
+            updateNavBadge(bNewOther, sc.tts_new_other);
+            updateNavBadge(bNewVoice, sc.tts_new_voice);
             if (bTotalClosed) bTotalClosed.innerText = sc.total_closed || 0;
             if (bTotalAll) bTotalAll.innerText = sc.total_all || 0;
 
@@ -1948,9 +1963,11 @@ function renderTicketsTable(force = false) {
             pakhBadgeStyle = 'background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;';
         }
 
+        const isNewPending = (t.status === 'CHỜ TIỀN KIỂM' || !t.comment);
+        const newBeacon = (isNewPending && t.ticket_status !== 'Đã đóng') ? '<span class="pulse-red-dot" title="Phiếu mới cần xử lý"></span>' : '';
         let compactPakhTypeHtml = (displayPakhType === '--')
             ? '<span style="color:#94a3b8; font-size:11px;">--</span>'
-            : `<span class="badge-status" style="${pakhBadgeStyle} font-size:9.5px; font-weight:700; padding:2px 6px; border-radius:3px; display:inline-block; max-width:100%; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${escapeHtml(rawPakhType || displayPakhType)}">${escapeHtml(displayPakhType)}</span>`;
+            : `<span class="badge-status" style="${pakhBadgeStyle} font-size:9.5px; font-weight:700; padding:2px 6px; border-radius:3px; display:inline-flex; align-items:center; max-width:100%; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${escapeHtml(rawPakhType || displayPakhType)}">${newBeacon}${escapeHtml(displayPakhType)}</span>`;
 
         return `
                     <!-- 1 DÒNG GỌN CHÍNH (COMPACT ROW) -->

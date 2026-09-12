@@ -3,6 +3,7 @@
 # Quy tắc: Giữ SAPC, CEM chỉ lấy Cell/Trạm (bỏ lưu lượng MB & App events), bỏ BTools.
 
 import os
+import re
 import json
 from datetime import datetime
 from pathlib import Path
