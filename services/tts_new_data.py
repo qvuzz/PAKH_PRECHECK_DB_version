@@ -110,104 +110,8 @@ def execute_tts_new_data_cycle():
             created_time_str = str(ticket.get("created_time", "")).strip()
 
             state.current_step = f"Tra cứu thuê bao {idx}/{total_tickets}: {phone_84}"
-            state.log("INFO", f"[{idx}/{total_tickets}] Đang tra cứu thuê bao: {phone_84} ({ticket_code} - {title})")
 
-            # Tra cứu BTools (chạy ngầm tự động)
-            raw_btools_data = extract_btools_single_phone(driver, phone_84, start_d, end_d)
-            clean_data = standardize_btools_data(raw_btools_data)
-
-            # Lưu file JSON vào number/ (hoặc fallback dùng lại dữ liệu BTools chu kỳ trước nếu lần này lỗi)
-            output_dir = str(BASE_DIR / "number")
-            os.makedirs(output_dir, exist_ok=True)
-            json_filename = os.path.join(output_dir, f"{phone_84}.json")
-            if clean_data is None and os.path.exists(json_filename):
-                try:
-                    with open(json_filename, "r", encoding="utf-8") as jf:
-                        cached = json.load(jf)
-                        cached_data = cached.get("btools_technical_data") or cached.get("data")
-                        if cached_data:
-                            clean_data = cached_data
-                            state.log("INFO", f"   ↳ 🔄 Tạm dùng dữ liệu BTools đã lưu từ chu kỳ trước cho {phone_84}")
-                except Exception:
-                    pass
-
-            if clean_data is not None:
-                with open(json_filename, "w", encoding="utf-8") as jf:
-                    json.dump({
-                        "phone": phone_84,
-                        "package_title": title,
-                        "ticket_content": content,
-                        "title": title,
-                        "content": content,
-                        "ticket_code": ticket_code,
-                        "btools_technical_data": clean_data,
-                        "data": clean_data
-                    }, jf, ensure_ascii=False, indent=2)
-
-            # Tra SAPC + HSS Profile
-            if sapc_client is not None:
-                try:
-                    raw_sapc_data = sapc_client.query(phone_84)
-                    sapc_result = convert_sapc_response(raw_sapc_data)
-                except Exception as e:
-                    sapc_result = {"msisdn": phone_84, "packages": []}
-
-                info_result = tra_cell_tu_so_dien_thoai(phone_84, session=sapc_client.session)
-                hss_output_dir = str(BASE_DIR / "output")
-                os.makedirs(hss_output_dir, exist_ok=True)
-                with open(os.path.join(hss_output_dir, f"{phone_84}.json"), "w", encoding="utf-8") as hf:
-                    json.dump({
-                        **sapc_result,
-                        "subscriber_info": info_result,
-                        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }, hf, ensure_ascii=False, indent=4)
-
-                # Kiểm tra hành vi bổ sung Case 2: Nếu gói ĐK trước 5 ngày và BTools 5 ngày không có data
-                try:
-                    from report_bot import get_sapc_package_validity
-                    from crawler_btools import fetch_supplementary_btools_if_needed
-                    active_pkgs, _ = get_sapc_package_validity(phone_84)
-                    commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date")]
-                    earliest_reg_dt = min([p["reg_dt"] for p in commercial_pkgs if p.get("reg_dt")], default=None)
-                    start_scan_date = (datetime.now() - timedelta(days=4)).date()
-                    if earliest_reg_dt and earliest_reg_dt.date() < start_scan_date:
-                        clean_data = fetch_supplementary_btools_if_needed(driver, phone_84, clean_data, earliest_reg_dt, start_scan_date)
-                except Exception as ex_case2:
-                    state.log("WARN", f"Lỗi tra cứu bổ sung Case 2: {ex_case2}")
-
-            # Tra cứu CEM & App Usage
-            cem_records = []
-            app_events = []
-            cem_data_str = "Không có dữ liệu CEM"
-            app_usage_str = "Không có dữ liệu App Usage"
-
-            try:
-                if cem_client is None:
-                    cem_client = CEMClient(driver=driver)
-                cem_records = cem_client.get_subscriber_history_5days(phone_84, days=5)
-                app_events = cem_client.get_subscriber_app_events(phone_84, days=5)
-                cem_data_str = CEMClient.extract_top_cells_summary(cem_records, app_events=app_events)
-                app_usage_str = CEMClient.extract_top_apps_summary(app_events)
-
-                save_cem_data_to_file(phone_84, cem_records, app_events, base_dir=BASE_DIR)
-            except Exception as ex_cem:
-                cem_data_str = f"Lỗi CEM: {ex_cem}"
-
-            # Tóm tắt thông tin bằng AI / NLP Offline
-            ai_summary = analyze_ticket_with_ai(json_filename)
-
-            # Kiểm tra THÔNG TIN MỞ LẠI TTS / Số lần mở lại
-            reopen_count = int(ticket.get("reopen_count") or 0)
-            last_reopened_date = str(ticket.get("last_reopened_date") or "").strip()
-            if reopen_count > 0:
-                reopen_warn = f"⚠️ [CẢNH BÁO: Phiếu mở lại {reopen_count} lần"
-                if last_reopened_date:
-                    reopen_warn += f" (Lần cuối: {last_reopened_date})"
-                reopen_warn += " - KHÔNG TỰ ĐỘNG ĐÓNG, yêu cầu KTV kiểm tra kỹ!]\n"
-                ai_summary = reopen_warn + (ai_summary if ai_summary and ai_summary != "null" else "")
-                state.log("WARN", f"⚠️ Phiếu {ticket_code} ({phone_84}) có THÔNG TIN MỞ LẠI TTS: Số lần mở lại = {reopen_count} -> KHÔNG TỰ ĐỘNG ĐÓNG!")
-
-            # Kiểm tra xem phiếu đã có nhận định / nội dung xử lý trong DB chưa (đặc biệt khi ở bước 2.6)
+            # Kiểm tra xem thuê bao đã có nhận định / nội dung xử lý hợp lệ trong DB chưa
             existing_db_row = None
             try:
                 conn_chk = get_db_connection()
@@ -221,40 +125,122 @@ def execute_tts_new_data_cycle():
             except Exception:
                 pass
 
-            step_name_raw = str(ticket.get("step_name") or "")
-            is_step_26 = "2.6" in step_name_raw
-
-            # Kiểm tra xem nhận định cũ trong DB có hợp lệ không (KHÔNG được tái sử dụng lỗi kết nối / chưa đăng nhập)
             def _is_valid_technical_status(st):
                 if not st:
                     return False
                 s_u = str(st).strip().upper()
-                if "LỖI KẾT NỐI" in s_u or "CHƯA ĐĂNG NHẬP" in s_u or "LỖI MÁY CHỦ" in s_u or "CHƯA PHÂN LOẠI" in s_u:
+                if "LỖI KẾT NỐI" in s_u or "CHƯA ĐĂNG NHẬP" in s_u or "LỖI MÁY CHỦ" in s_u or "CHƯA PHÂN LOẠI" in s_u or "CHỜ TIỀN KIỂM" in s_u:
                     return False
                 return True
 
             can_reuse_db = (
-                is_step_26 
-                and existing_db_row 
+                existing_db_row 
                 and existing_db_row["comment"] 
                 and _is_valid_technical_status(existing_db_row["status"])
             )
 
+            # Kiểm tra THÔNG TIN MỞ LẠI TTS / Số lần mở lại
+            reopen_count = int(ticket.get("reopen_count") or 0)
+            last_reopened_date = str(ticket.get("last_reopened_date") or "").strip()
+
             if can_reuse_db:
-                state.log("INFO", f"   ↳ 📋 Phiếu tại bước 2.6 kế thừa nhận định kỹ thuật chuẩn từ vòng 1: [{existing_db_row['status']}]")
+                state.log("INFO", f"   ↳ 📋 Thuê bao {phone_84} ({ticket_code}) đã có kết quả trong DB: [{existing_db_row['status']}]. Kế thừa hiển thị.")
                 status = existing_db_row["status"]
                 comment = existing_db_row["comment"]
                 action_plan = existing_db_row["action_plan"] or ""
                 color = existing_db_row["color"] or "#4CAF50"
-                real_pkgs_str = existing_db_row["real_packages"] or ""
-                final_packages_str = real_pkgs_str
+                final_packages_str = existing_db_row["real_packages"] or ""
                 rat_types_string = existing_db_row["rat_types"] or ""
                 cem_data_str = existing_db_row["cem_data"] or ""
                 app_usage_str = existing_db_row["app_usage"] or ""
                 ai_summary = existing_db_row["ai_summary"] or ""
-                reopen_count = int(ticket.get("reopen_count") or 0)
-                last_reopened_date = str(ticket.get("last_reopened_date") or "").strip()
             else:
+                state.log("INFO", f"[{idx}/{total_tickets}] Đang tra cứu Core cho thuê bao mới: {phone_84} ({ticket_code} - {title})")
+
+                # Tra cứu BTools (chạy ngầm tự động)
+                raw_btools_data = extract_btools_single_phone(driver, phone_84, start_d, end_d)
+                clean_data = standardize_btools_data(raw_btools_data)
+
+                # Lưu file JSON vào number/ (hoặc fallback dùng lại dữ liệu BTools chu kỳ trước nếu lần này lỗi)
+                output_dir = str(BASE_DIR / "number")
+                os.makedirs(output_dir, exist_ok=True)
+                json_filename = os.path.join(output_dir, f"{phone_84}.json")
+                if clean_data is None and os.path.exists(json_filename):
+                    try:
+                        with open(json_filename, "r", encoding="utf-8") as jf:
+                            cached = json.load(jf)
+                            cached_data = cached.get("btools_technical_data") or cached.get("data")
+                            if cached_data:
+                                clean_data = cached_data
+                                state.log("INFO", f"   ↳ 🔄 Tạm dùng dữ liệu BTools đã lưu từ chu kỳ trước cho {phone_84}")
+                    except Exception:
+                        pass
+
+                if clean_data is not None:
+                    with open(json_filename, "w", encoding="utf-8") as jf:
+                        json.dump({
+                            "phone": phone_84,
+                            "package_title": title,
+                            "ticket_content": content,
+                            "title": title,
+                            "content": content,
+                            "ticket_code": ticket_code,
+                            "btools_technical_data": clean_data,
+                            "data": clean_data
+                        }, jf, ensure_ascii=False, indent=2)
+
+                # Tra SAPC + HSS Profile
+                if sapc_client is not None:
+                    try:
+                        raw_sapc_data = sapc_client.query(phone_84)
+                        sapc_result = convert_sapc_response(raw_sapc_data)
+                    except Exception as e:
+                        sapc_result = {"msisdn": phone_84, "packages": []}
+
+                    info_result = tra_cell_tu_so_dien_thoai(phone_84, session=sapc_client.session)
+                    hss_output_dir = str(BASE_DIR / "output")
+                    os.makedirs(hss_output_dir, exist_ok=True)
+                    with open(os.path.join(hss_output_dir, f"{phone_84}.json"), "w", encoding="utf-8") as hf:
+                        json.dump({
+                            **sapc_result,
+                            "subscriber_info": info_result,
+                            "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }, hf, ensure_ascii=False, indent=4)
+
+                    # Kiểm tra hành vi bổ sung Case 2: Nếu gói ĐK trước 5 ngày và BTools 5 ngày không có data
+                    try:
+                        from report_bot import get_sapc_package_validity
+                        from crawler_btools import fetch_supplementary_btools_if_needed
+                        active_pkgs, _ = get_sapc_package_validity(phone_84)
+                        commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date")]
+                        earliest_reg_dt = min([p["reg_dt"] for p in commercial_pkgs if p.get("reg_dt")], default=None)
+                        start_scan_date = (datetime.now() - timedelta(days=4)).date()
+                        if earliest_reg_dt and earliest_reg_dt.date() < start_scan_date:
+                            clean_data = fetch_supplementary_btools_if_needed(driver, phone_84, clean_data, earliest_reg_dt, start_scan_date)
+                    except Exception as ex_case2:
+                        state.log("WARN", f"Lỗi tra cứu bổ sung Case 2: {ex_case2}")
+
+                # Tra cứu CEM & App Usage
+                cem_records = []
+                app_events = []
+                cem_data_str = "Không có dữ liệu CEM"
+                app_usage_str = "Không có dữ liệu App Usage"
+
+                try:
+                    if cem_client is None:
+                        cem_client = CEMClient(driver=driver)
+                    cem_records = cem_client.get_subscriber_history_5days(phone_84, days=5)
+                    app_events = cem_client.get_subscriber_app_events(phone_84, days=5)
+                    cem_data_str = CEMClient.extract_top_cells_summary(cem_records, app_events=app_events)
+                    app_usage_str = CEMClient.extract_top_apps_summary(app_events)
+
+                    save_cem_data_to_file(phone_84, cem_records, app_events, base_dir=BASE_DIR)
+                except Exception as ex_cem:
+                    cem_data_str = f"Lỗi CEM: {ex_cem}"
+
+                # Tóm tắt thông tin bằng AI / NLP Offline
+                ai_summary = analyze_ticket_with_ai(json_filename)
+
                 # Phân tích kịch bản mới dựa trên Core / BTools / CEM vừa cào
                 status, comment, action_plan, color = analyze_subscriber_status(
                     clean_data, title, content, phone_84=phone_84, cem_records=cem_records, app_events=app_events, incident_time_str=incident_time_str, driver=driver
@@ -282,6 +268,14 @@ def execute_tts_new_data_cycle():
                             real_pkgs.add(sc)
                 real_pkgs_str = ", ".join(list(real_pkgs)) if real_pkgs else "Không phát sinh gói TM"
                 final_packages_str = get_formatted_sapc_packages(phone_84, fallback_btools=real_pkgs_str)
+
+            if reopen_count > 0:
+                reopen_warn = f"⚠️ [CẢNH BÁO: Phiếu mở lại {reopen_count} lần"
+                if last_reopened_date:
+                    reopen_warn += f" (Lần cuối: {last_reopened_date})"
+                reopen_warn += " - KHÔNG TỰ ĐỘNG ĐÓNG, yêu cầu KTV kiểm tra kỹ!]\n"
+                ai_summary = reopen_warn + (ai_summary if ai_summary and ai_summary != "null" else "")
+                state.log("WARN", f"⚠️ Phiếu {ticket_code} ({phone_84}) có THÔNG TIN MỞ LẠI TTS: Số lần mở lại = {reopen_count} -> KHÔNG TỰ ĐỘNG ĐÓNG!")
 
             rec = {
                 "phone": phone_84,

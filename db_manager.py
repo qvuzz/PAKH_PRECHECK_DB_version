@@ -269,6 +269,31 @@ def save_or_update_ticket(t):
                         ticket_status = "Đã đóng"
                     if not ai_summary and "ai_summary" in existing.keys():
                         ai_summary = existing["ai_summary"] or ""
+
+                    # BẢO VỆ DỮ LIỆU TIỀN KIỂM ĐÃ CÓ TRONG DATABASE:
+                    # Nếu bản ghi cũ đã có kết quả phân tích kỹ thuật hợp lệ, và bản ghi mới là dữ liệu thô / CHỜ TIỀN KIỂM
+                    # thì kế thừa và hiển thị theo kết quả Database cũ, không bị ghi đè thành rỗng.
+                    has_valid_old = (
+                        existing["comment"] 
+                        and existing["status"] not in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI", None, "")
+                    )
+                    is_incoming_unprocessed = (
+                        not comment 
+                        or t.get("status") in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI", None, "")
+                    )
+                    if has_valid_old and is_incoming_unprocessed:
+                        t["status"] = existing["status"]
+                        t["color"] = existing["color"] or "green"
+                        comment = existing["comment"]
+                        action_plan = existing["action_plan"] or action_plan
+                        if existing["real_packages"] and existing["real_packages"] != "--":
+                            t["real_packages"] = existing["real_packages"]
+                        if existing["rat_types"] and existing["rat_types"] != "--":
+                            t["rat_types"] = existing["rat_types"]
+                        if existing["cem_data"] and existing["cem_data"] != "--":
+                            t["cem_data"] = existing["cem_data"]
+                        if existing["app_usage"] and existing["app_usage"] != "--":
+                            t["app_usage"] = existing["app_usage"]
         
                 reopen_count = int(t.get("reopen_count") or 0)
                 last_reopened_date = str(t.get("last_reopened_date") or "").strip()

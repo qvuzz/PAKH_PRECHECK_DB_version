@@ -121,18 +121,17 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                 is_step_26 = ("2.6" in step_name_raw) or (t.get("ticket_status") == "Chờ đóng lần 2")
 
                 existing_db_row = None
-                if is_step_26:
-                    try:
-                        conn_chk = get_db_connection()
-                        existing_db_row = conn_chk.execute("""
-                            SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary
-                            FROM tickets 
-                            WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
-                            ORDER BY updated_at DESC LIMIT 1
-                        """, (t.get("ticket_id"), f"{code}%", phone_84)).fetchone()
-                        conn_chk.close()
-                    except Exception:
-                        pass
+                try:
+                    conn_chk = get_db_connection()
+                    existing_db_row = conn_chk.execute("""
+                        SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary
+                        FROM tickets 
+                        WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
+                        ORDER BY updated_at DESC LIMIT 1
+                    """, (t.get("ticket_id"), f"{code}%", phone_84)).fetchone()
+                    conn_chk.close()
+                except Exception:
+                    pass
 
                 def _is_valid_technical_status(st):
                     if not st:
@@ -143,14 +142,13 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                     return True
 
                 can_reuse_db = (
-                    is_step_26 
-                    and existing_db_row 
+                    existing_db_row 
                     and existing_db_row["comment"] 
                     and _is_valid_technical_status(existing_db_row["status"])
                 )
 
                 if can_reuse_db:
-                    state.log("INFO", f"   ↳ 📋 Phiếu tại bước 2.6 kế thừa nhận định kỹ thuật từ vòng 1: [{existing_db_row['status']}]")
+                    state.log("INFO", f"   ↳ 📋 Thuê bao {phone_84} đã có kết quả tiền kiểm trong DB: [{existing_db_row['status']}]. Giữ nguyên hiển thị.")
                     eval_res = {
                         "status": existing_db_row["status"],
                         "color": existing_db_row["color"] or "green",
