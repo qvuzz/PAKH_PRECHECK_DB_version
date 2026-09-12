@@ -28,7 +28,7 @@ DEFAULT_API_KEY = "net_ktm_quangvu%6kvjpF82DYQPjgqJHyhGow6iGA5IPaxQO9klaxm6"
 CEM_API_KEY = os.getenv("CEM_API_KEY", DEFAULT_API_KEY)
 
 CEM_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json",
     "Origin": "https://cem.vnptmedia.vn",

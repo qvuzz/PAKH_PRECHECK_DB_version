@@ -272,10 +272,36 @@ def get_chrome_debug_driver():
         return None
 
 
+CEM_CACHE_FILE = os.path.join(os.path.dirname(__file__), "cem_auth_cache.json")
+
+def _save_cem_cache(api_key: str, cookies_dict: dict):
+    if not api_key:
+        return
+    try:
+        import time
+        with open(CEM_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"api_key": api_key, "cookies": cookies_dict, "updated_at": time.time()}, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+def _load_cem_cache():
+    if os.path.exists(CEM_CACHE_FILE):
+        try:
+            with open(CEM_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("api_key"), data.get("cookies", {})
+        except Exception:
+            pass
+    return None, {}
+
+
 def get_universal_cem_auth(driver=None):
     """
-    Trích xuất tự động apikey và cookies của CEM VNPT Media từ bất kỳ trình duyệt nào
-    (Firefox session recovery.jsonlz4, Chrome CDP, Edge, hoặc browser_cookie3).
+    Trích xuất tự động apikey và cookies của CEM VNPT Media từ bất kỳ trình duyệt nào:
+    1. Chrome debug driver / Chrome port 9222 (ưu tiên cao nhất, tức thì trong RAM).
+    2. Firefox cookies.sqlite (tự động đọc profile mới nhất).
+    3. Browser_cookie3 (quét Edge, Chrome, Firefox).
+    4. Cache file cem_auth_cache.json (phòng trường hợp đã đóng trình duyệt).
     Trả về tuple: (api_key, cookies_dict)
     """
     import urllib.parse
@@ -292,6 +318,7 @@ def get_universal_cem_auth(driver=None):
                     if c["name"] == "apikey":
                         api_key = urllib.parse.unquote(c["value"])
             if api_key:
+                _save_cem_cache(api_key, cookies_dict)
                 return api_key, cookies_dict
         except Exception:
             pass
@@ -302,9 +329,22 @@ def get_universal_cem_auth(driver=None):
         cookies_dict.update(cdp_cookies)
         if "apikey" in cdp_cookies:
             api_key = urllib.parse.unquote(cdp_cookies["apikey"])
+            _save_cem_cache(api_key, cookies_dict)
             return api_key, cookies_dict
 
-    # 3. Quét qua browser_cookie3 (Firefox session cookies trong recovery.jsonlz4, Chrome, Edge)
+    # 3. Thử lấy trực tiếp từ Firefox cookies.sqlite
+    try:
+        ff_cookies = extract_firefox_cookies("vnptmedia")
+        if ff_cookies:
+            cookies_dict.update(ff_cookies)
+            if "apikey" in ff_cookies:
+                api_key = urllib.parse.unquote(ff_cookies["apikey"])
+                _save_cem_cache(api_key, cookies_dict)
+                return api_key, cookies_dict
+    except Exception:
+        pass
+
+    # 4. Quét qua browser_cookie3 (Firefox session cookies trong recovery.jsonlz4, Chrome, Edge)
     try:
         import browser_cookie3
         for loader in (browser_cookie3.firefox, browser_cookie3.edge, browser_cookie3.chrome):
@@ -315,11 +355,17 @@ def get_universal_cem_auth(driver=None):
                     if c.name == "apikey":
                         api_key = urllib.parse.unquote(c.value)
                 if api_key:
+                    _save_cem_cache(api_key, cookies_dict)
                     return api_key, cookies_dict
             except Exception:
                 continue
     except Exception:
         pass
+
+    # 5. Fallback lấy từ file cache nếu trình duyệt đang tắt hoặc chưa mở lại
+    cached_key, cached_cookies = _load_cem_cache()
+    if cached_key:
+        return cached_key, cached_cookies
 
     return api_key, cookies_dict
 
