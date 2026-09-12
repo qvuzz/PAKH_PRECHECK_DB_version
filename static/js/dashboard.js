@@ -677,12 +677,7 @@ function selectModule(sys, srv, updateUrl = true) {
         if (thCemData) thCemData.innerText = 'Trạm & Cell';
         if (thAiSummary) thAiSummary.innerText = 'Nội Dung Phản Ánh';
         if (tableTitle) {
-            tableTitle.innerHTML = `
-                <span style="display:flex; align-items:center; gap:8px;">
-                    <span>Phiếu Cuộc Gọi — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>
-                    <button class="btn-sm btn-primary" onclick="startNewVoiceScan('call')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Cuộc Gọi (${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'})</button>
-                </span>
-            `;
+            tableTitle.innerHTML = `<span>Phiếu Cuộc Gọi — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
         }
     } else if (srv === 'sms') {
         if (thCategory) thCategory.innerText = 'Loại Tin Nhắn';
@@ -691,12 +686,7 @@ function selectModule(sys, srv, updateUrl = true) {
         if (thCemData) thCemData.innerText = 'Dữ Liệu Trạm';
         if (thAiSummary) thAiSummary.innerText = 'Nội Dung Tin Nhắn';
         if (tableTitle) {
-            tableTitle.innerHTML = `
-                <span style="display:flex; align-items:center; gap:8px;">
-                    <span>Phiếu Tin Nhắn — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>
-                    <button class="btn-sm btn-primary" onclick="startNewVoiceScan('sms')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Tin Nhắn (${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'})</button>
-                </span>
-            `;
+            tableTitle.innerHTML = `<span>Phiếu Tin Nhắn — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
         }
     } else if (srv === 'other') {
         if (thCategory) thCategory.innerText = 'Loại PAKH';
@@ -705,12 +695,7 @@ function selectModule(sys, srv, updateUrl = true) {
         if (thCemData) thCemData.innerText = 'Dữ Liệu CEM';
         if (thAiSummary) thAiSummary.innerText = 'Nội Dung Phản Ánh';
         if (tableTitle) {
-            tableTitle.innerHTML = `
-                <span style="display:flex; align-items:center; gap:8px;">
-                    <span>Phiếu Gói Cước & PA Khác — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>
-                    <button class="btn-sm btn-primary" onclick="startNewVoiceScan('other')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét PA Khác (${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'})</button>
-                </span>
-            `;
+            tableTitle.innerHTML = `<span>Phiếu Gói Cước & PA Khác — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
         }
     } else {
         // Data (Mobile Internet)
@@ -720,13 +705,7 @@ function selectModule(sys, srv, updateUrl = true) {
         if (thCemData) thCemData.innerText = 'Dữ Liệu CEM';
         if (thAiSummary) thAiSummary.innerText = 'Tóm Tắt Nội Dung PAKH';
         if (tableTitle) {
-            const scanFn = sys === 'tts_new' ? 'startTtsNewScan()' : 'runNowTtsOldApi()';
-            tableTitle.innerHTML = `
-                <span style="display:flex; align-items:center; gap:8px;">
-                    <span>Phiếu Mobile Internet — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>
-                    <button class="btn-sm btn-primary" onclick="${scanFn}" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Data (${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'})</button>
-                </span>
-            `;
+            tableTitle.innerHTML = `<span>Phiếu Mobile Internet — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
         }
     }
 
@@ -1011,34 +990,7 @@ function switchTableTab(tab) {
 
     const titleElem = document.getElementById('tableTitleText');
     if (titleElem) {
-        let scanBtnHtml = '';
-        if (currentSystem === 'tts_new') {
-            if (currentService === 'call') {
-                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startNewVoiceScan('call')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Cuộc Gọi (TTS Mới)</button>`;
-            } else if (currentService === 'sms') {
-                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startNewVoiceScan('sms')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Tin Nhắn (TTS Mới)</button>`;
-            } else if (currentService === 'other') {
-                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startNewVoiceScan('other')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét PA Khác (TTS Mới)</button>`;
-            } else if (currentService === 'data') {
-                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startTtsNewScan()" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Data (TTS Mới)</button>`;
-            }
-        } else if (currentSystem === 'tts_old_api') {
-            if (currentService === 'call') {
-                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startNewVoiceScan('call')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Cuộc Gọi (TTS Cũ)</button>`;
-            } else if (currentService === 'sms') {
-                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startNewVoiceScan('sms')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Tin Nhắn (TTS Cũ)</button>`;
-            } else if (currentService === 'other') {
-                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startNewVoiceScan('other')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét PA Khác (TTS Cũ)</button>`;
-            } else if (currentService === 'data') {
-                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="runNowTtsOldApi()" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Data (TTS Cũ)</button>`;
-            }
-        }
-        titleElem.innerHTML = `
-            <span style="display:flex; align-items:center; gap:8px;">
-                <span>${escapeHtml(title)}</span>
-                ${scanBtnHtml}
-            </span>
-        `;
+        titleElem.innerHTML = `<span>${escapeHtml(title)}</span>`;
     }
 
     loadTickets(true, true);
