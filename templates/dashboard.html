@@ -377,13 +377,13 @@
                 </div>
 
                 <!-- 2. Tick Tự đóng phiếu -->
-                <label id="ctrlAutoCloseUnified" class="ctrl-item" onclick="handleAutoCloseContainerClick(event)"
-                    style="display:flex; align-items:center; gap:5px; font-size:12px; font-weight:700; color:#dc2626; cursor:pointer; user-select:none; margin:0 3px; padding:2px 8px; border-radius:5px; border:1px solid rgba(220,38,38,0.3); background:#fef2f2;"
+                <div id="ctrlAutoCloseUnified" class="ctrl-item" onclick="handleAutoCloseClick(event)"
+                    style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:#dc2626; cursor:pointer; user-select:none; margin:0 3px; padding:3px 9px; border-radius:5px; border:1px solid rgba(220,38,38,0.3); background:#fef2f2;"
                     title="CẢNH BÁO NGUY HIỂM: Tự động đóng phiếu trên hệ thống (Chỉ dành cho Admin từ 127./localhost, cần xác nhận 2 lần)">
-                    <input type="checkbox" id="chkAutoCloseUnified" onchange="toggleAutoCloseUnified(this.checked)"
-                        style="width:15px; height:15px; accent-color:#dc2626; cursor:pointer;">
+                    <input type="checkbox" id="chkAutoCloseUnified"
+                        style="width:15px; height:15px; accent-color:#dc2626; cursor:pointer; pointer-events:none;">
                     <span id="autoCloseUnifiedLabel" style="color:#dc2626; font-weight:800; letter-spacing:0.3px;">⚠️ Tự đóng</span>
-                </label>
+                </div>
 
                 <!-- 3. Tick Lặp & ô nhập thời gian bên cạnh -->
                 <div class="ctrl-item"
@@ -841,7 +841,70 @@
 
 
 
-    <script src="/static/js/dashboard.js?v=4.0"></script>
+    <!-- MODAL XÁC NHẬN AN TOÀN 2 BƯỚC CHO TÍNH NĂNG TỰ ĐÓNG PHIẾU -->
+    <div id="modalAutoCloseConfirm" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:99999; background:rgba(15,23,42,0.65); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); align-items:center; justify-content:center;">
+        <div style="background:#ffffff; border-radius:12px; width:480px; max-width:92vw; box-shadow:0 25px 50px -12px rgba(0,0,0,0.35); border:1px solid #fecaca; overflow:hidden;">
+            
+            <!-- BƯỚC 1 -->
+            <div id="autoCloseStep1" style="padding:24px 20px;">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+                    <div style="width:44px; height:44px; border-radius:50%; background:#fef2f2; display:flex; align-items:center; justify-content:center; font-size:22px; flex-shrink:0; border:1px solid #fca5a5;">⚠️</div>
+                    <div>
+                        <h3 style="margin:0; font-size:16px; font-weight:800; color:#b91c1c;">CẢNH BÁO NGUY HIỂM (Xác nhận 1/2)</h3>
+                        <p style="margin:2px 0 0 0; font-size:12px; color:#64748b;">Kích hoạt chế độ Tự Động Đóng Phiếu</p>
+                    </div>
+                </div>
+                <div style="font-size:13px; color:#334155; line-height:1.6; background:#fff1f2; border:1px solid #ffe4e6; padding:12px 14px; border-radius:8px; margin-bottom:20px;">
+                    Bạn đang chuẩn bị bật tính năng <b>TỰ ĐỘNG ĐÓNG PHIẾU</b>!<br>
+                    Hệ thống sẽ tự động hoàn công / đóng phiếu lên CCOS/TTS sau khi tiền kiểm hợp lệ mà <b>KHÔNG cần KTV kiểm tra lại bằng tay</b>.
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:10px;">
+                    <button type="button" onclick="cancelAutoCloseModal()" style="padding:8px 16px; border-radius:6px; font-size:12.5px; font-weight:600; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; cursor:pointer;">Hủy bỏ (An toàn)</button>
+                    <button type="button" onclick="proceedToAutoCloseStep2()" style="padding:8px 16px; border-radius:6px; font-size:12.5px; font-weight:700; background:#ea580c; color:#ffffff; border:none; cursor:pointer; box-shadow:0 2px 6px rgba(234,88,12,0.3);">Tiếp tục Bước 2 →</button>
+                </div>
+            </div>
+
+            <!-- BƯỚC 2 -->
+            <div id="autoCloseStep2" style="display:none; padding:24px 20px;">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+                    <div style="width:44px; height:44px; border-radius:50%; background:#fee2e2; display:flex; align-items:center; justify-content:center; font-size:22px; flex-shrink:0; border:1px solid #ef4444;">🚨</div>
+                    <div>
+                        <h3 style="margin:0; font-size:16px; font-weight:800; color:#dc2626;">XÁC NHẬN LẦN 2 (BẮT BUỘC - 2/2)</h3>
+                        <p style="margin:2px 0 0 0; font-size:12px; color:#b91c1c; font-weight:600;">Trách nhiệm vận hành KTV</p>
+                    </div>
+                </div>
+                <div style="font-size:13px; color:#7f1d1d; line-height:1.6; background:#fef2f2; border:1px solid #fecaca; padding:12px 14px; border-radius:8px; margin-bottom:20px;">
+                    ⚠️ Việc tự động đóng phiếu có thể ảnh hưởng trực tiếp đến <b>khách hàng và chỉ số SLA dịch vụ</b> nếu tiền kiểm có sai sót.<br><br>
+                    Bạn có <b>TUYỆT ĐỐI CHẮC CHẮN</b> muốn kích hoạt Tự Động Đóng không?
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:10px;">
+                    <button type="button" onclick="cancelAutoCloseModal()" style="padding:8px 16px; border-radius:6px; font-size:12.5px; font-weight:600; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; cursor:pointer;">Quay lại / Hủy bỏ</button>
+                    <button type="button" onclick="confirmAndActivateAutoClose()" style="padding:8px 18px; border-radius:6px; font-size:12.5px; font-weight:800; background:#dc2626; color:#ffffff; border:none; cursor:pointer; box-shadow:0 3px 8px rgba(220,38,38,0.4);">⚠️ TÔI XÁC NHẬN KÍCH HOẠT</button>
+                </div>
+            </div>
+
+            <!-- CẢNH BÁO CHO MÁY TRẠM CLIENT (KHÔNG PHẢI ADMIN) -->
+            <div id="autoCloseClientBlocked" style="display:none; padding:24px 20px;">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+                    <div style="width:44px; height:44px; border-radius:50%; background:#f1f5f9; display:flex; align-items:center; justify-content:center; font-size:22px; flex-shrink:0;">⛔</div>
+                    <div>
+                        <h3 style="margin:0; font-size:16px; font-weight:800; color:#334155;">TÍNH NĂNG BỊ KHÓA TRÊN MÁY CLIENT</h3>
+                        <p style="margin:2px 0 0 0; font-size:12px; color:#64748b;">Chỉ dành cho Máy chủ Admin (Localhost / 127.0.0.1)</p>
+                    </div>
+                </div>
+                <div style="font-size:13px; color:#334155; line-height:1.6; background:#f8fafc; border:1px solid #e2e8f0; padding:12px 14px; border-radius:8px; margin-bottom:20px;">
+                    Chế độ <b>TỰ ĐỘNG ĐÓNG PHIẾU</b> chỉ được phép kích hoạt từ Máy chủ Admin (truy cập qua <code>localhost</code> hoặc IP <code>127.0.0.1</code>).<br><br>
+                    Máy trạm KTV kết nối từ xa chỉ được phép sử dụng tính năng <b>Quét phiếu & Tiền kiểm tra cứu</b>.
+                </div>
+                <div style="display:flex; justify-content:flex-end;">
+                    <button type="button" onclick="cancelAutoCloseModal()" style="padding:8px 20px; border-radius:6px; font-size:12.5px; font-weight:700; background:#005baa; color:#ffffff; border:none; cursor:pointer;">Đã hiểu</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script src="/static/js/dashboard.js?v=4.1"></script>
 </body>
 
 </html>

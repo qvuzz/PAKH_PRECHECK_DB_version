@@ -61,47 +61,79 @@ function updateModeUI(autoClose) {
     }
 }
 
-function handleAutoCloseContainerClick(e) {
-    if (!isSystemAdmin) {
-        if (e) e.preventDefault();
-        alert("⛔ TÍNH NĂNG BỊ KHÓA:\n\nChế độ [TỰ ĐỘNG ĐÓNG PHIẾU] chỉ cho phép kích hoạt từ Máy chủ Admin (truy cập qua localhost hoặc IP 127.x.x.x).\n\nMáy trạm KTV kết nối từ xa chỉ được phép Quét & Tiền kiểm tra cứu!");
-    }
-}
+function handleAutoCloseClick(e) {
+    if (e) e.stopPropagation();
 
-async function toggleAutoCloseUnified(isChecked) {
-    const chkUnified = document.getElementById('chkAutoCloseUnified');
+    // 1. Nếu không phải Admin (Client LAN kết nối tới) -> Mở modal thông báo bị khóa
     if (!isSystemAdmin) {
-        if (chkUnified) {
-            chkUnified.checked = false;
-            chkUnified.disabled = true;
-        }
-        alert("⛔ TÍNH NĂNG BỊ KHÓA:\n\nChế độ [TỰ ĐỘNG ĐÓNG PHIẾU] chỉ cho phép kích hoạt từ Máy chủ Admin (truy cập qua localhost hoặc IP 127.x.x.x).\n\nMáy trạm KTV kết nối từ xa chỉ được phép Quét & Tiền kiểm tra cứu!");
+        showAutoCloseClientBlocked();
         return;
     }
 
-    // Nếu người dùng tick chọn bật Tự Đóng -> Yêu cầu xác nhận 2 lần vì tính chất nguy hiểm
-    if (isChecked) {
-        const confirm1 = confirm("⚠️ CẢNH BÁO NGUY HIỂM (XÁC NHẬN 1/2):\n\nBạn đang chuẩn bị kích hoạt chế độ [TỰ ĐỘNG ĐÓNG PHIẾU]!\nKhi bật, hệ thống sẽ tự động hoàn công / đóng phiếu lên CCOS/TTS mà không cần KTV kiểm tra thủ công.\n\nBạn có chắc chắn muốn tiếp tục?");
-        if (!confirm1) {
-            if (chkUnified) chkUnified.checked = false;
-            return;
-        }
-
-        const confirm2 = confirm("🚨 XÁC NHẬN LẦN 2 (BẮT BUỘC - 2/2):\n\nViệc đóng nhầm phiếu có thể ảnh hưởng nghiêm trọng đến khách hàng và chỉ số SLA dịch vụ!\n\nBạn có TUYỆT ĐỐI CHẮC CHẮN muốn kích hoạt TỰ ĐỘNG ĐÓNG không?");
-        if (!confirm2) {
-            if (chkUnified) chkUnified.checked = false;
-            return;
-        }
+    // 2. Nếu là Admin:
+    // Nếu đang BẬT -> Click là TẮT ngay lập tức
+    if (currentAutoClose) {
+        updateModeUI(false);
+        saveAutoCloseConfig(false);
+        return;
     }
 
+    // Nếu đang TẮT -> Bật Modal xác nhận 2 bước
+    openAutoCloseConfirmModal();
+}
+
+function openAutoCloseConfirmModal() {
+    const modal = document.getElementById('modalAutoCloseConfirm');
+    const step1 = document.getElementById('autoCloseStep1');
+    const step2 = document.getElementById('autoCloseStep2');
+    const blocked = document.getElementById('autoCloseClientBlocked');
+    if (!modal) return;
+    if (step1) step1.style.display = 'block';
+    if (step2) step2.style.display = 'none';
+    if (blocked) blocked.style.display = 'none';
+    modal.style.display = 'flex';
+}
+
+function proceedToAutoCloseStep2() {
+    const step1 = document.getElementById('autoCloseStep1');
+    const step2 = document.getElementById('autoCloseStep2');
+    if (step1) step1.style.display = 'none';
+    if (step2) step2.style.display = 'block';
+}
+
+function showAutoCloseClientBlocked() {
+    const modal = document.getElementById('modalAutoCloseConfirm');
+    const step1 = document.getElementById('autoCloseStep1');
+    const step2 = document.getElementById('autoCloseStep2');
+    const blocked = document.getElementById('autoCloseClientBlocked');
+    if (!modal) return;
+    if (step1) step1.style.display = 'none';
+    if (step2) step2.style.display = 'none';
+    if (blocked) blocked.style.display = 'block';
+    modal.style.display = 'flex';
+}
+
+function cancelAutoCloseModal() {
+    const modal = document.getElementById('modalAutoCloseConfirm');
+    if (modal) modal.style.display = 'none';
+    const chk = document.getElementById('chkAutoCloseUnified');
+    if (chk) chk.checked = currentAutoClose;
+}
+
+async function confirmAndActivateAutoClose() {
+    cancelAutoCloseModal();
+    updateModeUI(true);
+    await saveAutoCloseConfig(true);
+}
+
+async function saveAutoCloseConfig(isActive) {
     try {
-        updateModeUI(isChecked);
         await fetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                auto_close: isChecked,
-                auto_close_mode: isChecked ? 'all' : 'none'
+                auto_close: isActive,
+                auto_close_mode: isActive ? 'all' : 'none'
             })
         });
         loadTickets();
@@ -110,8 +142,12 @@ async function toggleAutoCloseUnified(isChecked) {
     }
 }
 
+async function toggleAutoCloseUnified(isChecked) {
+    handleAutoCloseClick();
+}
+
 async function toggleAutoCloseMode(isChecked) {
-    return toggleAutoCloseUnified(isChecked);
+    return handleAutoCloseClick();
 }
 
 async function fetchStatus() {
