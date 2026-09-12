@@ -2209,3 +2209,28 @@
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
+
+        /* SORTABLE TABLE HEADER */
+        .sortable-th {
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+        .sortable-th:hover {
+            background-color: #f1f5f9;
+            color: var(--primary, #005baa);
+        }
+        .sort-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #94a3b8;
+            transition: transform 0.2s ease, color 0.2s ease;
+            vertical-align: middle;
+        }
+        .sortable-th:hover .sort-icon {
+            color: #475569;
+        }
+        .sort-icon.active {
+            color: #0284c7;
+        }

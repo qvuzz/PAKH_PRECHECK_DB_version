@@ -366,6 +366,87 @@ let currentTableTab = 'chua_dong';
 let currentSystem = 'tts_old_api';
 let currentService = 'data';
 
+// SẮP XẾP DANH SÁCH PHIẾU THEO NGÀY TIẾP NHẬN
+let sortIncidentTimeOrder = 'none'; // 'none', 'desc' (mới nhất trước), 'asc' (cũ nhất trước)
+
+function parseIncidentDate(dateStr) {
+    if (!dateStr || dateStr === '--' || dateStr === 'null') return 0;
+    const str = String(dateStr).trim();
+    // 1. DD/MM/YYYY HH:mm[:ss] hoặc DD/MM/YYYY
+    const dmyMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+    if (dmyMatch) {
+        const day = parseInt(dmyMatch[1], 10);
+        const month = parseInt(dmyMatch[2], 10) - 1;
+        const year = parseInt(dmyMatch[3], 10);
+        const hour = parseInt(dmyMatch[4] || 0, 10);
+        const minute = parseInt(dmyMatch[5] || 0, 10);
+        const second = parseInt(dmyMatch[6] || 0, 10);
+        return new Date(year, month, day, hour, minute, second).getTime() || 0;
+    }
+    // 2. YYYY-MM-DD[T/ ]HH:mm[:ss]
+    const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+    if (isoMatch) {
+        const year = parseInt(isoMatch[1], 10);
+        const month = parseInt(isoMatch[2], 10) - 1;
+        const day = parseInt(isoMatch[3], 10);
+        const hour = parseInt(isoMatch[4] || 0, 10);
+        const minute = parseInt(isoMatch[5] || 0, 10);
+        const second = parseInt(isoMatch[6] || 0, 10);
+        return new Date(year, month, day, hour, minute, second).getTime() || 0;
+    }
+    const ts = Date.parse(str);
+    return isNaN(ts) ? 0 : ts;
+}
+
+function toggleIncidentTimeSort() {
+    if (sortIncidentTimeOrder === 'none') {
+        sortIncidentTimeOrder = 'desc';
+    } else if (sortIncidentTimeOrder === 'desc') {
+        sortIncidentTimeOrder = 'asc';
+    } else {
+        sortIncidentTimeOrder = 'none';
+    }
+    updateSortIncidentTimeUI();
+    renderTicketsTable(true);
+}
+window.toggleIncidentTimeSort = toggleIncidentTimeSort;
+
+function updateSortIncidentTimeUI() {
+    const iconContainer = document.getElementById('sortIncidentTimeIcon');
+    const th = document.getElementById('thIncidentTime');
+    if (!iconContainer) return;
+
+    if (sortIncidentTimeOrder === 'desc') {
+        iconContainer.className = 'sort-icon active';
+        iconContainer.innerHTML = `
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <polyline points="19 12 12 19 5 12"></polyline>
+            </svg>
+        `;
+        if (th) th.title = "Đang xếp: Mới nhất trước (Bấm để đổi sang cũ nhất trước)";
+    } else if (sortIncidentTimeOrder === 'asc') {
+        iconContainer.className = 'sort-icon active';
+        iconContainer.innerHTML = `
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="19" x2="12" y2="5"></line>
+                <polyline points="5 12 12 5 19 12"></polyline>
+            </svg>
+        `;
+        if (th) th.title = "Đang xếp: Cũ nhất trước (Bấm để quay về mặc định)";
+    } else {
+        iconContainer.className = 'sort-icon';
+        iconContainer.innerHTML = `
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 15l5 5 5-5"/>
+                <path d="M7 9l5-5 5 5"/>
+            </svg>
+        `;
+        if (th) th.title = "Thứ tự mặc định (Bấm để sắp xếp theo ngày tiếp nhận)";
+    }
+}
+window.updateSortIncidentTimeUI = updateSortIncidentTimeUI;
+
 // PHÂN TRANG DANH SÁCH PHIẾU
 let currentTicketPage = 1;
 let currentTicketPageSize = 10;
@@ -1219,6 +1300,25 @@ function renderTicketsTable(force = false) {
         return;
     }
 
+    // Sắp xếp danh sách phiếu nếu sortIncidentTimeOrder khác 'none'
+    let displayTickets = cachedTickets;
+    if (sortIncidentTimeOrder === 'desc') {
+        displayTickets = [...cachedTickets].sort((a, b) => {
+            const timeA = parseIncidentDate(a.incident_time);
+            const timeB = parseIncidentDate(b.incident_time);
+            return timeB - timeA;
+        });
+    } else if (sortIncidentTimeOrder === 'asc') {
+        displayTickets = [...cachedTickets].sort((a, b) => {
+            const timeA = parseIncidentDate(a.incident_time);
+            const timeB = parseIncidentDate(b.incident_time);
+            return timeA - timeB;
+        });
+    }
+
+    // Cập nhật biểu tượng mũi tên sắp xếp trên header
+    updateSortIncidentTimeUI();
+
     // Tính toán số trang & vị trí trang
     let pageSizeNum = (currentTicketPageSize === 'all') ? totalItems : (parseInt(currentTicketPageSize, 10) || 10);
     let totalPages = Math.max(1, Math.ceil(totalItems / pageSizeNum));
@@ -1228,7 +1328,7 @@ function renderTicketsTable(force = false) {
 
     let startIndex = (currentTicketPageSize === 'all') ? 0 : (currentTicketPage - 1) * pageSizeNum;
     let endIndex = Math.min(startIndex + pageSizeNum, totalItems);
-    let pageTickets = (currentTicketPageSize === 'all') ? cachedTickets : cachedTickets.slice(startIndex, endIndex);
+    let pageTickets = (currentTicketPageSize === 'all') ? displayTickets : displayTickets.slice(startIndex, endIndex);
 
     // Cập nhật thanh phân trang
     const rangeText = document.getElementById('pageRangeText');
@@ -1238,7 +1338,7 @@ function renderTicketsTable(force = false) {
     if (pagContainer) pagContainer.style.display = 'flex';
     renderPaginationNav(currentTicketPage, totalPages);
 
-    const newSignature = JSON.stringify(pageTickets) + '_' + currentTicketPage + '_' + currentAutoClose + '_' + currentTableTab + '_' + currentSystem + '_' + currentService + '_' + currentTicketPageSize;
+    const newSignature = JSON.stringify(pageTickets) + '_' + currentTicketPage + '_' + currentAutoClose + '_' + currentTableTab + '_' + currentSystem + '_' + currentService + '_' + currentTicketPageSize + '_' + sortIncidentTimeOrder;
     if (!force && newSignature === lastTicketsSignature) {
         return;
     }
