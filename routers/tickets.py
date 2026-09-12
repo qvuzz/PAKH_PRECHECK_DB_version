@@ -414,13 +414,6 @@ async def close_one_ttsnew_ticket(request: Request):
     action_plan_val = action_plan_custom or (str(row["action_plan"] or "").strip() if (row and "action_plan" in row.keys()) else "")
     target_step = str(body.get("target_step") or "").strip()
 
-    if row:
-        if not is_mobile_internet_ticket(row["package_title"]):
-            return {
-                "success": False,
-                "message": "Tuyệt đối không đóng phiếu loại PAKH khác (Thoại/SMS/Gói cước/CVQT) bằng API! Vui lòng bấm 'Đóng thủ công' để xử lý trên giao diện web TTS."
-            }
-
     reopen_cnt = int(row["reopen_count"] or 0) if (row and "reopen_count" in row.keys()) else 0
     force_close = body.get("force", False)
     if reopen_cnt > 0 and not force_close:

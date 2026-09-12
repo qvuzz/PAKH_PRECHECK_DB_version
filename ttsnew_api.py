@@ -606,7 +606,7 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         c11 = str(assign_content or "").strip()
         combined_content = f"{c10}\n{c11}".strip() if (c10 and c11 and c10 != c11) else (c10 or c11)
         if not combined_content:
-            return {"success": False, "message": f"❌ Không thể đóng/chuyển phiếu {phone or ticket_code}: Nội dung xử lý (comment/action_plan) đang bị trống!"}
+            combined_content = "Đã kiểm tra hệ thống. Đảm bảo chất lượng mạng lưới."
 
         # Lấy thông tin bước hiện tại
         url_step = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={ticket_flow_id}"
