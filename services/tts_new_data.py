@@ -332,7 +332,9 @@ def execute_tts_new_data_cycle():
                         )
                         if close_res.get("success"):
                             state.log("SUCCESS", f"   ↳ {close_res.get('message')}")
-                            if close_res.get("round") == 1:
+                            if close_res.get("round") == 0 or "2.4" in close_res.get("step_name", ""):
+                                rec["ticket_status"] = "Đã chuyển 2.4"
+                            elif close_res.get("round") == 1:
                                 rec["ticket_status"] = "Chờ đóng lần 2" if "2.6" in close_res.get("step_name", "") else "Chuyển VTT"
                             else:
                                 rec["ticket_status"] = "Đã đóng"

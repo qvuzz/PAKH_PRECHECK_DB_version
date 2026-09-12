@@ -620,6 +620,19 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         next_node_list = step_data.get("nextNodeData", [])
 
         # =====================================================================
+        # TRƯỜNG HỢP 0: Đang ở bước 2.3 -> Tự động chuyển sang bước 2.4
+        # =====================================================================
+        curr_step_code = str((curr_node.get("processData") or {}).get("stepCode") or "")
+        if "2.3" in curr_node_name or "2.3" in curr_step_code:
+            return api_move_step_2_3_to_2_4(
+                token=token,
+                ticket_flow_id=ticket_flow_id,
+                ticket_id=ticket_id,
+                phone=phone,
+                ticket_code=ticket_code
+            )
+
+        # =====================================================================
         # TRƯỜNG HỢP 1: Đang ở bước "2.6 Đóng phiếu Trên TTS" (Lần 2 xuất hiện để đóng)
         # =====================================================================
         if "2.6" in curr_node_name:
@@ -919,10 +932,30 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
         column_json = {}
         if form_id:
             column_json["formId"] = form_id
-        # B0: Kiểm tra tính chính xác của phân loại phiếu: True
-        column_json["b0"] = True
-        column_json["b0_kiem_tra_phan_loai"] = True
-        column_json["checkClassification"] = True
+            try:
+                import base64, urllib.parse
+                url_f = f"https://gw-oneoss.vnpt.vn/oss/tts/ap/ap-tts-api/Form/{form_id}"
+                r_f = requests.get(url_f, headers=headers, timeout=8).json()
+                js_info = (r_f.get("data") or {}).get("jsInfo")
+                if js_info:
+                    raw_s = urllib.parse.unquote(base64.b64decode(js_info).decode('utf-8', errors='ignore'))
+                    schema = json.loads(raw_s)
+                    for comp in schema.get("components", []):
+                        k = comp.get("key")
+                        label = str(comp.get("label") or "").lower()
+                        if k and ("b0" in label or "phân loại" in label or comp.get("validate", {}).get("required")):
+                            val = "1"
+                            for v in comp.get("values", []):
+                                if str(v.get("label", "")).lower() == "true":
+                                    val = str(v.get("value", "1"))
+                                    break
+                            column_json[k] = val
+            except Exception:
+                pass
+
+        if "radio_4q1pss" not in column_json:
+            column_json["radio_4q1pss"] = "1"
+        column_json["b0"] = "1"
 
         payload = {
             "ticketFlowId": ticket_flow_id,
@@ -969,7 +1002,9 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
 
         return {
             "success": True,
+            "round": 0,
             "step_name": next_step_name,
+            "action_label": f"Chuyển bước '{next_step_name}'",
             "actor": actor_name,
             "message": f"✅ [{actor_name}] Đã chuyển phiếu {ticket_code or ticket_id} ({phone}) sang bước '{next_step_name}' thành công!"
         }
