@@ -9,10 +9,10 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, cem_client=None) -> dict:
+def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, cem_client=None, driver=None) -> dict:
     """
     Tiền kiểm chuyên biệt 1 phiếu Cuộc gọi:
-    1. Tra cứu SAPC: Lấy trạng thái NAM (0/1), gói cước, dịch vụ.
+    1. Tra cứu SAPC: Lấy trạng thái NAM (0/1), HSS Profile (VoLTE), gói cước, dịch vụ.
     2. Tra cứu Cell từ SAPC và CEM (chỉ thống kê Top Cell/Trạm, bỏ qua App usage & lưu lượng MB).
     3. Phân tích kịch bản cuộc gọi và đưa ra nhận định, ý kiến đóng phiếu chuẩn VNPT.
     """
@@ -21,6 +21,36 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
     ticket_content = ticket.get("content", "")
     reopen_count = int(ticket.get("reopen_count") or 0)
     last_reopened_date = str(ticket.get("last_reopened_date") or "").strip()
+
+    # Nhận diện nếu caller truyền driver vào vị trí tham số thứ 3
+    if sapc_client is not None and hasattr(sapc_client, "session") is False and hasattr(sapc_client, "execute_cdp_cmd"):
+        driver = sapc_client
+        sapc_client = None
+
+    if driver is None:
+        try:
+            from auth_extractor import get_chrome_debug_driver
+            driver = get_chrome_debug_driver()
+        except Exception:
+            pass
+
+    if sapc_client is None:
+        try:
+            from sapc_client import SAPCClient
+            sapc_client = SAPCClient(driver=driver)
+        except Exception:
+            try:
+                from sapc_client import SAPCClient
+                sapc_client = SAPCClient()
+            except Exception:
+                pass
+
+    if cem_client is None:
+        try:
+            from cem_client import CEMClient
+            cem_client = CEMClient(driver=driver)
+        except Exception:
+            pass
 
     info_result = {}
     sapc_result = {"msisdn": phone_84, "packages": []}

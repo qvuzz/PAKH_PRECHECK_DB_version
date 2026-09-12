@@ -28,18 +28,16 @@ def check_btools_fast(driver=None) -> bool:
 
 def check_cem_fast(driver=None) -> bool:
     try:
-        from cem_client import CEMClient, CEM_URL, CEM_HEADERS
+        from cem_client import CEMClient, CEM_URL
         c = CEMClient(driver=driver)
         if not c.api_key:
             return False
-        res = c.session.post(
+        res, _ = c._post_with_retry(
             CEM_URL,
-            headers=CEM_HEADERS,
-            json={"apikey": c.api_key, "start_date": "2026-09-01", "msisdn": "912345678"},
-            timeout=3,
-            verify=False
+            payload={"start_date": "2026-09-01", "msisdn": "912345678"},
+            timeout=3
         )
-        return res.status_code == 200
+        return bool(res and res.status_code == 200)
     except Exception:
         return False
 

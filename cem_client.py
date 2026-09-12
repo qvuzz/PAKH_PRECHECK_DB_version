@@ -24,7 +24,7 @@ class LegacySSLAdapter(HTTPAdapter):
 
 
 CEM_URL = os.getenv("CEM_API_URL", "https://api-cem.vnptmedia.vn/api2/getSubHistoryInfo")
-DEFAULT_API_KEY = "net_ktm_quangvu%seQyfEELlCD19c2CljcOLfolTBsHfwSEUSSDFNVw"
+DEFAULT_API_KEY = "net_ktm_quangvu%6kvjpF82DYQPjgqJHyhGow6iGA5IPaxQO9klaxm6"
 CEM_API_KEY = os.getenv("CEM_API_KEY", DEFAULT_API_KEY)
 
 CEM_HEADERS = {
@@ -34,6 +34,18 @@ CEM_HEADERS = {
     "Origin": "https://cem.vnptmedia.vn",
     "Referer": "https://cem.vnptmedia.vn/",
 }
+
+
+def safe_log(msg: str):
+    """In log ra màn hình an toàn trên mọi hệ điều hành (tránh UnicodeEncodeError trên Windows cp1252)."""
+    try:
+        print(msg)
+    except Exception:
+        try:
+            clean_msg = msg.encode("ascii", errors="replace").decode("ascii")
+            print(clean_msg)
+        except Exception:
+            pass
 
 
 def format_active_dates_compact(date_list):
@@ -83,33 +95,84 @@ def format_active_dates_compact(date_list):
 
 class CEMClient:
     def __init__(self, api_key=None, driver=None):
+        self.driver = driver
+        self.last_auth_error = False
         self.api_key = api_key or os.getenv("CEM_API_KEY", DEFAULT_API_KEY)
         self.session = requests.Session()
         self.session.mount("https://", LegacySSLAdapter())
         self.load_cookies_from_chrome(driver=driver)
 
     def load_cookies_from_chrome(self, driver=None):
-        """Tự động trích xuất apikey và toàn bộ cookie của CEM từ trình duyệt (Firefox, Chrome, Edge)."""
+        """Tự động trích xuất apikey và toàn bộ cookie của CEM từ trình duyệt (Chrome CDP, Firefox, Edge)."""
+        drv = driver or self.driver
+        if not drv:
+            try:
+                from auth_extractor import get_chrome_debug_driver
+                drv = get_chrome_debug_driver()
+                if drv:
+                    self.driver = drv
+            except Exception:
+                pass
+
         try:
             from auth_extractor import get_universal_cem_auth
-            extracted_key, cookies_dict = get_universal_cem_auth(driver=driver)
+            extracted_key, cookies_dict = get_universal_cem_auth(driver=drv)
 
             for name, val in cookies_dict.items():
-                self.session.cookies.set(
-                    name,
-                    val,
-                    domain="cem.vnptmedia.vn",
-                    path="/"
-                )
+                self.session.cookies.set(name, val, domain="cem.vnptmedia.vn", path="/")
+                self.session.cookies.set(name, val, domain=".vnptmedia.vn", path="/")
+                self.session.cookies.set(name, val, domain="api-cem.vnptmedia.vn", path="/")
 
             if extracted_key:
                 self.api_key = extracted_key
-                print(f"🔑 [CEM] Đã tự động lấy API Key từ Cookie trình duyệt: {self.api_key[:25]}...")
+                self.last_auth_error = False
+                safe_log(f"[CEM] Đã tự động cập nhật API Key từ trình duyệt: {self.api_key[:25]}...")
                 return True
         except Exception as e:
-            print(f"⚠️ [CEM] Không thể trích xuất cookie tự động: {e}")
+            safe_log(f"[CEM] Không thể trích xuất cookie tự động: {e}")
 
         return False
+
+    def _post_with_retry(self, url, payload, headers=None, timeout=15):
+        """
+        Gửi POST request đến CEM API, tự động phát hiện mã 401/403/405 hoặc 'Authentication Fail'
+        và làm mới session/apikey từ Chrome rồi gửi lại (retry).
+        """
+        if headers is None:
+            headers = CEM_HEADERS
+
+        payload["apikey"] = self.api_key
+        try:
+            res = self.session.post(url, headers=headers, json=payload, timeout=timeout, verify=False)
+        except Exception as ex:
+            return None, str(ex)
+
+        # Kiểm tra nếu bị hết hạn session / Authentication Fail
+        is_auth_fail = (res.status_code in (401, 403, 405))
+        if not is_auth_fail and res.status_code == 200:
+            try:
+                data_check = res.json()
+                if isinstance(data_check, dict) and "Authentication Fail" in str(data_check.get("message", "")):
+                    is_auth_fail = True
+            except Exception:
+                pass
+
+        if is_auth_fail:
+            safe_log("[CEM] ⚠️ Phát hiện API Key hoặc Session CEM hết hạn! Đang tự động làm mới từ Chrome...")
+            refreshed = self.load_cookies_from_chrome()
+            if refreshed:
+                payload["apikey"] = self.api_key
+                try:
+                    res = self.session.post(url, headers=headers, json=payload, timeout=timeout, verify=False)
+                    safe_log(f"[CEM] ✅ Thử lại thành công sau khi làm mới key (status={res.status_code})")
+                    return res, None
+                except Exception as ex_retry:
+                    return None, str(ex_retry)
+            else:
+                self.last_auth_error = True
+                safe_log("[CEM] ❌ Không thể làm mới API Key! Vui lòng đảm bảo tab CEM đang mở trên Chrome.")
+
+        return res, None
 
     def get_subscriber_history_5days(self, msisdn, days=5):
         """
@@ -128,19 +191,12 @@ class CEMClient:
         for i in range(days):
             date_str = (today - timedelta(days=i)).strftime("%Y-%m-%d")
             payload = {
-                "apikey": self.api_key,
                 "start_date": date_str,
                 "msisdn": clean_phone
             }
-            try:
-                res = self.session.post(
-                    CEM_URL,
-                    headers=CEM_HEADERS,
-                    json=payload,
-                    timeout=15,
-                    verify=False
-                )
-                if res.status_code == 200:
+            res, err = self._post_with_retry(CEM_URL, payload, timeout=15)
+            if res and res.status_code == 200:
+                try:
                     data = res.json()
                     items = data.get("data") or data.get("result") or data
                     if isinstance(items, list):
@@ -148,11 +204,17 @@ class CEMClient:
                             if isinstance(row, dict):
                                 row["_query_date"] = date_str
                                 all_records.append(row)
-            except Exception as e:
-                print(f"⚠️ [CEM] Lỗi tra ngày {date_str} cho {clean_phone}: {e}")
-            time.sleep(0.15)
+                except Exception as e:
+                    safe_log(f"[CEM] Lỗi parse dữ liệu ngày {date_str} cho {clean_phone}: {e}")
+            elif err:
+                safe_log(f"[CEM] Lỗi kết nối ngày {date_str} cho {clean_phone}: {err}")
+            time.sleep(0.12)
 
         return all_records
+
+    def get_subscriber_cell_history(self, msisdn, days=5):
+        """Alias cho get_subscriber_history_5days hỗ trợ tương thích ngược."""
+        return self.get_subscriber_history_5days(msisdn, days=days)
 
     @staticmethod
     def extract_top_cells_summary(records, app_events=None):
@@ -247,7 +309,6 @@ class CEMClient:
 
         for d_str in target_dates:
             payload = {
-                "apikey": self.api_key,
                 "phone": clean_phone,
                 "date": d_str,
                 "rat": rat,
@@ -255,10 +316,10 @@ class CEMClient:
                 "n_top_elements": 24,
                 "kpi_type": "application"
             }
-            try:
-                url = "https://api-cem.vnptmedia.vn/api2/getTopSubEvents"
-                res = self.session.post(url, headers=CEM_HEADERS, json=payload, timeout=15, verify=False)
-                if res.status_code == 200:
+            url = "https://api-cem.vnptmedia.vn/api2/getTopSubEvents"
+            res, err = self._post_with_retry(url, payload, timeout=15)
+            if res and res.status_code == 200:
+                try:
                     data = res.json()
                     data_items = data.get("data") or []
                     if isinstance(data_items, list):
@@ -266,8 +327,10 @@ class CEMClient:
                             if isinstance(hour_item, dict):
                                 hour_item["_query_date"] = d_str
                                 all_app_records.append(hour_item)
-            except Exception as e:
-                print(f"⚠️ [CEM] Lỗi lấy getTopSubEvents ngày {d_str} cho {clean_phone}: {e}")
+                except Exception as e:
+                    safe_log(f"[CEM] Lỗi parse getTopSubEvents ngày {d_str} cho {clean_phone}: {e}")
+            elif err:
+                safe_log(f"[CEM] Lỗi kết nối getTopSubEvents ngày {d_str} cho {clean_phone}: {err}")
             time.sleep(0.1)
 
         return all_app_records
