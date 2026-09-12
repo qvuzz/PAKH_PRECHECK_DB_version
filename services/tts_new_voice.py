@@ -143,7 +143,6 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
 
                 can_reuse_db = (
                     existing_db_row 
-                    and existing_db_row["comment"] 
                     and _is_valid_technical_status(existing_db_row["status"])
                 )
 
@@ -152,8 +151,8 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                     eval_res = {
                         "status": existing_db_row["status"],
                         "color": existing_db_row["color"] or "green",
-                        "comment": existing_db_row["comment"],
-                        "action_plan": existing_db_row["action_plan"] or "Đủ điều kiện đóng phiếu",
+                        "comment": existing_db_row["comment"] or "",
+                        "action_plan": existing_db_row["action_plan"] or "",
                         "real_packages": existing_db_row["real_packages"] or "--",
                         "rat_types": existing_db_row["rat_types"] or "2G/3G/4G Thoại",
                         "cem_data": existing_db_row["cem_data"] or "--",
@@ -179,7 +178,7 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                     "status": eval_res.get("status", "MẠNG LƯỚI ĐẢM BẢO"),
                     "color": eval_res.get("color", "green"),
                     "comment": eval_res.get("comment", ""),
-                    "action_plan": eval_res.get("action_plan", "Đủ điều kiện đóng phiếu"),
+                    "action_plan": eval_res.get("action_plan", ""),
                     "real_packages": eval_res.get("real_packages", "--"),
                     "rat_types": eval_res.get("rat_types", "2G/3G/4G Thoại"),
                     "cem_data": eval_res.get("cem_data", "--"),

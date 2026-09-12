@@ -139,53 +139,33 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
     # =========================================================================
     status = "MẠNG LƯỚI ĐẢM BẢO"
     color = "green"
-    action_plan = "Đủ điều kiện đóng phiếu"
     primary_cell_name = top_primary_cell or sapc_cell or "khu vực"
 
     # Kịch bản 1: Cảnh báo phiếu mở lại nhiều lần
     if reopen_count > 0:
         status = f"⚠️ PHIẾU MỞ LẠI ({reopen_count} LẦN)"
         color = "orange"
-        action_plan = "KTV Kiểm tra lại"
-        comment = (
-            f"Phiếu phản ánh cuộc gọi được mở lại lần thứ {reopen_count} "
-            f"(Lần cuối: {last_reopened_date or 'Gần đây'}). "
-            f"Yêu cầu KTV liên hệ trực tiếp khách hàng xác minh chi tiết lỗi trước khi xử lý."
-        )
     # Kịch bản 2: Bị khóa Spam cuộc gọi
     elif "spam cuộc gọi" in title.lower() or "spam cuộc gọi" in ticket_content.lower():
         status = "BỊ KHÓA SPAM CUỘC GỌI"
         color = "red"
-        action_plan = "Chuyển KTV xử lý Spam"
-        comment = "Thuê bao bị hệ thống chặn do nghi vấn phát tán cuộc gọi rác/Spam. Hướng dẫn khách hàng xác minh chính chủ để mở khóa."
     # Kịch bản 3: Thuê bao bị khóa cước / khóa dịch vụ (NAM = 1)
     elif nam_val == "1":
         status = "KHÓA DỊCH VỤ (NAM: 1)"
         color = "red"
-        action_plan = "Chưa đủ điều kiện đóng"
-        comment = "Thuê bao đang bị tạm khóa chiều/dịch vụ trên hệ thống Core (NAM: 1). KTV hướng dẫn khách hàng thanh toán cước hoặc kiểm tra tình trạng chặn chiều."
     # Kịch bản 4: HSS Profile bất thường / Profile lạ (ảnh hưởng VoLTE)
     elif is_strange_hss:
         status = "HSS PROFILE LẠ (ẢNH HƯỞNG VOLTE)"
         color = "red"
-        action_plan = "KTV kiểm tra HSS/VoLTE"
-        comment = (
-            f"Hồ sơ Core phát hiện HSS Profile bất thường: {hss_profile} (Profile lạ). "
-            f"Dấu hiệu này có thể gây lỗi đăng ký VoLTE/IMS hoặc lỗi cuộc gọi độ nét cao. "
-            f"Đề nghị KTV kiểm tra lại thông số thuê bao trên HSS/IMS trước khi xử lý."
-        )
     # Kịch bản 5: Mạng lưới và trạm phát sóng đảm bảo bình thường
     else:
         status = "MẠNG LƯỚI ĐẢM BẢO"
         color = "green"
-        action_plan = "Đủ điều kiện đóng phiếu"
-        hss_note = f", HSS Profile: {hss_profile} (VoLTE sẵn sàng)" if hss_profile else ""
-        comment = (
-            f"Đã kiểm tra hệ thống: Thuê bao hoạt động 2 chiều bình thường (NAM: 0{hss_note}). "
-            f"Trạm phát sóng phục vụ ({primary_cell_name}) hoạt động đảm bảo chất lượng, "
-            f"không phát hiện cảnh báo lỗi phần cứng hay sự cố diện rộng tại khu vực. "
-            f"Đề nghị KTV liên hệ hướng dẫn khách hàng kiểm tra thiết bị, cấu hình VoLTE hoặc gọi lại thử."
-        )
+
+    # Tuyệt đối KHÔNG tự ý điền Ý kiến phân tích (Cột 10) và Nội dung phản hồi (Cột 11) cho Cuộc gọi/Thoại
+    # Để trống hoàn toàn để KTV tự nhập theo ý muốn hoặc để trống.
+    comment = ""
+    action_plan = ""
 
     # Tổng hợp trường hiển thị tóm tắt nội dung
     ai_summary_val = ticket_content

@@ -274,7 +274,7 @@ def save_or_update_ticket(t):
                     # Nếu bản ghi cũ đã có kết quả phân tích kỹ thuật hợp lệ, và bản ghi mới là dữ liệu thô / CHỜ TIỀN KIỂM
                     # thì kế thừa và hiển thị theo kết quả Database cũ, không bị ghi đè thành rỗng.
                     has_valid_old = (
-                        existing["comment"] 
+                        existing["status"] 
                         and existing["status"] not in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI", None, "")
                     )
                     is_incoming_unprocessed = (
