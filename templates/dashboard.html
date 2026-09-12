@@ -645,6 +645,16 @@
                             id="tableTitleText">
                             Phiếu Mobile Internet
                         </div>
+                        <button type="button" id="btnRecheckModule" class="btn btn-sm" onclick="recheckCurrentModule(this)"
+                            style="display:inline-flex; align-items:center; gap:5px; padding:3px 9px; font-size:11.5px; font-weight:700; color:#0284c7; background:#f0f9ff; border:1px solid #bae6fd; border-radius:5px; cursor:pointer; transition:all 0.2s ease;"
+                            title="Tiền kiểm lại các phiếu trong module này (Phiếu ở bước 2.6 sẽ tự động tái sử dụng kết quả trong database)">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <path d="M23 4v6h-6"></path>
+                                <path d="M1 20v-6h6"></path>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                            </svg>
+                            <span>Tiền kiểm lại</span>
+                        </button>
                         <div id="ctrlAutoCloseUnified" class="ctrl-item" onclick="handleAutoCloseClick(event)"
                             style="display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:700; color:#dc2626; cursor:pointer; user-select:none; margin-left:6px; padding:3px 9px; border-radius:5px; border:1px solid rgba(220,38,38,0.3); background:#fef2f2;"
                             title="CẢNH BÁO NGUY HIỂM: Tự động chuyển bước/đóng phiếu Mobile Internet (Chỉ dành cho Admin từ 127./localhost, cần xác nhận 2 lần)">
@@ -825,7 +835,7 @@
         </div>
     </div>
 
-    <script src="/static/js/dashboard.js?v=4.6"></script>
+    <script src="/static/js/dashboard.js?v=4.7"></script>
 </body>
 
 </html>

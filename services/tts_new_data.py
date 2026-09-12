@@ -238,7 +238,6 @@ def execute_tts_new_data_cycle():
                 and existing_db_row 
                 and existing_db_row["comment"] 
                 and _is_valid_technical_status(existing_db_row["status"])
-                and (clean_data is None or len(clean_data) == 0)
             )
 
             if can_reuse_db:

@@ -115,14 +115,59 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
             code = t.get("ticket_code", "")
             inc_time = str(t.get("incident_time") or t.get("created_time") or "").strip()
 
-            state.current_step = f"Tiền kiểm Cuộc gọi {idx}/{len(voice_tickets)}: {phone_84}"
+            state.current_step = f"Tiền kiểm {lbl} {idx}/{len(voice_tickets)}: {phone_84}"
             try:
-                eval_res = precheck_single_voice_ticket(
-                    phone_84=phone_84, 
-                    ticket=t, 
-                    sapc_client=sapc_client, 
-                    cem_client=cem_client
+                step_name_raw = str(t.get("step_name") or "")
+                is_step_26 = ("2.6" in step_name_raw) or (t.get("ticket_status") == "Chờ đóng lần 2")
+
+                existing_db_row = None
+                if is_step_26:
+                    try:
+                        conn_chk = get_db_connection()
+                        existing_db_row = conn_chk.execute("""
+                            SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary
+                            FROM tickets 
+                            WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
+                            ORDER BY updated_at DESC LIMIT 1
+                        """, (t.get("ticket_id"), f"{code}%", phone_84)).fetchone()
+                        conn_chk.close()
+                    except Exception:
+                        pass
+
+                def _is_valid_technical_status(st):
+                    if not st:
+                        return False
+                    s_u = str(st).strip().upper()
+                    if "LỖI KẾT NỐI" in s_u or "CHƯA ĐĂNG NHẬP" in s_u or "LỖI MÁY CHỦ" in s_u or "CHƯA PHÂN LOẠI" in s_u or "CHỜ TIỀN KIỂM" in s_u:
+                        return False
+                    return True
+
+                can_reuse_db = (
+                    is_step_26 
+                    and existing_db_row 
+                    and existing_db_row["comment"] 
+                    and _is_valid_technical_status(existing_db_row["status"])
                 )
+
+                if can_reuse_db:
+                    state.log("INFO", f"   ↳ 📋 Phiếu tại bước 2.6 kế thừa nhận định kỹ thuật từ vòng 1: [{existing_db_row['status']}]")
+                    eval_res = {
+                        "status": existing_db_row["status"],
+                        "color": existing_db_row["color"] or "green",
+                        "comment": existing_db_row["comment"],
+                        "action_plan": existing_db_row["action_plan"] or "Đủ điều kiện đóng phiếu",
+                        "real_packages": existing_db_row["real_packages"] or "--",
+                        "rat_types": existing_db_row["rat_types"] or "2G/3G/4G Thoại",
+                        "cem_data": existing_db_row["cem_data"] or "--",
+                        "ai_summary": existing_db_row["ai_summary"] or t.get("content", "")
+                    }
+                else:
+                    eval_res = precheck_single_voice_ticket(
+                        phone_84=phone_84, 
+                        ticket=t, 
+                        sapc_client=sapc_client, 
+                        cem_client=cem_client
+                    )
 
                 ticket_content = t.get("content", "")
                 reopen_count = int(t.get("reopen_count") or 0)
@@ -158,7 +203,7 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                 state.log("ERROR", f"Lỗi tiền kiểm {phone_84}: {e}")
                 return False
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             items = list(enumerate(voice_tickets, 1))
             futures = [executor.submit(_process_single_voice_ticket, it) for it in items]
             for future in concurrent.futures.as_completed(futures):

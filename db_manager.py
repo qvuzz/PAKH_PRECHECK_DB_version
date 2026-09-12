@@ -7,13 +7,19 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "tickets.db"
 
+_db_initialized = False
+
 def get_db_connection():
-    conn = sqlite3.connect(str(DB_PATH), timeout=30.0)
+    conn = sqlite3.connect(str(DB_PATH), timeout=60.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")  # Tăng tốc độ và chống khóa file
+    conn.execute("PRAGMA busy_timeout=60000;")
     return conn
 
 def init_db():
+    global _db_initialized
+    if _db_initialized:
+        return
     conn = get_db_connection()
     with conn:
         conn.execute("""
@@ -93,6 +99,7 @@ def init_db():
             );
         """)
     conn.close()
+    _db_initialized = True
 
 def record_ttsnew_stage(phone: str, ticket_code: str = "", round_num: int = 1, flow_id: int = None, status: str = ""):
     """Lưu vết tiến trình đóng phiếu 2 vòng trên TTS Mới."""
@@ -202,128 +209,151 @@ def save_or_update_ticket(t):
         return
 
     init_db()
-    conn = get_db_connection()
-    with conn:
-        source = t.get("source", "tts_old") or "tts_old"
-        ticket_code = t.get("ticket_code", "")
-
-        # 1. Chống trùng lặp theo ticket_code (dành riêng cho TTS Mới)
-        if ticket_code:
-            existing_code = conn.execute(
-                "SELECT * FROM tickets WHERE ticket_code = ?", 
-                (ticket_code,)
-            ).fetchone()
-            if existing_code and existing_code["incident_time"] != incident_time:
-                conn.execute(
-                    "DELETE FROM tickets WHERE ticket_code = ?",
-                    (ticket_code,)
-                )
-
-        # 2. Chống trùng lặp theo số thuê bao đang ở trạng thái 'Chưa đóng' cùng nguồn
-        # Nếu đã có bản ghi chưa đóng nhưng lệch định dạng incident_time -> xóa bản ghi cũ, thay thế bằng bản ghi mới
-        existing_active = conn.execute(
-            """SELECT * FROM tickets 
-               WHERE phone = ? AND (source = ? OR (source IS NULL AND ? = 'tts_old')) 
-                 AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')""",
-            (phone, source, source)
-        ).fetchone()
-
-        if existing_active and existing_active["incident_time"] != incident_time:
-            conn.execute(
-                "DELETE FROM tickets WHERE phone = ? AND incident_time = ?",
-                (phone, existing_active["incident_time"])
-            )
-            # Kế thừa dữ liệu đã nhập / phân tích nếu bản ghi mới chưa có
-            if not t.get("comment") and existing_active["comment"]:
-                t["comment"] = existing_active["comment"]
-            if not t.get("action_plan") and existing_active["action_plan"]:
-                t["action_plan"] = existing_active["action_plan"]
-            if not t.get("ai_summary") and existing_active["ai_summary"]:
-                t["ai_summary"] = existing_active["ai_summary"]
-
-        existing = conn.execute(
-            "SELECT * FROM tickets WHERE phone = ? AND incident_time = ?", 
-            (phone, incident_time)
-        ).fetchone()
+    import time
+    for attempt in range(5):
+        conn = None
+        try:
+            conn = get_db_connection()
+            with conn:
+                source = t.get("source", "tts_old") or "tts_old"
+                ticket_code = t.get("ticket_code", "")
         
-        comment = t.get("comment", "")
-        action_plan = t.get("action_plan", "")
-        ticket_status = t.get("ticket_status", "Chưa đóng")
-        ai_summary = t.get("ai_summary", "")
-
-        if existing:
-            # Đối với tts_new (quét trực tiếp từ live API), nếu phiếu đang xuất hiện thì luôn khôi phục 'Chưa đóng'
-            # Chỉ giữ 'Đã đóng' khi là nguồn tts_old và không có force_update_status
-            if source != "tts_new" and not t.get("force_update_status") and existing["ticket_status"] in ("Đã đóng", "Da dong") and ticket_status == "Chưa đóng":
-                ticket_status = "Đã đóng"
-            if not ai_summary and "ai_summary" in existing.keys():
-                ai_summary = existing["ai_summary"] or ""
-
-        reopen_count = int(t.get("reopen_count") or 0)
-        last_reopened_date = str(t.get("last_reopened_date") or "").strip()
-        if existing and reopen_count == 0 and "reopen_count" in existing.keys():
-            existing_rc = int(existing["reopen_count"] or 0)
-            if existing_rc > 0:
-                reopen_count = existing_rc
-                last_reopened_date = str(existing["last_reopened_date"] or "")
-
-        conn.execute("""
-            INSERT INTO tickets (
-                phone, incident_time, package_title, real_packages, rat_types,
-                cem_data, app_usage, ticket_content, status, comment,
-                action_plan, color, ticket_status, created_time, ai_summary,
-                source, ticket_code, ticket_id, flow_id, reopen_count, last_reopened_date,
-                phan_hoi_he_thong, id_he_thong, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(phone, incident_time) DO UPDATE SET
-                package_title = excluded.package_title,
-                real_packages = excluded.real_packages,
-                rat_types = excluded.rat_types,
-                cem_data = excluded.cem_data,
-                app_usage = excluded.app_usage,
-                ticket_content = excluded.ticket_content,
-                status = excluded.status,
-                comment = excluded.comment,
-                action_plan = excluded.action_plan,
-                color = excluded.color,
-                ticket_status = excluded.ticket_status,
-                created_time = excluded.created_time,
-                ai_summary = excluded.ai_summary,
-                source = excluded.source,
-                ticket_code = excluded.ticket_code,
-                ticket_id = COALESCE(excluded.ticket_id, tickets.ticket_id),
-                flow_id = COALESCE(excluded.flow_id, tickets.flow_id),
-                reopen_count = excluded.reopen_count,
-                last_reopened_date = excluded.last_reopened_date,
-                phan_hoi_he_thong = COALESCE(excluded.phan_hoi_he_thong, tickets.phan_hoi_he_thong),
-                id_he_thong = COALESCE(excluded.id_he_thong, tickets.id_he_thong),
-                updated_at = CURRENT_TIMESTAMP;
-        """, (
-            phone,
-            incident_time,
-            t.get("package_title", ""),
-            t.get("real_packages", ""),
-            t.get("rat_types", ""),
-            t.get("cem_data", ""),
-            t.get("app_usage", ""),
-            t.get("ticket_content", ""),
-            t.get("status", "CHƯA PHÂN LOẠI"),
-            comment,
-            action_plan,
-            t.get("color", "FFFFFF"),
-            ticket_status,
-            t.get("created_time", ""),
-            ai_summary,
-            source,
-            ticket_code,
-            t.get("ticket_id") or None,
-            t.get("flow_id") or None,
-            reopen_count,
-            last_reopened_date,
-            t.get("phan_hoi_he_thong", 1),
-            t.get("id_he_thong", 0),
-        ))
-    conn.close()
+                # 1. Chống trùng lặp theo ticket_code (dành riêng cho TTS Mới)
+                if ticket_code:
+                    existing_code = conn.execute(
+                        "SELECT * FROM tickets WHERE ticket_code = ?", 
+                        (ticket_code,)
+                    ).fetchone()
+                    if existing_code and existing_code["incident_time"] != incident_time:
+                        conn.execute(
+                            "DELETE FROM tickets WHERE ticket_code = ?",
+                            (ticket_code,)
+                        )
+        
+                # 2. Chống trùng lặp theo số thuê bao đang ở trạng thái 'Chưa đóng' cùng nguồn
+                # Nếu đã có bản ghi chưa đóng nhưng lệch định dạng incident_time -> xóa bản ghi cũ, thay thế bằng bản ghi mới
+                existing_active = conn.execute(
+                    """SELECT * FROM tickets 
+                       WHERE phone = ? AND (source = ? OR (source IS NULL AND ? = 'tts_old')) 
+                         AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')""",
+                    (phone, source, source)
+                ).fetchone()
+        
+                if existing_active and existing_active["incident_time"] != incident_time:
+                    conn.execute(
+                        "DELETE FROM tickets WHERE phone = ? AND incident_time = ?",
+                        (phone, existing_active["incident_time"])
+                    )
+                    # Kế thừa dữ liệu đã nhập / phân tích nếu bản ghi mới chưa có
+                    if not t.get("comment") and existing_active["comment"]:
+                        t["comment"] = existing_active["comment"]
+                    if not t.get("action_plan") and existing_active["action_plan"]:
+                        t["action_plan"] = existing_active["action_plan"]
+                    if not t.get("ai_summary") and existing_active["ai_summary"]:
+                        t["ai_summary"] = existing_active["ai_summary"]
+        
+                existing = conn.execute(
+                    "SELECT * FROM tickets WHERE phone = ? AND incident_time = ?", 
+                    (phone, incident_time)
+                ).fetchone()
+                
+                comment = t.get("comment", "")
+                action_plan = t.get("action_plan", "")
+                ticket_status = t.get("ticket_status", "Chưa đóng")
+                ai_summary = t.get("ai_summary", "")
+        
+                if existing:
+                    # Đối với tts_new (quét trực tiếp từ live API), nếu phiếu đang xuất hiện thì luôn khôi phục 'Chưa đóng'
+                    # Chỉ giữ 'Đã đóng' khi là nguồn tts_old và không có force_update_status
+                    if source != "tts_new" and not t.get("force_update_status") and existing["ticket_status"] in ("Đã đóng", "Da dong") and ticket_status == "Chưa đóng":
+                        ticket_status = "Đã đóng"
+                    if not ai_summary and "ai_summary" in existing.keys():
+                        ai_summary = existing["ai_summary"] or ""
+        
+                reopen_count = int(t.get("reopen_count") or 0)
+                last_reopened_date = str(t.get("last_reopened_date") or "").strip()
+                if existing and reopen_count == 0 and "reopen_count" in existing.keys():
+                    existing_rc = int(existing["reopen_count"] or 0)
+                    if existing_rc > 0:
+                        reopen_count = existing_rc
+                        last_reopened_date = str(existing["last_reopened_date"] or "")
+        
+                conn.execute("""
+                    INSERT INTO tickets (
+                        phone, incident_time, package_title, real_packages, rat_types,
+                        cem_data, app_usage, ticket_content, status, comment,
+                        action_plan, color, ticket_status, created_time, ai_summary,
+                        source, ticket_code, ticket_id, flow_id, reopen_count, last_reopened_date,
+                        phan_hoi_he_thong, id_he_thong, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(phone, incident_time) DO UPDATE SET
+                        package_title = excluded.package_title,
+                        real_packages = excluded.real_packages,
+                        rat_types = excluded.rat_types,
+                        cem_data = excluded.cem_data,
+                        app_usage = excluded.app_usage,
+                        ticket_content = excluded.ticket_content,
+                        status = excluded.status,
+                        comment = excluded.comment,
+                        action_plan = excluded.action_plan,
+                        color = excluded.color,
+                        ticket_status = excluded.ticket_status,
+                        created_time = excluded.created_time,
+                        ai_summary = excluded.ai_summary,
+                        source = excluded.source,
+                        ticket_code = excluded.ticket_code,
+                        ticket_id = COALESCE(excluded.ticket_id, tickets.ticket_id),
+                        flow_id = COALESCE(excluded.flow_id, tickets.flow_id),
+                        reopen_count = excluded.reopen_count,
+                        last_reopened_date = excluded.last_reopened_date,
+                        phan_hoi_he_thong = COALESCE(excluded.phan_hoi_he_thong, tickets.phan_hoi_he_thong),
+                        id_he_thong = COALESCE(excluded.id_he_thong, tickets.id_he_thong),
+                        updated_at = CURRENT_TIMESTAMP;
+                """, (
+                    phone,
+                    incident_time,
+                    t.get("package_title", ""),
+                    t.get("real_packages", ""),
+                    t.get("rat_types", ""),
+                    t.get("cem_data", ""),
+                    t.get("app_usage", ""),
+                    t.get("ticket_content", ""),
+                    t.get("status", "CHƯA PHÂN LOẠI"),
+                    comment,
+                    action_plan,
+                    t.get("color", "FFFFFF"),
+                    ticket_status,
+                    t.get("created_time", ""),
+                    ai_summary,
+                    source,
+                    ticket_code,
+                    t.get("ticket_id") or None,
+                    t.get("flow_id") or None,
+                    reopen_count,
+                    last_reopened_date,
+                    t.get("phan_hoi_he_thong", 1),
+                    t.get("id_he_thong", 0),
+                ))
+            conn.close()
+            conn = None
+            break
+        except sqlite3.OperationalError as e:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            if "locked" in str(e).lower() and attempt < 4:
+                time.sleep(0.2 * (attempt + 1))
+                continue
+            raise
+        except Exception:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            raise
 
 def save_tickets_bulk(ticket_list):
     for t in ticket_list:

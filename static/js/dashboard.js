@@ -2970,6 +2970,61 @@ window.triggerManualScan = triggerManualScan;
 window.toggleUnifiedAutomation = toggleUnifiedAutomation;
 window.startUnifiedAutomation = startUnifiedAutomation;
 
+// TIỀN KIỂM LẠI CHO RIÊNG MODULE HIỆN TẠI (TÁI SỬ DỤNG KẾT QUẢ DB NẾU PHIẾU ĐANG Ở BƯỚC 2.6)
+async function recheckCurrentModule(btn) {
+    let endpoint = '/api/tts_old_api/run-now';
+    let moduleLabel = 'Mobile Internet (TTS Cũ)';
+
+    if (currentSystem === 'tts_new') {
+        if (currentService === 'data') {
+            endpoint = '/api/ttsnew/run-now';
+            moduleLabel = 'Mobile Internet (TTS Mới)';
+        } else if (currentService === 'call') {
+            endpoint = '/api/ttsnew/scan_call';
+            moduleLabel = 'Cuộc gọi (TTS Mới)';
+        } else if (currentService === 'sms') {
+            endpoint = '/api/ttsnew/scan_sms';
+            moduleLabel = 'Tin nhắn (TTS Mới)';
+        } else if (currentService === 'other') {
+            endpoint = '/api/ttsnew/scan_other';
+            moduleLabel = 'Gói cước / PA Khác (TTS Mới)';
+        } else {
+            endpoint = '/api/ttsnew/scan_voice';
+            moduleLabel = 'Thoại / SMS (TTS Mới)';
+        }
+    } else {
+        if (currentService === 'voice_sms') {
+            endpoint = '/api/tts_old_api/scan_voice';
+            moduleLabel = 'Thoại/SMS/Gói (TTS Cũ)';
+        }
+    }
+
+    if (btn) {
+        btn.disabled = true;
+        btn.style.opacity = '0.7';
+        btn.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 0.8s linear infinite;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg> <span>Đang tiền kiểm...</span>`;
+    }
+
+    try {
+        const res = await fetch(endpoint, { method: 'POST' });
+        const data = await res.json();
+        console.log(`[Tiền kiểm lại ${moduleLabel}]:`, data);
+    } catch (e) {
+        console.error("Lỗi tiền kiểm lại:", e);
+    } finally {
+        setTimeout(async () => {
+            if (btn) {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> <span>Tiền kiểm lại</span>`;
+            }
+            await fetchStatus();
+            await loadTickets(true);
+        }, 1200);
+    }
+}
+window.recheckCurrentModule = recheckCurrentModule;
+
 // Alias tương thích
 const runNowUnified = startUnifiedAutomation;
 
