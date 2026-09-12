@@ -6,6 +6,7 @@ import json
 import time
 import requests
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -221,6 +222,38 @@ def fetch_nguyen_nhan_list_api(token: str) -> dict:
     return mapping
 
 
+def fetch_lich_su_step1_map(id_yeu_cau_list: list, token: str) -> dict:
+    """
+    Truy vấn ngầm lịch sử xử lý (/XLXuLy/DanhSach_XuLyLichSu) song song đa luồng cho danh sách IdYeuCau.
+    Trả về dict: {id_yeu_cau: (ngay_su_co, ngay_tiep_nhan)}.
+    Giống hệt cách crawler_tts.py mở modal xl-xu-ly-lich-su của Mobile Internet.
+    """
+    if not id_yeu_cau_list:
+        return {}
+    headers = get_request_headers(token)
+    url = f"{API_BASE_URL}/XLXuLy/DanhSach_XuLyLichSu"
+    result_map = {}
+
+    def _fetch_one(id_yc):
+        if not id_yc:
+            return id_yc, None, None
+        try:
+            r = requests.post(url, headers=headers, json={"IdYeuCau": int(id_yc)}, timeout=6)
+            if r.status_code == 200:
+                his = r.json()
+                step1 = next((item for item in his if str(item.get("BuocXuLy")) in ("1.1", "1")), his[0] if his else {})
+                return id_yc, step1.get("NgaySuCo"), step1.get("NgayTiepNhan")
+        except Exception:
+            pass
+        return id_yc, None, None
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for id_yc, ngay_su_co, ngay_tiep_nhan in ex.map(_fetch_one, id_yeu_cau_list):
+            if id_yc:
+                result_map[id_yc] = (ngay_su_co, ngay_tiep_nhan)
+    return result_map
+
+
 def fetch_tts_old_tickets_api(token: str, limit: int = 200, from_date: str = None, to_date: str = None) -> list:
     """
     Quét toàn bộ phiếu sự cố từ REST API TTS Cũ (/WS/api/XLXuLy/DanhSach_XuLy).
@@ -259,6 +292,10 @@ def fetch_tts_old_tickets_api(token: str, limit: int = 200, from_date: str = Non
     raw_list = resp.json()
     standard_tickets = []
 
+    # Thu thập IdYeuCau để truy vấn song song lịch sử xử lý lấy chính xác NgaySuCo và NgayTiepNhan (chuẩn như Mobile Internet)
+    id_yeu_cau_list = [int(t.get("IdYeuCau")) for t in raw_list if t.get("IdYeuCau")]
+    lich_su_map = fetch_lich_su_step1_map(id_yeu_cau_list, token)
+
     for t in raw_list:
         phone_raw = str(t.get("DienThoai") or "").strip()
         # Chuẩn hóa phone VN (nếu 9 chữ số và đầu 8/9/3/7/5 thì thêm 84)
@@ -272,12 +309,35 @@ def fetch_tts_old_tickets_api(token: str, limit: int = 200, from_date: str = Non
 
         title = str(t.get("TieuDeYeuCau") or t.get("LinhVuc") or "Sự cố mạng").strip()
         content = str(t.get("NoiDungYeuCau") or "").strip()
-        # NgayKetThuc: Thời gian xảy ra sự cố (Ví dụ: 28/08/2026 18:19:41)
-        # NgayYeuCauHH: Thời gian tiếp nhận yêu cầu (Ví dụ: 03/09/2026 14:03:29)
-        inc_time = str(t.get("NgayKetThuc") or "").strip()
-        created_time = str(t.get("NgayYeuCauHH") or t.get("NgayYeuCau") or "").strip()
-        if not inc_time:
-            inc_time = created_time
+
+        raw_yc = t.get("IdYeuCau")
+        clean_yc = int(raw_yc) if raw_yc is not None else None
+
+        ngay_su_co, ngay_tiep_nhan = lich_su_map.get(clean_yc, (None, None))
+
+        # Ngày yêu cầu trên bảng danh sách
+        grid_date = str(t.get("NgayYeuCauHH") or t.get("NgayYeuCau") or "").strip()
+        if "T" in grid_date and not t.get("NgayYeuCauHH"):
+            try:
+                dt = datetime.fromisoformat(grid_date)
+                grid_date = dt.strftime("%d/%m/%Y %H:%M:%S")
+            except Exception:
+                pass
+
+        # Chuẩn hóa thời gian theo cơ chế của Mobile Internet (crawler_tts.py):
+        # 1. Thời gian tiếp nhận: ưu tiên NgayTiepNhan từ Bước 1.1, fallback về grid_date (NgayYeuCauHH)
+        reception_time = str(ngay_tiep_nhan or "").strip() or grid_date
+
+        # 2. Thời điểm xảy ra sự cố: ưu tiên NgaySuCo từ Bước 1.1, fallback về extract_incident_time từ nội dung, fallback về reception_time
+        incident_time = str(ngay_su_co or "").strip()
+        if not incident_time or incident_time == "None":
+            from report_bot import extract_incident_time
+            incident_time = extract_incident_time(content, default_created_time=reception_time)
+        if not incident_time or incident_time == "Không có thông tin":
+            incident_time = reception_time
+
+        created_time = reception_time
+        inc_time = incident_time
 
         # Xác định loại dịch vụ (data vs voice_sms)
         title_lower = title.lower()
