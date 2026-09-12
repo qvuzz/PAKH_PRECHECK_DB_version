@@ -1129,8 +1129,13 @@ function toggleTicketRow(ticketKey, event) {
     }
 }
 
-function dismissNewBeacon(ticketKey, event) {
-    if (event) event.stopPropagation();
+function dismissNewBeacon(ticketKey, event, clickedElem = null) {
+    if (event) {
+        try {
+            event.stopPropagation();
+            event.preventDefault();
+        } catch(e) {}
+    }
     try {
         let readTickets = JSON.parse(localStorage.getItem('acknowledged_tickets') || '{}');
         readTickets[ticketKey] = true;
@@ -1141,16 +1146,26 @@ function dismissNewBeacon(ticketKey, event) {
         localStorage.setItem('acknowledged_tickets', JSON.stringify(readTickets));
     } catch(e) {}
     
-    const el = document.getElementById(`beacon-${ticketKey}`);
-    if (el) {
-        el.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+    if (clickedElem) {
+        clickedElem.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+        clickedElem.style.opacity = '0';
+        clickedElem.style.transform = 'scale(0)';
+        setTimeout(() => {
+            if (clickedElem && clickedElem.parentNode) clickedElem.remove();
+        }, 200);
+    }
+
+    const els = document.querySelectorAll(`[id="beacon-${ticketKey}"], .beacon-${ticketKey}`);
+    els.forEach(el => {
+        el.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
         el.style.opacity = '0';
         el.style.transform = 'scale(0)';
         setTimeout(() => {
             if (el && el.parentNode) el.remove();
-        }, 250);
-    }
+        }, 200);
+    });
 }
+window.dismissNewBeacon = dismissNewBeacon;
 
 function syncCompactToDetail(ticketKey, field, val) {
     const detailTa = document.getElementById(`textarea-detail-${field}-${ticketKey}`);
@@ -1888,7 +1903,7 @@ function renderTicketsTable(force = false) {
 
             const isNewPending = (t.ticket_status !== 'Đã đóng');
             const newBeacon = (isNewPending && !isAcknowledged) 
-                ? `<span id="beacon-${ticketKey}" class="pulse-red-dot" onclick="dismissNewBeacon('${ticketKey}', event)" title="Phiếu mới (Bấm để xóa dấu đỏ / đã biết)"></span>` 
+                ? `<span id="beacon-${ticketKey}" class="pulse-red-dot beacon-${ticketKey}" onclick="dismissNewBeacon('${ticketKey}', event, this)" title="Phiếu mới (Bấm để xóa dấu đỏ / đã biết)"></span>` 
                 : '';
 
             let reopenBadgeHtml = '';

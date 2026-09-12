@@ -816,21 +816,36 @@
         }
 
         .pulse-red-dot {
-            display: inline-block;
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: #ef4444;
-            margin-left: 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            margin-left: 2px;
             margin-right: 2px;
             vertical-align: middle;
             cursor: pointer;
             position: relative;
             top: -1px;
-            animation: dotPulseRed 1.2s infinite;
+            background: transparent;
+            border: none;
+            outline: none;
+            user-select: none;
+            z-index: 5;
             transition: transform 0.2s ease, opacity 0.2s ease;
         }
-        .pulse-red-dot:hover {
+        .pulse-red-dot::before {
+            content: '';
+            display: block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #ef4444;
+            animation: dotPulseRed 1.2s infinite;
+            transition: transform 0.2s ease, background-color 0.2s ease;
+            pointer-events: none;
+        }
+        .pulse-red-dot:hover::before {
             transform: scale(1.6);
             background: #dc2626;
         }
