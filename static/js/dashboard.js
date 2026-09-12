@@ -607,10 +607,72 @@ function selectModule(sys, srv, updateUrl = true) {
         thTicketCode.style.display = 'table-cell';
     }
 
-    // Cập nhật tiêu đề cột: Tóm tắt nội dung chỉ dùng cho Mobile Internet, các trường hợp khác là Nội dung phản ánh
+    // Cập nhật tiêu đề bảng và tiêu đề cột chuyên biệt theo module
+    const thCategory = document.getElementById('thCategory');
+    const thProfile = document.getElementById('thProfile');
+    const thInfrastructure = document.getElementById('thInfrastructure');
+    const thCemData = document.getElementById('thCemData');
     const thAiSummary = document.getElementById('thAiSummary');
-    if (thAiSummary) {
-        thAiSummary.innerText = (srv === 'data') ? 'Tóm Tắt Nội Dung PAKH' : 'Nội Dung Phản Ánh';
+    const tableTitle = document.getElementById('tableTitleText');
+
+    if (srv === 'call') {
+        if (thCategory) thCategory.innerText = 'Loại Cuộc Gọi';
+        if (thProfile) thProfile.innerText = 'Trạng Thái (SAPC)';
+        if (thInfrastructure) thInfrastructure.innerText = 'Sóng';
+        if (thCemData) thCemData.innerText = 'Trạm & Cell';
+        if (thAiSummary) thAiSummary.innerText = 'Nội Dung Phản Ánh';
+        if (tableTitle) {
+            tableTitle.innerHTML = `
+                <span style="display:flex; align-items:center; gap:8px;">
+                    <span>Phiếu Cuộc Gọi — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>
+                    <button class="btn-sm btn-primary" onclick="startNewVoiceScan('call')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Cuộc Gọi (${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'})</button>
+                </span>
+            `;
+        }
+    } else if (srv === 'sms') {
+        if (thCategory) thCategory.innerText = 'Loại Tin Nhắn';
+        if (thProfile) thProfile.innerText = 'Trạng Thái (SAPC)';
+        if (thInfrastructure) thInfrastructure.innerText = 'Hạ Tầng';
+        if (thCemData) thCemData.innerText = 'Dữ Liệu Trạm';
+        if (thAiSummary) thAiSummary.innerText = 'Nội Dung Tin Nhắn';
+        if (tableTitle) {
+            tableTitle.innerHTML = `
+                <span style="display:flex; align-items:center; gap:8px;">
+                    <span>Phiếu Tin Nhắn — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>
+                    <button class="btn-sm btn-primary" onclick="startNewVoiceScan('sms')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Tin Nhắn (${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'})</button>
+                </span>
+            `;
+        }
+    } else if (srv === 'other') {
+        if (thCategory) thCategory.innerText = 'Loại PAKH';
+        if (thProfile) thProfile.innerText = 'Gói Cước Core';
+        if (thInfrastructure) thInfrastructure.innerText = 'Hạ Tầng';
+        if (thCemData) thCemData.innerText = 'Dữ Liệu CEM';
+        if (thAiSummary) thAiSummary.innerText = 'Nội Dung Phản Ánh';
+        if (tableTitle) {
+            tableTitle.innerHTML = `
+                <span style="display:flex; align-items:center; gap:8px;">
+                    <span>Phiếu Gói Cước & PA Khác — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>
+                    <button class="btn-sm btn-primary" onclick="startNewVoiceScan('other')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét PA Khác (${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'})</button>
+                </span>
+            `;
+        }
+    } else {
+        // Data (Mobile Internet)
+        if (thCategory) thCategory.innerText = 'Loại PAKH';
+        if (thProfile) thProfile.innerText = 'Hồ Sơ Core';
+        if (thInfrastructure) thInfrastructure.innerText = 'Hạ Tầng';
+        if (thCemData) thCemData.innerText = 'Dữ Liệu CEM';
+        if (thAiSummary) thAiSummary.innerText = 'Tóm Tắt Nội Dung PAKH';
+        if (tableTitle) {
+            const scanFn = sys === 'tts_new' ? 'startTtsNewScan()' : 'runNowTtsOldApi()';
+            tableTitle.innerHTML = `
+                <span style="display:flex; align-items:center; gap:8px;">
+                    <span>Phiếu Mobile Internet — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>
+                    <button class="btn-sm btn-primary" onclick="${scanFn}" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Data (${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'})</button>
+                </span>
+            `;
+        }
     }
 
     // Ẩn bộ lọc nguồn & loại PAKH vì đây là menu chuyên biệt của TTS
@@ -828,7 +890,10 @@ function switchTableTab(tab) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
     let srvName = 'Mobile Internet';
-    if (currentService === 'voice_sms') srvName = 'Thoại/SMS/Gói/PA Khác';
+    if (currentService === 'call') srvName = 'Cuộc Gọi';
+    else if (currentService === 'sms') srvName = 'Tin Nhắn';
+    else if (currentService === 'other') srvName = 'Gói Cước & PA Khác';
+    else if (currentService === 'voice_sms') srvName = 'Thoại / SMS';
     else if (currentService === 'all') srvName = '';
 
     let title = '';
@@ -837,9 +902,10 @@ function switchTableTab(tab) {
         else if (tab === 'da_dong') title = 'Lịch Sử Phiếu Đã Đóng (Chỉ Xem)';
         else title = 'Toàn Bộ Cơ Sở Dữ Liệu (Tổng hợp tất cả trạng thái)';
     } else {
-        if (tab === 'chua_dong') title = `Phiếu ${srvName}`;
-        else if (tab === 'da_dong') title = `Phiếu ${srvName} Đã Đóng`;
-        else title = `Tất Cả Phiếu ${srvName}`;
+        const sysLabel = (currentSystem === 'tts_new') ? 'TTS Mới' : 'TTS Cũ';
+        if (tab === 'chua_dong') title = `Phiếu ${srvName} — ${sysLabel}`;
+        else if (tab === 'da_dong') title = `Phiếu ${srvName} Đã Đóng — ${sysLabel}`;
+        else title = `Tất Cả Phiếu ${srvName} — ${sysLabel}`;
     }
 
     if (tab === 'chua_dong') {
@@ -866,7 +932,36 @@ function switchTableTab(tab) {
     }
 
     const titleElem = document.getElementById('tableTitleText');
-    if (titleElem) titleElem.textContent = title;
+    if (titleElem) {
+        let scanBtnHtml = '';
+        if (currentSystem === 'tts_new') {
+            if (currentService === 'call') {
+                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startNewVoiceScan('call')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Cuộc Gọi (TTS Mới)</button>`;
+            } else if (currentService === 'sms') {
+                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startNewVoiceScan('sms')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Tin Nhắn (TTS Mới)</button>`;
+            } else if (currentService === 'other') {
+                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startNewVoiceScan('other')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét PA Khác (TTS Mới)</button>`;
+            } else if (currentService === 'data') {
+                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startTtsNewScan()" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Data (TTS Mới)</button>`;
+            }
+        } else if (currentSystem === 'tts_old_api') {
+            if (currentService === 'call') {
+                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startNewVoiceScan('call')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Cuộc Gọi (TTS Cũ)</button>`;
+            } else if (currentService === 'sms') {
+                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startNewVoiceScan('sms')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Tin Nhắn (TTS Cũ)</button>`;
+            } else if (currentService === 'other') {
+                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="startNewVoiceScan('other')" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét PA Khác (TTS Cũ)</button>`;
+            } else if (currentService === 'data') {
+                scanBtnHtml = `<button class="btn-sm btn-primary" onclick="runNowTtsOldApi()" style="padding:3px 10px; font-size:11px; margin-left:8px; cursor:pointer; font-weight:700;">⚡ Quét Data (TTS Cũ)</button>`;
+            }
+        }
+        titleElem.innerHTML = `
+            <span style="display:flex; align-items:center; gap:8px;">
+                <span>${escapeHtml(title)}</span>
+                ${scanBtnHtml}
+            </span>
+        `;
+    }
 
     loadTickets(true, true);
 }
@@ -1076,9 +1171,9 @@ function renderTicketsTable(force = false) {
         const isExpanded = expandedTicketKeys.has(ticketKey);
 
         let badgeClass = 'badge-gray';
-        if (t.status.includes('BÌNH THƯỜNG') || t.status.includes('VPN')) badgeClass = 'badge-green';
-        else if (t.status.includes('PROFILE LẠ') || t.status.includes('LẠ')) badgeClass = 'badge-red';
-        else if (t.status.includes('YẾU') || t.status.includes('GÓI') || t.status.includes('LỖI ỨNG DỤNG') || t.status.includes('ỨNG DỤNG')) badgeClass = 'badge-yellow';
+        if (t.status.includes('BÌNH THƯỜNG') || t.status.includes('VPN') || t.status.includes('MẠNG LƯỚI ĐẢM BẢO') || t.status.includes('ĐỦ ĐIỀU KIỆN ĐÓNG')) badgeClass = 'badge-green';
+        else if (t.status.includes('PROFILE LẠ') || t.status.includes('LẠ') || t.status.includes('KHÓA DỊCH VỤ') || t.status.includes('SPAM') || t.status.includes('KHÓA GPRS')) badgeClass = 'badge-red';
+        else if (t.status.includes('YẾU') || t.status.includes('GÓI') || t.status.includes('LỖI ỨNG DỤNG') || t.status.includes('ỨNG DỤNG') || t.status.includes('MỞ LẠI') || t.status.includes('SỰ CỐ') || t.status.includes('KTV KIỂM TRA')) badgeClass = 'badge-yellow';
 
         const now = new Date();
         const pad = (n) => String(n).padStart(2, '0');
@@ -1115,7 +1210,7 @@ function renderTicketsTable(force = false) {
                     `;
             compactActionHtml = `<span class="badge-status badge-green" style="font-weight:700; padding:2px 6px; font-size:10px;">ĐÃ ĐÓNG</span>`;
         } else if (isTtsNew) {
-            const hasProfile = t.real_packages && t.real_packages.includes('Radio:');
+            const hasProfile = t.real_packages && (t.real_packages.includes('Radio:') || t.real_packages.includes('NAM:'));
             const isErrorStatus = !t.status || t.status.includes('LỖI') || t.status.includes('CHƯA PHÂN LOẠI');
             const precheckBtn = (hasProfile && !isErrorStatus)
                 ? `<div style="display:inline-flex; align-items:center; gap:3px;">
@@ -1195,7 +1290,7 @@ function renderTicketsTable(force = false) {
                 : '';
             if (isOtherPakh) {
                 // TUYỆT ĐỐI KHÔNG ĐÓNG BẰNG API: CHỈ CÓ NÚT "ĐÓNG THỦ CÔNG" CHUYỂN SANG TRANG XỬ LÝ SỰ CỐ
-                const hasProfile = t.real_packages && t.real_packages.includes('Radio:');
+                const hasProfile = t.real_packages && (t.real_packages.includes('Radio:') || t.real_packages.includes('NAM:'));
                 const isErrorStatus = !t.status || t.status.includes('LỖI') || t.status.includes('CHƯA PHÂN LOẠI');
                 const precheckBtn = (hasProfile && !isErrorStatus)
                     ? `<div style="display:inline-flex; align-items:center; gap:3px;">
@@ -1224,7 +1319,7 @@ function renderTicketsTable(force = false) {
                             </div>
                         `;
             } else {
-                const hasProfile = t.real_packages && t.real_packages.includes('Radio:');
+                const hasProfile = t.real_packages && (t.real_packages.includes('Radio:') || t.real_packages.includes('NAM:'));
                 const isErrorStatus = !t.status || t.status.includes('LỖI') || t.status.includes('CHƯA PHÂN LOẠI');
                 const precheckBtn = (hasProfile && !isErrorStatus)
                     ? `<div style="display:inline-flex; align-items:center; gap:3px;">
@@ -1507,44 +1602,83 @@ function renderTicketsTable(force = false) {
                         `;
             }
 
-            let btoolsHtml = `
-                <div style="font-size:10.5px; line-height:1.4; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; margin-top:4px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
-                        <strong style="color:#b45309; font-size:10px; text-transform:uppercase; letter-spacing:0.03em;">Data Usage (BTools):</strong>
-                        <a href="${btoolsUrl}" target="_blank" style="font-size:10.5px; color:#b45309; font-weight:700; text-decoration:none;" title="Tra cứu BTools cho thuê bao ${t.phone}">Xem BTools ↗</a>
-                    </div>
-                    <span style="color:#334155;">${btoolsLines.length > 0 ? escapeHtml(btoolsLines.join(' ')) : '<span style="color:#94a3b8; font-style:italic;">Chưa có dữ liệu btools hoặc không phát sinh</span>'}</span>
-                </div>
-            `;
+            if (currentService === 'call') {
+                const isLocked = isNamLocked || raw.includes('NAM: 1') || raw.includes('Khóa dịch vụ') || raw.includes('Khóa GPRS');
+                const callStatusBadge = isLocked
+                    ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:11px; padding:3px 8px; border-radius:4px; display:inline-block; font-weight:700;">NAM: 1 (KHÓA DỊCH VỤ)</span>`
+                    : `<span style="background:#dcfce7; color:#15803d; border:1px solid #86efac; font-size:11px; padding:3px 8px; border-radius:4px; display:inline-block; font-weight:700;">NAM: 0 (MỞ DỊCH VỤ)</span>`;
 
-            pkgHtml = `<div>${gridHtml}${btoolsHtml}</div>`;
-
-            // Tạo bản hiển thị rút gọn 1 dòng cho cột Hồ Sơ
-            let cParts = [];
-            if (raw.includes('Radio:')) {
-                const m = raw.match(/Radio:\s*([^\|\n\\]+)/);
-                if (m) cParts.push(`<span style="color:#0369a1; font-weight:700; font-family:'JetBrains Mono', monospace;">Radio: ${escapeHtml(m[1].trim())}</span>`);
-            }
-            if (hssVal || raw.includes('HSS:')) {
-                const targetHss = hssVal || (raw.match(/HSS:\s*([^\|\n\\]+)/) ? raw.match(/HSS:\s*([^\|\n\\]+)/)[1].trim() : '');
-                const hssDigits = targetHss.replace(/\D/g, '');
-                if (hssDigits.length >= 3 || targetHss.includes('PROFILE LẠ')) {
-                    cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">HSS: ${escapeHtml(targetHss)} (PROFILE LẠ)</span>`);
+                let pkgContent = '';
+                if (sapcItems.length > 0) {
+                    pkgContent = `
+                        <div style="margin-top:6px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px;">
+                            <div style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; margin-bottom:3px;">GÓI THOẠI / DỊCH VỤ:</div>
+                            ${sapcItems.map(item => `
+                                <div style="margin-top:3px; font-size:11px;">
+                                    <span style="color:#0f766e; font-weight:700;">${escapeHtml(item.name)}</span>
+                                    ${item.dates ? `<div style="font-size:9.5px; color:#64748b;">${escapeHtml(item.dates)}</div>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                } else {
+                    pkgContent = `<div style="color:#94a3b8; font-size:11px; font-style:italic; margin-top:4px;">Không có gói thoại riêng</div>`;
                 }
-            }
-            if (raw.includes('NAM: 1') || raw.includes('Khóa GPRS')) {
-                cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">Khóa GPRS</span>`);
-            } else if (raw.includes('NAM: 0')) {
-                cParts.push(`<span style="color:#475569; font-weight:600; font-family:'JetBrains Mono', monospace;">NAM: 0</span>`);
-            }
-            if (sapcLines.length > 0) {
-                let firstPkg = sapcLines[0].replace(/^SAPC:\s*/gi, '').trim();
-                cParts.push(`<span style="color:#475569; font-weight:500;">Gói: ${escapeHtml(firstPkg)}</span>`);
-            }
-            if (cParts.length > 0) {
-                compactProfileHtml = cParts.join(' | ');
+                pkgHtml = `
+                    <div style="font-family:'JetBrains Mono', monospace; font-size:11.5px;">
+                        <div>${callStatusBadge}</div>
+                        ${pkgContent}
+                    </div>
+                `;
+
+                // Bản thu gọn 1 dòng cho cuộc gọi
+                compactProfileHtml = isLocked
+                    ? `<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 6px; border-radius:3px;">NAM: 1 (Khóa)</span>`
+                    : `<span style="color:#15803d; font-weight:700; font-family:'JetBrains Mono', monospace;">NAM: 0 (Mở)</span>`;
+                if (sapcLines.length > 0) {
+                    let firstPkg = sapcLines[0].replace(/^SAPC:\s*/gi, '').trim();
+                    compactProfileHtml += ` | <span style="color:#475569; font-weight:500;">${escapeHtml(firstPkg)}</span>`;
+                }
             } else {
-                compactProfileHtml = escapeHtml(compactProfileTooltip);
+                let btoolsHtml = `
+                    <div style="font-size:10.5px; line-height:1.4; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; margin-top:4px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                            <strong style="color:#b45309; font-size:10px; text-transform:uppercase; letter-spacing:0.03em;">Data Usage (BTools):</strong>
+                            <a href="${btoolsUrl}" target="_blank" style="font-size:10.5px; color:#b45309; font-weight:700; text-decoration:none;" title="Tra cứu BTools cho thuê bao ${t.phone}">Xem BTools ↗</a>
+                        </div>
+                        <span style="color:#334155;">${btoolsLines.length > 0 ? escapeHtml(btoolsLines.join(' ')) : '<span style="color:#94a3b8; font-style:italic;">Chưa có dữ liệu btools hoặc không phát sinh</span>'}</span>
+                    </div>
+                `;
+
+                pkgHtml = `<div>${gridHtml}${btoolsHtml}</div>`;
+
+                // Tạo bản hiển thị rút gọn 1 dòng cho cột Hồ Sơ
+                let cParts = [];
+                if (raw.includes('Radio:')) {
+                    const m = raw.match(/Radio:\s*([^\|\n\\]+)/);
+                    if (m) cParts.push(`<span style="color:#0369a1; font-weight:700; font-family:'JetBrains Mono', monospace;">Radio: ${escapeHtml(m[1].trim())}</span>`);
+                }
+                if (hssVal || raw.includes('HSS:')) {
+                    const targetHss = hssVal || (raw.match(/HSS:\s*([^\|\n\\]+)/) ? raw.match(/HSS:\s*([^\|\n\\]+)/)[1].trim() : '');
+                    const hssDigits = targetHss.replace(/\D/g, '');
+                    if (hssDigits.length >= 3 || targetHss.includes('PROFILE LẠ')) {
+                        cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">HSS: ${escapeHtml(targetHss)} (PROFILE LẠ)</span>`);
+                    }
+                }
+                if (raw.includes('NAM: 1') || raw.includes('Khóa GPRS')) {
+                    cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">Khóa GPRS</span>`);
+                } else if (raw.includes('NAM: 0')) {
+                    cParts.push(`<span style="color:#475569; font-weight:600; font-family:'JetBrains Mono', monospace;">NAM: 0</span>`);
+                }
+                if (sapcLines.length > 0) {
+                    let firstPkg = sapcLines[0].replace(/^SAPC:\s*/gi, '').trim();
+                    cParts.push(`<span style="color:#475569; font-weight:500;">Gói: ${escapeHtml(firstPkg)}</span>`);
+                }
+                if (cParts.length > 0) {
+                    compactProfileHtml = cParts.join(' | ');
+                } else {
+                    compactProfileHtml = escapeHtml(compactProfileTooltip);
+                }
             }
         }
 
@@ -1594,6 +1728,16 @@ function renderTicketsTable(force = false) {
         const fullStatus = displayStatus;
         if (displayStatus.includes('HOẠT ĐỘNG BÌNH THƯỜNG') || displayStatus.includes('HOAT DONG BINH THUONG')) {
             displayStatus = 'BÌNH THƯỜNG';
+        } else if (displayStatus.includes('MẠNG LƯỚI ĐẢM BẢO') || displayStatus.includes('ĐỦ ĐIỀU KIỆN ĐÓNG')) {
+            displayStatus = 'ĐỦ Đ/K ĐÓNG';
+        } else if (displayStatus.includes('KHÓA DỊCH VỤ') || displayStatus.includes('NAM: 1')) {
+            displayStatus = 'KHÓA DỊCH VỤ';
+        } else if (displayStatus.includes('SPAM')) {
+            displayStatus = 'SPAM CUỘC GỌI';
+        } else if (displayStatus.includes('PHIẾU MỞ LẠI') || displayStatus.includes('MỞ LẠI')) {
+            displayStatus = 'PHIẾU MỞ LẠI';
+        } else if (displayStatus.includes('SỰ CỐ DIỆN RỘNG') || displayStatus.includes('SỰ CỐ')) {
+            displayStatus = 'SỰ CỐ TRẠM';
         } else if (displayStatus.includes('GÓI CÒN HẠN')) {
             displayStatus = 'GÓI CÒN HẠN';
         } else if (displayStatus.includes('BẮT SÓNG 4G KÉM') || displayStatus.includes('KHÔNG CÓ 4G')) {

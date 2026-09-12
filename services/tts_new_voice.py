@@ -96,10 +96,16 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
         except Exception:
             sapc_client = None
 
+        from cem_client import CEMClient
+        try:
+            cem_client = CEMClient()
+        except Exception:
+            cem_client = None
+
+        from services.voice_precheck import precheck_single_voice_ticket
+
         # Bước 2: Tra cứu Core & Profile song song để xử lý nhanh toàn bộ danh sách phiếu
         import concurrent.futures
-        hss_output_dir = str(BASE_DIR / "output")
-        os.makedirs(hss_output_dir, exist_ok=True)
 
         def _process_single_voice_ticket(item_tuple):
             idx, t = item_tuple
@@ -109,56 +115,33 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
             code = t.get("ticket_code", "")
             inc_time = str(t.get("incident_time") or t.get("created_time") or "").strip()
 
-            state.current_step = f"Tra cứu Core {idx}/{len(voice_tickets)}: {phone_84}"
+            state.current_step = f"Tiền kiểm Cuộc gọi {idx}/{len(voice_tickets)}: {phone_84}"
             try:
-                info_result = {}
-                sapc_result = {"msisdn": phone_84, "packages": []}
-                if sapc_client:
-                    try:
-                        info_result = tra_cell_tu_so_dien_thoai(phone_84, session=sapc_client.session)
-                        raw_sapc = sapc_client.query(phone_84)
-                        sapc_result = convert_sapc_response(raw_sapc)
-                    except Exception as ex_core:
-                        state.log("WARN", f"Lỗi tra Core cho {phone_84}: {ex_core}")
-
-                with open(os.path.join(hss_output_dir, f"{phone_84}.json"), "w", encoding="utf-8") as hf:
-                    json.dump({
-                        **sapc_result,
-                        "subscriber_info": info_result,
-                        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }, hf, ensure_ascii=False, indent=4)
-
-                formatted_packages = get_formatted_sapc_packages(phone_84)
+                eval_res = precheck_single_voice_ticket(
+                    phone_84=phone_84, 
+                    ticket=t, 
+                    sapc_client=sapc_client, 
+                    cem_client=cem_client
+                )
 
                 ticket_content = t.get("content", "")
                 reopen_count = int(t.get("reopen_count") or 0)
                 last_reopened_date = str(t.get("last_reopened_date") or "").strip()
 
-                ai_summary_val = ticket_content
-                if reopen_count > 0:
-                    warn_prefix = f"⚠️ [CẢNH BÁO: Phiếu mở lại {reopen_count} lần"
-                    if last_reopened_date:
-                        warn_prefix += f" (Lần cuối: {last_reopened_date})"
-                    warn_prefix += " - Yêu cầu KTV kiểm tra kỹ!]\n"
-                    ai_summary_val = warn_prefix + (ticket_content or "")
-                    state.log("WARN", f"⚠️ Phiếu Thoại/SMS {code} ({phone_84}) mở lại {reopen_count} lần -> Cảnh báo KTV kiểm tra!")
-
-                cell_desc = info_result.get("Cell ID") or info_result.get("ECGI") or "--"
-                rat_type_str = info_result.get("Radio") or "Sóng di động"
-
                 rec_update = {
                     "phone": phone_84,
                     "incident_time": inc_time,
-                    "package_title": t.get("title", "Thoại / SMS"),
+                    "package_title": t.get("title", "Cuộc gọi"),
                     "ticket_content": ticket_content,
-                    "status": "",
-                    "real_packages": formatted_packages,
-                    "rat_types": rat_type_str,
-                    "cem_data": f"Cell: {cell_desc}",
+                    "status": eval_res.get("status", "MẠNG LƯỚI ĐẢM BẢO"),
+                    "color": eval_res.get("color", "green"),
+                    "comment": eval_res.get("comment", ""),
+                    "action_plan": eval_res.get("action_plan", "Đủ điều kiện đóng phiếu"),
+                    "real_packages": eval_res.get("real_packages", "--"),
+                    "rat_types": eval_res.get("rat_types", "2G/3G/4G Thoại"),
+                    "cem_data": eval_res.get("cem_data", "--"),
                     "app_usage": "--",
-                    "ai_summary": ai_summary_val,
-                    "comment": "",
-                    "action_plan": "",
+                    "ai_summary": eval_res.get("ai_summary", ticket_content),
                     "ticket_status": "Chưa đóng",
                     "force_update_status": True,
                     "source": "tts_new",
@@ -169,10 +152,10 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                     "last_reopened_date": last_reopened_date
                 }
                 save_or_update_ticket(rec_update)
-                state.log("SUCCESS", f"[{idx}/{len(voice_tickets)}] Đã tra cứu Core: {phone_84} ({code.split(chr(10))[0]})")
+                state.log("SUCCESS", f"[{idx}/{len(voice_tickets)}] Đã tiền kiểm Cuộc gọi: {phone_84} -> {eval_res.get('status')}")
                 return True
             except Exception as e:
-                state.log("ERROR", f"Lỗi xử lý {phone_84}: {e}")
+                state.log("ERROR", f"Lỗi tiền kiểm {phone_84}: {e}")
                 return False
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:

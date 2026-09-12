@@ -597,10 +597,42 @@ async def precheck_one_ticket(request: Request):
 
         conn = get_db_connection()
         with conn:
-            cur = conn.execute("SELECT package_title, ticket_content FROM tickets WHERE phone = ?", (phone,))
+            cur = conn.execute("SELECT package_title, ticket_content, reopen_count FROM tickets WHERE phone = ?", (phone,))
             row = cur.fetchone()
             pkg_title = (row[0] if row else "Thoại / SMS") or ""
             t_content = row[1] if row else ""
+            reopen_cnt = row[2] if row and len(row) > 2 else 0
+
+            from services.voice_precheck import is_voice_ticket, precheck_single_voice_ticket
+            if is_voice_ticket(pkg_title):
+                t_info = {
+                    "package_title": pkg_title,
+                    "ticket_content": t_content,
+                    "incident_time": incident_time,
+                    "reopen_count": reopen_cnt
+                }
+                v_res = precheck_single_voice_ticket(phone, t_info, driver=driver)
+                conn.execute("""
+                    UPDATE tickets 
+                    SET real_packages = ?, 
+                        rat_types = ?,
+                        cem_data = ?,
+                        status = ?,
+                        comment = ?,
+                        action_plan = ?,
+                        updated_at = CURRENT_TIMESTAMP 
+                    WHERE phone = ?
+                """, (
+                    v_res.get("formatted_pkg", ""),
+                    v_res.get("rat_types", ""),
+                    v_res.get("cem_data", ""),
+                    v_res.get("status", ""),
+                    v_res.get("comment", ""),
+                    v_res.get("action_plan", ""),
+                    phone
+                ))
+                state.log("SUCCESS", f"✅ Đã tiền kiểm Cuộc gọi xong cho {phone}: {v_res.get('status')}")
+                return {"success": True, "formatted_pkg": v_res.get("formatted_pkg", ""), "info": info_res}
 
             num_file = BASE_DIR / "number" / f"{phone}.json"
             existing_clean_data = []
