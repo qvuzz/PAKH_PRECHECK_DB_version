@@ -2661,12 +2661,23 @@ async function handleMoveToStep24(ticketCode, phone, ticketId, flowId, btnElem) 
         return;
     }
 
+    const cleanTicketCode = ticketCode.split('\n')[0].trim();
+    const ticketKey = phone || cleanTicketCode;
+    const commentEl = document.getElementById(`textarea-detail-comment-${ticketKey}`) || document.getElementById(`textarea-comment-${ticketKey}`);
+    const planEl = document.getElementById(`textarea-detail-action_plan-${ticketKey}`) || document.getElementById(`textarea-action_plan-${ticketKey}`);
+    const commentVal = commentEl ? commentEl.value.trim() : '';
+    const planVal = planEl ? planEl.value.trim() : '';
+
+    const displayComment = commentVal || "Chuyển 2.4 (hoặc lấy từ dữ liệu tiền kiểm)";
+    const displayPlan = planVal || "Chuyển 2.4 (hoặc lấy từ dữ liệu tiền kiểm)";
+
     const confirmMsg = `XÁC NHẬN CHUYỂN BƯỚC 2.4 (TTS MỚI):\n\n` +
-        `• Mã phiếu: ${ticketCode}\n` +
+        `• Mã phiếu: ${cleanTicketCode}\n` +
         `• Số điện thoại: ${phone}\n` +
         `• Chuyển từ: Bước 2.3  ➔  Bước: 2.4 Đánh giá, báo cáo tình hình xử lý\n` +
         `• Đơn vị nhận: Trung tâm Vận hành khai thác mạng Khu vực miền Nam/Tổ Dịch vụ (SOC2)\n` +
-        `• Nội dung xử lý & chuyển giao: "Chuyển 2.4"\n\n` +
+        `• Ý kiến phân tích: "${displayComment}"\n` +
+        `• Phương án xử lý: "${displayPlan}"\n\n` +
         `Bạn có chắc chắn muốn chuyển phiếu này sang bước 2.4 không?`;
 
     if (!confirm(confirmMsg)) return;
@@ -2687,7 +2698,9 @@ async function handleMoveToStep24(ticketCode, phone, ticketId, flowId, btnElem) 
                 phone: phone,
                 ticket_id: ticketId || null,
                 flow_id: flowId || null,
-                token: ttsNewToken || ''
+                token: ttsNewToken || '',
+                comment: commentVal,
+                action_plan: planVal
             })
         });
         const data = await res.json();

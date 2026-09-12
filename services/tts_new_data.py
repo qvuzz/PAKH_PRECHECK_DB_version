@@ -326,7 +326,7 @@ def _process_single_ticket(
                         # TỰ ĐỘNG CHUYỂN TIẾP SANG 2.6 HOẶC 5.1 THEO CHUỖI LIVE
                         try:
                             time.sleep(1.5)
-                            raw_act = fetch_active_tickets(token, limit=100)
+                            raw_act = fetch_active_tickets(token, limit=1000)
                             next_f_id = None
                             for r_it in raw_act:
                                 if (ticket.get("ticket_id") and str(r_it.get("ticketId")) == str(ticket.get("ticket_id"))) or \
@@ -353,7 +353,7 @@ def _process_single_ticket(
                                             save_or_update_ticket(rec)
                                         # TIẾP TỤC ĐÓNG DỨT ĐIỂM NẾU SANG 2.6
                                         time.sleep(1.5)
-                                        raw_act3 = fetch_active_tickets(token, limit=100)
+                                        raw_act3 = fetch_active_tickets(token, limit=1000)
                                         f3_id = None
                                         for r_it3 in raw_act3:
                                             if (ticket.get("ticket_id") and str(r_it3.get("ticketId")) == str(ticket.get("ticket_id"))) or \
@@ -391,7 +391,7 @@ def _process_single_ticket(
                         if "2.6" in close_res.get("step_name", ""):
                             try:
                                 time.sleep(1.5)
-                                raw_act3 = fetch_active_tickets(token, limit=100)
+                                raw_act3 = fetch_active_tickets(token, limit=1000)
                                 f3_id = None
                                 for r_it3 in raw_act3:
                                     if (ticket.get("ticket_id") and str(r_it3.get("ticketId")) == str(ticket.get("ticket_id"))) or \

@@ -820,13 +820,34 @@ async def move_ticket_to_step_2_4(request: Request):
             "message": f"Không tìm thấy luồng xử lý (flow_id/ticket_id) của phiếu {clean_code or phone} trên hệ thống TTS Mới."
         }
 
+    comment = (body.get("comment") or "").strip()
+    action_plan = (body.get("action_plan") or "").strip()
+    if not comment or not action_plan:
+        try:
+            conn = get_db_connection()
+            r_db = conn.execute("""
+                SELECT comment, action_plan 
+                FROM tickets 
+                WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
+            """, (ticket_id, f"{clean_code}%", phone)).fetchone()
+            if r_db:
+                if not comment and r_db["comment"]:
+                    comment = str(r_db["comment"]).strip()
+                if not action_plan and r_db["action_plan"]:
+                    action_plan = str(r_db["action_plan"]).strip()
+            conn.close()
+        except Exception:
+            pass
+
     state.log("STEP", f"Đang gửi yêu cầu chuyển bước 2.4 cho phiếu {clean_code or phone} bởi [{ktv_name}]...")
     res = api_move_step_2_3_to_2_4(
         token=tok,
         ticket_flow_id=int(flow_id),
         ticket_id=int(ticket_id),
         phone=phone,
-        ticket_code=clean_code
+        ticket_code=clean_code,
+        comment=comment,
+        action_plan=action_plan
     )
 
     if res.get("success"):

@@ -678,12 +678,26 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
             }
 
         # =====================================================================
+        # TRƯỜNG HỢP 0: Đang ở bước 2.3 -> Tự động chuyển sang bước 2.4
+        # =====================================================================
+        if "2.3" in curr_node_name or "2.3" in str((curr_node.get("processData") or {}).get("stepCode", "")):
+            return api_move_step_2_3_to_2_4(
+                token=token,
+                ticket_flow_id=ticket_flow_id,
+                ticket_id=ticket_id,
+                phone=phone,
+                ticket_code=ticket_code,
+                comment=closing_content or "",
+                action_plan=assign_content or ""
+            )
+
+        # =====================================================================
         # TRƯỜNG HỢP 2: Đang ở bước 2.4 (Lần đầu xuất hiện -> Chuyển sang 2.6 hoặc 5.1)
         # =====================================================================
         if "2.4" not in curr_node_name:
             return {
                 "success": False,
-                "message": f"⚠️ Phiếu đang ở bước '{curr_node_name}', không phải bước 2.4 hoặc 2.6. Hệ thống chỉ cho phép tự động đóng/chuyển bước khi phiếu ở bước 2.4 (chuyển 2.6/5.1) hoặc bước 2.6 (đóng dứt điểm). Vui lòng xử lý thủ công trên web TTS!"
+                "message": f"⚠️ Phiếu đang ở bước '{curr_node_name}', không phải bước 2.3, 2.4 hoặc 2.6. Hệ thống chỉ cho phép tự động xử lý khi phiếu ở bước 2.3 (sang 2.4), bước 2.4 (sang 2.6/5.1) hoặc bước 2.6 (đóng dứt điểm). Vui lòng xử lý thủ công trên web TTS!"
             }
 
         if target_step == "5.1":
@@ -809,7 +823,7 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         new_actual_step = next_step_name
         try:
             time.sleep(1.2)
-            raw_active = fetch_active_tickets(token, limit=100)
+            raw_active = fetch_active_tickets(token, limit=1000)
             for r_it in raw_active:
                 if (ticket_id and str(r_it.get("ticketId")) == str(ticket_id)) or \
                    (clean_code and clean_code in str(r_it.get("ticketCode", ""))):
@@ -855,14 +869,15 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
 
 
 def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
-                            phone: str = "", ticket_code: str = "") -> dict:
+                            phone: str = "", ticket_code: str = "",
+                            comment: str = "", action_plan: str = "") -> dict:
     """
     Thực hiện chuyển phiếu từ bước 2.3 sang bước 2.4 trên hệ thống TTS Mới:
-    - B0: Kiểm tra tính chính xác của phân loại phiếu: True
-    - Nội dung xử lý (closingContent): "Chuyển 2.4"
+    - B0: Kiểm tra tính chính xác của phân loại phiếu: True (nếu form yêu cầu)
+    - Nội dung xử lý (closingContent): Cột 10 (comment) hoặc mặc định "Chuyển 2.4"
     - Bước tiếp theo: "2.4 Đánh giá, báo cáo tình hình xử lý"
     - Đơn vị nhận (clUnitId): Trung tâm Vận hành khai thác mạng Khu vực miền Nam/Tổ Dịch vụ (SOC2) (418)
-    - Nội dung chuyển giao (assignContent): "Chuyển 2.4"
+    - Nội dung chuyển giao (assignContent): Cột 11 (action_plan) hoặc mặc định "Chuyển 2.4"
     """
     if not token or not str(token).strip():
         return {"success": False, "message": "❌ Thiếu token xác thực OneOSS của TTS Mới. Vui lòng đăng nhập TTS Mới trên trình duyệt!"}
@@ -978,9 +993,12 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
             except Exception:
                 pass
 
-        if "radio_4q1pss" not in column_json:
-            column_json["radio_4q1pss"] = "1"
-        column_json["b0"] = "1"
+            if "radio_4q1pss" not in column_json:
+                column_json["radio_4q1pss"] = "1"
+            column_json["b0"] = "1"
+
+        closing_content = (comment or "").strip() or "Chuyển 2.4"
+        assign_content = (action_plan or "").strip() or "Chuyển 2.4"
 
         payload = {
             "ticketFlowId": ticket_flow_id,
@@ -988,8 +1006,8 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
             "formId": form_id,
             "processNodeInstanceId": curr_node.get("id"),
             "processDefinitionId": step_data.get("processInstanceId"),
-            "closingContent": "Chuyển 2.4",
-            "assignContent": "Chuyển 2.4",
+            "closingContent": closing_content,
+            "assignContent": assign_content,
             "columnJson": column_json,
             "newTicketFlow": {
                 "ticketFlowParentId": ticket_flow_id,
@@ -1017,7 +1035,7 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
         new_actual_step = next_step_name
         try:
             time.sleep(1.2)
-            raw_active = fetch_active_tickets(token, limit=100)
+            raw_active = fetch_active_tickets(token, limit=300)
             for r_it in raw_active:
                 if (ticket_id and str(r_it.get("ticketId")) == str(ticket_id)) or \
                    (clean_code and clean_code in str(r_it.get("ticketCode", ""))):
@@ -1032,7 +1050,8 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
         except Exception:
             pass
 
-        new_ticket_code_val = f"{clean_code}\n[2.4_QT_CLM_02]\n{new_actual_step}"
+        proc_label = (chosen_node.get("processData") or {}).get("processName") or chosen_node.get("processInstanceName") or "2.4_QT_CLM_02"
+        new_ticket_code_val = f"{clean_code}\n[{proc_label}]\n{new_actual_step}"
         try:
             from db_manager import get_db_connection
             conn = get_db_connection()
@@ -1076,7 +1095,7 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
         token = "Bearer " + token
 
     try:
-        active_list = fetch_active_tickets(token, limit=100)
+        active_list = fetch_active_tickets(token, limit=300)
     except Exception as e:
         return {"success": False, "message": f"Lỗi fetch active tickets: {e}"}
 
@@ -1130,33 +1149,35 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
             matched_it = active_map.get(tid_str) or active_map.get(clean_c)
             if matched_it:
                 latest_flow_id = matched_it.get("id")
-                # Nếu flow_id khác hoặc bước hiện tại cần làm mới
-                if latest_flow_id and (str(row["flow_id"]) != str(latest_flow_id) or "2.3" in raw_code or "2.4" in raw_code):
+                c_name = str(matched_it.get("stepName") or "").strip()
+                c_proc = str(matched_it.get("processDefinitionName") or "").strip()
+                
+                if not c_name and latest_flow_id:
                     try:
                         url_step = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={latest_flow_id}"
-                        r_step = requests.get(url_step, headers=headers, timeout=5).json()
+                        r_step = requests.get(url_step, headers=headers, timeout=3).json()
                         c_nodes = (r_step.get("data") or {}).get("currentNodes", [])
                         if c_nodes:
                             c_node = c_nodes[0]
                             c_name = str(c_node.get("name") or "")
                             c_proc = str((c_node.get("processData") or {}).get("processName") or "")
-                            
-                            new_code_lines = [clean_c]
-                            if c_proc:
-                                new_code_lines.append(f"[{c_proc}]")
-                            if c_name:
-                                new_code_lines.append(c_name)
-                            new_ticket_code = "\n".join(new_code_lines)
-
-                            if str(row["flow_id"]) != str(latest_flow_id) or raw_code != new_ticket_code:
-                                conn.execute("""
-                                    UPDATE tickets 
-                                    SET flow_id = ?, ticket_code = ?, updated_at = CURRENT_TIMESTAMP 
-                                    WHERE ticket_id = ? AND source = 'tts_new'
-                                """, (latest_flow_id, new_ticket_code, row["ticket_id"]))
-                                updated_count += 1
                     except Exception:
                         pass
+
+                new_code_lines = [clean_c]
+                if c_proc:
+                    new_code_lines.append(f"[{c_proc}]")
+                if c_name:
+                    new_code_lines.append(c_name)
+                new_ticket_code = "\n".join(new_code_lines)
+
+                if str(row["flow_id"]) != str(latest_flow_id) or raw_code != new_ticket_code:
+                    conn.execute("""
+                        UPDATE tickets 
+                        SET flow_id = ?, ticket_code = ?, updated_at = CURRENT_TIMESTAMP 
+                        WHERE ticket_id = ? AND source = 'tts_new'
+                    """, (latest_flow_id, new_ticket_code, row["ticket_id"]))
+                    updated_count += 1
             else:
                 # Phiếu không còn nằm trong active_list -> tự động đánh dấu đã đóng trên TTS Mới
                 try:
