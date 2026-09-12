@@ -236,23 +236,6 @@ async function fetchStatus() {
             pillStatus.className = 'stat-pill ' + (data.status === 'PROCESSING' ? 'processing' : (data.status === 'WAITING' ? 'waiting' : 'idle'));
         }
 
-        // Cập nhật chỉ báo trạng thái quét riêng biệt theo từng module ở Sidebar
-        const isOldDataScanning = (data.status === 'PROCESSING') && (currentEngine === 'api' || currentEngine === 'selenium');
-        const isNewDataScanning = (data.status === 'PROCESSING') && (currentEngine === 'tts_new');
-
-        const navOldSub = document.querySelector('#nav-tts_old_api-data .nav-item-sub');
-        if (navOldSub) {
-            navOldSub.innerHTML = isOldDataScanning
-                ? '<span style="color:#0284c7; font-weight:700;">⚡ Đang quét...</span>'
-                : 'Quét tự động';
-        }
-        const navNewSub = document.querySelector('#nav-tts_new-data .nav-item-sub');
-        if (navNewSub) {
-            navNewSub.innerHTML = isNewDataScanning
-                ? '<span style="color:#0284c7; font-weight:700;">⚡ Đang quét...</span>'
-                : 'Quét toàn bộ';
-        }
-
         if (data.system_counts) {
             const sc = data.system_counts;
             const bOldData = document.getElementById('badgeOldData');
