@@ -377,9 +377,9 @@
                 </div>
 
                 <!-- 2. Tick Tự đóng phiếu -->
-                <label id="ctrlAutoCloseUnified" class="ctrl-item"
+                <label id="ctrlAutoCloseUnified" class="ctrl-item" onclick="handleAutoCloseContainerClick(event)"
                     style="display:flex; align-items:center; gap:5px; font-size:12px; font-weight:700; color:#dc2626; cursor:pointer; user-select:none; margin:0 3px; padding:2px 8px; border-radius:5px; border:1px solid rgba(220,38,38,0.3); background:#fef2f2;"
-                    title="CẢNH BÁO NGUY HIỂM: Tự động đóng phiếu trên hệ thống (Cần xác nhận 2 lần)">
+                    title="CẢNH BÁO NGUY HIỂM: Tự động đóng phiếu trên hệ thống (Chỉ dành cho Admin từ 127./localhost, cần xác nhận 2 lần)">
                     <input type="checkbox" id="chkAutoCloseUnified" onchange="toggleAutoCloseUnified(this.checked)"
                         style="width:15px; height:15px; accent-color:#dc2626; cursor:pointer;">
                     <span id="autoCloseUnifiedLabel" style="color:#dc2626; font-weight:800; letter-spacing:0.3px;">⚠️ Tự đóng</span>

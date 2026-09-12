@@ -1,6 +1,13 @@
 let isRunning = false;
 let currentAutoClose = false;
 
+// Xác định quyền Admin đồng bộ ngay lập tức dựa trên Hostname (Localhost hoặc dải IP 127.x.x.x)
+function checkIsLocalHost() {
+    const host = window.location.hostname || '';
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.startsWith('127.');
+}
+let isSystemAdmin = checkIsLocalHost() || (new URLSearchParams(window.location.search).get('role') === 'admin');
+
 function escapeHtml(str) {
     if (!str) return '';
     return String(str)
@@ -25,6 +32,7 @@ function updateModeUI(autoClose) {
             chkUnified.checked = false;
             chkUnified.disabled = true;
         } else {
+            chkUnified.disabled = false;
             chkUnified.checked = currentAutoClose;
         }
     }
@@ -53,6 +61,13 @@ function updateModeUI(autoClose) {
     }
 }
 
+function handleAutoCloseContainerClick(e) {
+    if (!isSystemAdmin) {
+        if (e) e.preventDefault();
+        alert("⛔ TÍNH NĂNG BỊ KHÓA:\n\nChế độ [TỰ ĐỘNG ĐÓNG PHIẾU] chỉ cho phép kích hoạt từ Máy chủ Admin (truy cập qua localhost hoặc IP 127.x.x.x).\n\nMáy trạm KTV kết nối từ xa chỉ được phép Quét & Tiền kiểm tra cứu!");
+    }
+}
+
 async function toggleAutoCloseUnified(isChecked) {
     const chkUnified = document.getElementById('chkAutoCloseUnified');
     if (!isSystemAdmin) {
@@ -60,6 +75,7 @@ async function toggleAutoCloseUnified(isChecked) {
             chkUnified.checked = false;
             chkUnified.disabled = true;
         }
+        alert("⛔ TÍNH NĂNG BỊ KHÓA:\n\nChế độ [TỰ ĐỘNG ĐÓNG PHIẾU] chỉ cho phép kích hoạt từ Máy chủ Admin (truy cập qua localhost hoặc IP 127.x.x.x).\n\nMáy trạm KTV kết nối từ xa chỉ được phép Quét & Tiền kiểm tra cứu!");
         return;
     }
 
@@ -2886,7 +2902,7 @@ function exportExcel() {
 // QUẢN LÝ PHIÊN ĐĂNG NHẬP TTS & PHÂN QUYỀN (MULTI-USER SESSION)
 // =====================================================================
 let currentAuthUser = null;
-let isSystemAdmin = false;
+// isSystemAdmin được xác định đồng bộ ngay đầu file dashboard.js
 
 function getTtsAuthSession() {
     try {
@@ -3479,7 +3495,8 @@ async function initUserSession() {
         console.warn("Lỗi kiểm tra current_user:", e);
     }
 
-    isSystemAdmin = serverData.is_local || urlParams.get('role') === 'admin';
+    isSystemAdmin = serverData.is_local || checkIsLocalHost() || urlParams.get('role') === 'admin';
+    applyUserSessionState();
 
     // Chỉ máy chủ Localhost (Admin) mới tự động kết nối với Chrome đang mở trên máy chủ
     if (serverData.is_local) {

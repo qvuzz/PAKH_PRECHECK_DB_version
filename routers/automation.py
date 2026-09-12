@@ -20,11 +20,17 @@ def get_system_status():
     return snap
 
 
+def is_admin_ip(client_ip: str) -> bool:
+    if not client_ip:
+        return True
+    return client_ip in ("127.0.0.1", "localhost", "::1") or client_ip.startswith("127.")
+
+
 @router.post("/start")
 async def start_automation(request: Request):
     body = await request.json()
     client_ip = request.client.host if request.client else "127.0.0.1"
-    is_local = client_ip in ("127.0.0.1", "localhost", "::1")
+    is_local = is_admin_ip(client_ip)
 
     state.is_running = True
     state.stop_requested = False
@@ -34,6 +40,8 @@ async def start_automation(request: Request):
     if not is_local:
         state.auto_close = False
         state.auto_close_mode = "none"
+        if body.get("auto_close") or (body.get("auto_close_mode") and body.get("auto_close_mode") != "none"):
+            state.log("WARNING", f"⛔ Đã chặn yêu cầu Tự đóng từ IP máy trạm {client_ip} (Chỉ Admin từ 127./localhost mới được phép)")
     elif "auto_close_mode" in body:
         state.auto_close_mode = str(body["auto_close_mode"]).strip()
         state.auto_close = (state.auto_close_mode != "none")
@@ -56,7 +64,7 @@ async def start_automation(request: Request):
 async def update_automation_config(request: Request):
     body = await request.json()
     client_ip = request.client.host if request.client else "127.0.0.1"
-    is_local = client_ip in ("127.0.0.1", "localhost", "::1")
+    is_local = is_admin_ip(client_ip)
 
     if "scan_scopes" in body:
         state.scan_scopes = list(body["scan_scopes"])
@@ -64,6 +72,8 @@ async def update_automation_config(request: Request):
     if not is_local:
         state.auto_close = False
         state.auto_close_mode = "none"
+        if body.get("auto_close") or (body.get("auto_close_mode") and body.get("auto_close_mode") != "none"):
+            state.log("WARNING", f"⛔ Đã chặn yêu cầu Tự đóng từ IP máy trạm {client_ip} (Chỉ Admin từ 127./localhost mới được phép)")
     elif "auto_close_mode" in body:
         state.auto_close_mode = str(body["auto_close_mode"]).strip()
         state.auto_close = (state.auto_close_mode != "none")
