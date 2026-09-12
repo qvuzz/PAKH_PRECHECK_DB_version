@@ -1406,7 +1406,13 @@ function renderTicketsTable(force = false) {
         let aiSummaryHtml = '--';
         let compactSummaryHtml = '--';
         let compactSummaryTooltip = '';
-        if (isDataTicket && t.ai_summary && t.ai_summary !== 'null' && t.ai_summary.trim() !== '' && t.ai_summary !== t.ticket_content) {
+        const hasStructuredSummary = isDataTicket && t.ai_summary && t.ai_summary !== 'null' && t.ai_summary.trim() !== '' && (
+            t.ai_summary !== t.ticket_content || 
+            t.ai_summary.includes('1.') || 
+            t.ai_summary.includes('Gói cước sử dụng:') ||
+            t.ai_summary.toLowerCase().includes('tình trạng')
+        );
+        if (hasStructuredSummary) {
             const cleanSummaryText = t.ai_summary.replace(/\[?AI\]?[:\-\s]*/gi, '').trim();
             const lines = cleanSummaryText.split('\n').map(l => l.trim().replace(/^\[?AI\]?[:\-\s]*/gi, '')).filter(l => l.length > 0);
             compactSummaryTooltip = lines.join(' | ');
@@ -1824,55 +1830,54 @@ function renderTicketsTable(force = false) {
 
         if (t.ticket_code) {
             const codeLines = t.ticket_code.split('\n').map(l => l.trim()).filter(l => l);
-            let mainCode = codeLines[0] || '';
-            if (mainCode.endsWith('.0') && !isNaN(Number(mainCode))) {
-                mainCode = mainCode.slice(0, -2);
-            }
+            let mainCode = '';
             let procName = '';
             let stepName = '';
-            for (let i = 1; i < codeLines.length; i++) {
-                const line = codeLines[i];
-                if (line.startsWith('[') && line.endsWith(']')) {
-                    procName = line;
+
+            for (const line of codeLines) {
+                if (line.includes('/202') || line.startsWith('HT/')) {
+                    if (!mainCode) mainCode = line;
+                } else if (line.startsWith('[') && line.endsWith(']')) {
+                    if (!procName) procName = line;
+                } else if (line.includes('2.') || line.includes('5.') || line.toLowerCase().includes('bước') || line.toLowerCase().includes('xử lý') || line.toLowerCase().includes('đóng')) {
+                    if (!stepName) stepName = line;
+                } else if (!mainCode) {
+                    mainCode = line;
                 } else if (!stepName) {
                     stepName = line;
-                } else if (!procName) {
-                    procName = `[${line}]`;
                 }
+            }
+
+            if (!mainCode && codeLines[0]) mainCode = codeLines[0];
+            if (mainCode.endsWith('.0') && !isNaN(Number(mainCode))) {
+                mainCode = mainCode.slice(0, -2);
             }
             if (!procName && t.process_name) procName = `[${t.process_name}]`;
             if (!stepName && t.step_name) stepName = t.step_name;
             if (procName && !procName.startsWith('[')) procName = `[${procName}]`;
 
-            const extraLines = codeLines.slice(1);
-            const extraHtml = extraLines.map(l => {
-                if (l.startsWith('[') && l.endsWith(']')) {
-                    return `<div style="font-size:10px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:3px; margin-top:3px; display:inline-block; font-family:-apple-system, BlinkMacSystemFont, sans-serif;">${escapeHtml(l)}</div>`;
-                }
-                return `<div style="font-size:10.5px; font-weight:500; color:#475569; margin-top:2px; line-height:1.25; font-family:-apple-system, BlinkMacSystemFont, sans-serif;">${escapeHtml(l)}</div>`;
-            }).join('');
-
             let reopenBadgeHtml = '';
             if (reopenCount > 0) {
                 reopenBadgeHtml = `
-                            <div style="margin-top:4px;">
-                                <span class="badge-status" style="background:#fee2e2; color:#dc2626; border:1px solid #f87171; font-weight:800; font-size:10px; padding:2px 7px; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 2px rgba(220,38,38,0.15);" title="THÔNG TIN MỞ LẠI TTS: Số lần mở lại là ${reopenCount}">
-                                    MỞ LẠI: ${reopenCount} LẦN
-                                </span>
-                            </div>
-                            ${t.last_reopened_date ? `<div style="font-size:9.5px; color:#ef4444; font-weight:600; margin-top:2px;">(Lần cuối: ${escapeHtml(t.last_reopened_date)})</div>` : ''}
-                        `;
+                    <div style="margin-top:4px;">
+                        <span class="badge-status" style="background:#fee2e2; color:#dc2626; border:1px solid #f87171; font-weight:800; font-size:10px; padding:2px 7px; display:inline-flex; align-items:center; gap:4px; box-shadow:0 1px 2px rgba(220,38,38,0.15);" title="THÔNG TIN MỞ LẠI TTS: Số lần mở lại là ${reopenCount}">
+                            MỞ LẠI: ${reopenCount} LẦN
+                        </span>
+                    </div>
+                    ${t.last_reopened_date ? `<div style="font-size:9.5px; color:#ef4444; font-weight:600; margin-top:2px;">(Lần cuối: ${escapeHtml(t.last_reopened_date)})</div>` : ''}
+                `;
             }
 
             ticketCodeHtml = `
-                        <div>
-                            <span style="color:#0f172a; font-weight:700; font-size:11.5px;">
-                                ${escapeHtml(mainCode)}
-                            </span>
-                            ${extraHtml}
-                            ${reopenBadgeHtml}
-                        </div>
-                    `;
+                <div>
+                    <span style="color:#0f172a; font-weight:700; font-size:11.5px;">
+                        ${escapeHtml(mainCode || '--')}
+                    </span>
+                    ${procName ? `<div style="font-size:10px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:3px; margin-top:3px; display:inline-block;">${escapeHtml(procName)}</div>` : ''}
+                    ${stepName ? `<div style="font-size:10.5px; font-weight:500; color:#475569; margin-top:2px; line-height:1.25;">${escapeHtml(stepName)}</div>` : ''}
+                    ${reopenBadgeHtml}
+                </div>
+            `;
 
             let stepColor = '#475569';
             let stepBg = '#f1f5f9';
@@ -1883,38 +1888,40 @@ function renderTicketsTable(force = false) {
                     stepColor = '#15803d';
                     stepBg = '#dcfce7';
                     stepBorder = '#86efac';
-                } else if (stepName.includes('2.4') || sLower.includes('phối hợp')) {
+                } else if (stepName.includes('2.4') || sLower.includes('phối hợp') || sLower.includes('đánh giá')) {
                     stepColor = '#b45309';
                     stepBg = '#fef3c7';
                     stepBorder = '#fde68a';
+                } else if (stepName.includes('2.3') || sLower.includes('xử lý')) {
+                    stepColor = '#1d4ed8';
+                    stepBg = '#eff6ff';
+                    stepBorder = '#bfdbfe';
                 }
             }
 
             compactTicketCodeHtml = `
-                        <div style="display:flex; flex-direction:column; justify-content:center; gap:2px; padding:2px 0; min-width:155px;">
-                            <!-- Dòng 1: Mã phiếu trọn vẹn + Reopen badge -->
-                            <div style="display:flex; align-items:center; gap:5px; line-height:1.2; white-space:nowrap;">
-                                <span style="color:#0f172a; font-weight:700; font-size:11.5px; font-family:'JetBrains Mono', monospace; white-space:nowrap; letter-spacing:-0.2px;" title="Mã phiếu: ${escapeHtml(mainCode)}">
-                                    ${escapeHtml(mainCode)}
-                                </span>
-                                ${reopenCount > 0 ? `<span class="badge-status" style="background:#fee2e2; color:#dc2626; border:1px solid #f87171; font-weight:800; font-size:9px; padding:1px 4px; border-radius:3px; white-space:nowrap;" title="Mở lại ${reopenCount} lần">Lại: ${reopenCount}L</span>` : ''}
-                            </div>
-                            <!-- Dòng 2: Tên Quy trình -->
-                            <div style="line-height:1.2; white-space:nowrap;">
-                                ${procName 
-                                    ? `<span style="font-size:9.5px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:3px; display:inline-block; max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:-apple-system, BlinkMacSystemFont, sans-serif;" title="Quy trình: ${escapeHtml(procName)}">${escapeHtml(procName)}</span>`
-                                    : `<span style="color:#94a3b8; font-size:10px; font-style:italic;">--</span>`
-                                }
-                            </div>
-                            <!-- Dòng 3: Tên bước -->
-                            <div style="line-height:1.2; white-space:nowrap;">
-                                ${stepName 
-                                    ? `<span style="font-size:9.5px; font-weight:600; color:${stepColor}; background:${stepBg}; border:1px solid ${stepBorder}; padding:1px 5px; border-radius:3px; display:inline-block; max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:-apple-system, BlinkMacSystemFont, sans-serif;" title="Bước hiện tại: ${escapeHtml(stepName)}">${escapeHtml(stepName)}</span>`
-                                    : `<span style="color:#94a3b8; font-size:10px; font-style:italic;">--</span>`
-                                }
-                            </div>
-                        </div>
-                    `;
+                <div style="display:flex; flex-direction:column; justify-content:center; gap:2px; padding:2px 0; min-width:155px;">
+                    <!-- Dòng 1: Mã phiếu trọn vẹn + Reopen badge -->
+                    <div style="display:flex; align-items:center; gap:5px; line-height:1.2; white-space:nowrap;">
+                        <span style="color:#0f172a; font-weight:700; font-size:11.5px; font-family:'JetBrains Mono', monospace; white-space:nowrap; letter-spacing:-0.2px;" title="Mã phiếu: ${escapeHtml(mainCode)}">
+                            ${escapeHtml(mainCode || '--')}
+                        </span>
+                        ${reopenCount > 0 ? `<span class="badge-status" style="background:#fee2e2; color:#dc2626; border:1px solid #f87171; font-weight:800; font-size:9px; padding:1px 4px; border-radius:3px; white-space:nowrap;" title="Mở lại ${reopenCount} lần">Lại: ${reopenCount}L</span>` : ''}
+                    </div>
+                    <!-- Dòng 2: Tên Quy trình (nếu có) -->
+                    ${procName ? `
+                    <div style="line-height:1.2; white-space:nowrap;">
+                        <span style="font-size:9.5px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:3px; display:inline-block; max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:-apple-system, BlinkMacSystemFont, sans-serif;" title="Quy trình: ${escapeHtml(procName)}">${escapeHtml(procName)}</span>
+                    </div>` : ''}
+                    <!-- Dòng 3: Tên bước hiện tại -->
+                    <div style="line-height:1.2; white-space:nowrap;">
+                        ${stepName 
+                            ? `<span style="font-size:9.5px; font-weight:600; color:${stepColor}; background:${stepBg}; border:1px solid ${stepBorder}; padding:1px 5px; border-radius:3px; display:inline-block; max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:-apple-system, BlinkMacSystemFont, sans-serif;" title="Bước hiện tại: ${escapeHtml(stepName)}">${escapeHtml(stepName)}</span>`
+                            : `<span style="color:#94a3b8; font-size:10px; font-style:italic;">--</span>`
+                        }
+                    </div>
+                </div>
+            `;
         }
 
         let rawPakhType = (t.package_title || '').trim();

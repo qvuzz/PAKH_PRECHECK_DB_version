@@ -28,10 +28,6 @@ def execute_tts_new_data_cycle():
     5. Chạy Scenarios Engine & AI Summarizer để đưa ra nhận định, ý kiến và hướng xử lý.
     6. Lưu vào Database SQLite với source='tts_new' và xuất Excel báo cáo.
     """
-    if state.status == "PROCESSING":
-        state.log("WARN", "Hệ thống đang bận thực hiện chu kỳ khác.")
-        return
-
     state.status = "PROCESSING"
     state.status_message = "Đang chạy tiền kiểm TTS Mới..."
     state.current_step = "Kết nối TTS Mới"

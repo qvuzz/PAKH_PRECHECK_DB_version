@@ -225,13 +225,31 @@ def save_or_update_ticket(t):
                         (ticket_code,)
                     ).fetchone()
                     if existing_code and existing_code["incident_time"] != incident_time:
+                        # Kế thừa kết quả tiền kiểm cũ trước khi xóa bản ghi lệch thời gian
+                        has_old_eval = existing_code["status"] and existing_code["status"] not in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI", None, "")
+                        if has_old_eval:
+                            if not t.get("status") or t.get("status") in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI", ""):
+                                t["status"] = existing_code["status"]
+                                t["color"] = existing_code["color"] or "green"
+                                if not t.get("comment"):
+                                    t["comment"] = existing_code["comment"] or ""
+                                if not t.get("action_plan"):
+                                    t["action_plan"] = existing_code["action_plan"] or ""
+                                if not t.get("real_packages") or t.get("real_packages") == "--":
+                                    t["real_packages"] = existing_code["real_packages"] or "--"
+                                if not t.get("rat_types") or t.get("rat_types") == "--":
+                                    t["rat_types"] = existing_code["rat_types"] or "--"
+                                if not t.get("cem_data") or t.get("cem_data") == "--":
+                                    t["cem_data"] = existing_code["cem_data"] or "--"
+                                if not t.get("app_usage") or t.get("app_usage") == "--":
+                                    t["app_usage"] = existing_code["app_usage"] or "--"
                         conn.execute(
                             "DELETE FROM tickets WHERE ticket_code = ?",
                             (ticket_code,)
                         )
         
                 # 2. Chống trùng lặp theo số thuê bao đang ở trạng thái 'Chưa đóng' cùng nguồn
-                # Nếu đã có bản ghi chưa đóng nhưng lệch định dạng incident_time -> xóa bản ghi cũ, thay thế bằng bản ghi mới
+                # Nếu đã có bản ghi chưa đóng nhưng lệch định dạng incident_time -> kế thừa toàn bộ kết quả tiền kiểm rồi xóa bản ghi cũ
                 existing_active = conn.execute(
                     """SELECT * FROM tickets 
                        WHERE phone = ? AND (source = ? OR (source IS NULL AND ? = 'tts_old')) 
@@ -240,17 +258,30 @@ def save_or_update_ticket(t):
                 ).fetchone()
         
                 if existing_active and existing_active["incident_time"] != incident_time:
+                    has_old_eval = existing_active["status"] and existing_active["status"] not in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI", None, "")
+                    if has_old_eval:
+                        if not t.get("status") or t.get("status") in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI", ""):
+                            t["status"] = existing_active["status"]
+                            t["color"] = existing_active["color"] or "green"
+                            if not t.get("comment"):
+                                t["comment"] = existing_active["comment"] or ""
+                            if not t.get("action_plan"):
+                                t["action_plan"] = existing_active["action_plan"] or ""
+                            if not t.get("real_packages") or t.get("real_packages") == "--":
+                                t["real_packages"] = existing_active["real_packages"] or "--"
+                            if not t.get("rat_types") or t.get("rat_types") == "--":
+                                t["rat_types"] = existing_active["rat_types"] or "--"
+                            if not t.get("cem_data") or t.get("cem_data") == "--":
+                                t["cem_data"] = existing_active["cem_data"] or "--"
+                            if not t.get("app_usage") or t.get("app_usage") == "--":
+                                t["app_usage"] = existing_active["app_usage"] or "--"
+                    if not t.get("ai_summary") and existing_active["ai_summary"]:
+                        t["ai_summary"] = existing_active["ai_summary"]
+
                     conn.execute(
                         "DELETE FROM tickets WHERE phone = ? AND incident_time = ?",
                         (phone, existing_active["incident_time"])
                     )
-                    # Kế thừa dữ liệu đã nhập / phân tích nếu bản ghi mới chưa có
-                    if not t.get("comment") and existing_active["comment"]:
-                        t["comment"] = existing_active["comment"]
-                    if not t.get("action_plan") and existing_active["action_plan"]:
-                        t["action_plan"] = existing_active["action_plan"]
-                    if not t.get("ai_summary") and existing_active["ai_summary"]:
-                        t["ai_summary"] = existing_active["ai_summary"]
         
                 existing = conn.execute(
                     "SELECT * FROM tickets WHERE phone = ? AND incident_time = ?", 

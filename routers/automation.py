@@ -184,15 +184,9 @@ def run_now_tts_old_api():
 @router.post("/ttsnew/run-now")
 def run_now_tts_new():
     state.engine = "tts_new"
-    if state.status == "PROCESSING":
-        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
-    if state.is_running:
-        state.trigger_now_requested = True
-        state.log("INFO", "⚡ KÍCH HOẠT QUÉT NGAY LẬP TỨC (TTS MỚI - DATA)!")
-        return {"success": True, "message": "Đã kích hoạt quét ngay chu kỳ TTS Mới..."}
-    else:
-        threading.Thread(target=execute_tts_new_data_cycle, daemon=True).start()
-        return {"success": True, "message": "Đã kích hoạt quét tiền kiểm TTS Mới..."}
+    from services.tts_new_data import execute_tts_new_data_cycle
+    threading.Thread(target=execute_tts_new_data_cycle, daemon=True).start()
+    return {"success": True, "message": "Đã kích hoạt quét tiền kiểm TTS Mới..."}
 
 
 @router.post("/ttsnew/scan_call")
