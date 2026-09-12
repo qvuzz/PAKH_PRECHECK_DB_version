@@ -285,29 +285,38 @@ async def open_detail_ttsnew_api(request: Request):
         except Exception:
             pass
 
-    if not flow_id:
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    is_local = client_ip in ("127.0.0.1", "localhost", "::1")
+    client_tok = (body.get("token") or "").strip()
+    from ttsnew_api import resolve_ttsnew_token, fetch_active_tickets
+    tok, ktv_user = resolve_ttsnew_token(client_ip, is_local, client_tok)
+
+    if not flow_id and tok:
         try:
-            from ttsnew_api import extract_token_from_browser, fetch_active_tickets
-            tok = extract_token_from_browser()
-            if tok:
-                active_t = fetch_active_tickets(tok, limit=1000)
-                for at in active_t:
-                    tc = at.get("ticketCode")
-                    if tc == code or tc == clean_code or (ticket_id and at.get("ticketId") == ticket_id):
-                        flow_id = at.get("id")
-                        ticket_id = at.get("ticketId")
-                        conn_u = get_db_connection()
-                        with conn_u:
-                            conn_u.execute("UPDATE tickets SET flow_id = ?, ticket_id = ? WHERE ticket_code = ?", (flow_id, ticket_id, code))
-                        conn_u.close()
-                        break
+            active_t = fetch_active_tickets(tok, limit=1000)
+            for at in active_t:
+                tc = str(at.get("ticketCode") or "")
+                t_id = at.get("ticketId")
+                if tc == code or tc == clean_code or (ticket_id and t_id == ticket_id) or (clean_code and clean_code.endswith(str(t_id))):
+                    flow_id = at.get("id")
+                    ticket_id = at.get("ticketId")
+                    conn_u = get_db_connection()
+                    with conn_u:
+                        conn_u.execute("UPDATE tickets SET flow_id = ?, ticket_id = ? WHERE (ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'", (flow_id, ticket_id, f"{clean_code}%", phone))
+                    conn_u.close()
+                    break
         except Exception as ex_f:
             state.log("WARN", f"Không tìm thấy flow_id cho {code}: {ex_f}")
 
     if not flow_id or not ticket_id:
-        return {"success": False, "message": f"Không tìm thấy mã luồng (flow_id/ticket_id) của phiếu {code or phone}."}
+        return {
+            "success": False, 
+            "message": f"Không tìm thấy mã luồng OneOSS của phiếu {clean_code or code}. Vui lòng mở trang Quản lý phiếu và tìm kiếm.",
+            "fallback_url": "https://tts.vnptnet.vn/tts/ticket/quan-ly-phieu",
+            "clean_code": clean_code
+        }
 
-    state.log("STEP", f"🌐 Đang mở cửa sổ Cập nhật xử lý phiếu {clean_code or code} trên TTS Mới...")
+    state.log("STEP", f"🌐 Đang mở cửa sổ chi tiết phiếu {clean_code or code} trên TTS Mới...")
 
     try:
         from playwright.sync_api import sync_playwright
@@ -330,11 +339,15 @@ async def open_detail_ttsnew_api(request: Request):
                 window.location.reload();
             }}""")
 
+            # Đợi nhẹ cho trang chi tiết hiển thị
+            target_page.wait_for_timeout(1500)
+
+            # Thử mở dialog Cập nhật xử lý (nếu có)
             try:
-                btn_cap_nhat = target_page.wait_for_selector('button.p-button-primary:has-text("Cập nhật xử lý")', timeout=10000)
+                btn_cap_nhat = target_page.query_selector('button.p-button-primary:has-text("Cập nhật xử lý")')
                 if btn_cap_nhat:
                     btn_cap_nhat.click()
-                    target_page.wait_for_timeout(1200)
+                    target_page.wait_for_timeout(1000)
 
                     dialog = target_page.query_selector('.p-dialog:has-text("Cập nhật xử lý")')
                     if dialog:
@@ -352,19 +365,24 @@ async def open_detail_ttsnew_api(request: Request):
                             if txt_assign:
                                 txt_assign.fill(combined_text)
             except Exception as ex_modal:
-                state.log("WARN", f"Chưa tự động bật được nút Cập nhật xử lý: {ex_modal}")
+                pass
 
-        state.log("SUCCESS", f"✅ Đã mở cửa sổ Cập nhật xử lý phiếu {clean_code or code} trên TTS Mới!")
+        state.log("SUCCESS", f"✅ Đã mở chi tiết phiếu {clean_code or code} trên tab TTS Mới thành công!")
         return {
             "success": True, 
-            "message": f"Đã mở cửa sổ Cập nhật xử lý phiếu {clean_code or code} trên TTS Mới", 
-            "ticket_code": code,
+            "message": f"Đã mở chi tiết phiếu {clean_code or code} trên tab trình duyệt TTS Mới!", 
+            "ticket_code": clean_code or code,
             "ticket_id": ticket_id,
             "flow_id": flow_id
         }
     except Exception as ex_open:
-        state.log("WARN", f"⚠️ Lỗi mở tab TTS Mới: {ex_open}")
-        return {"success": False, "message": f"Lỗi mở tab TTS Mới: {str(ex_open)}"}
+        state.log("WARN", f"⚠️ Không thể tương tác trực tiếp với Chrome 9222: {ex_open}")
+        return {
+            "success": False, 
+            "message": f"Không thể tự động điều khiển tab Chrome: {str(ex_open)}",
+            "fallback_url": "https://tts.vnptnet.vn/tts/ticket/quan-ly-phieu",
+            "clean_code": clean_code
+        }
 
 
 @router.post("/ttsnew/close_one")

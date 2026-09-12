@@ -1301,63 +1301,85 @@ function renderTicketsTable(force = false) {
             }
 
             if (isOtherPakh) {
-                // Cuộc gọi / Thoại / SMS / Gói cước: Chỉ giữ chức năng Đóng thủ công
-                actionHtml = `
-                            <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                                ${stageBadge}
-                                <button class="btn-manual-orange" style="padding:4px 9px; font-size:10.5px; margin-top:2px;" onclick="manualCloseTtsNewTicket('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Chuyển sang trang chi tiết phiếu trên TTS Mới để đóng thủ công">
-                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
-                                    Đóng thủ công
-                                </button>
-                            </div>
-                        `;
-
+                // Cuộc gọi / Thoại / SMS / Gói cước:
+                // Thu nhỏ: Chỉ hiện 1 nút Đóng thủ công
                 compactActionHtml = `
-                            <button class="btn-manual-orange" style="padding:2px 6px; font-size:10px; height:24px; line-height:1;" onclick="manualCloseTtsNewTicket('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở chi tiết phiếu trên TTS Mới để đóng thủ công">
-                                Đóng thủ công
-                            </button>
-                        `;
+                    <button class="btn-manual-orange" style="padding:2px 7px; font-size:10px; height:24px; line-height:1;" onclick="manualCloseTtsNewTicket('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở quản lý phiếu trên TTS Mới để xử lý thủ công">
+                        Đóng thủ công
+                    </button>
+                `;
+
+                // Mở rộng: Cho phép tiền kiểm lại, mở TTS, và đóng thủ công
+                actionHtml = `
+                    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                        <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Tiền kiểm lại</button>
+                        <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; display:inline-flex; align-items:center; gap:3px;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở trang chi tiết phiếu trên TTS Mới">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+                            Mở TTS
+                        </button>
+                        <button class="btn-manual-orange" style="padding:5px 12px; font-size:11.5px;" onclick="manualCloseTtsNewTicket('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở quản lý phiếu trên TTS Mới để đóng thủ công">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+                            Đóng thủ công
+                        </button>
+                    </div>
+                `;
             } else {
-                // Mobile Internet: Ghi rõ là Đóng 2.6 hay Đóng 5.1
+                // Mobile Internet:
                 const isStep26 = (t.ticket_status === 'Chờ đóng lần 2') || (stepName && stepName.includes('2.6')) || (t.ticket_code && t.ticket_code.includes('2.6'));
+                const planCommentText = ((t.action_plan || '') + ' ' + (t.comment || '')).toLowerCase();
+                const isRule51 = !isStep26 && (
+                    planCommentText.includes('vtt') || 
+                    planCommentText.includes('kỹ thuật địa bàn') || 
+                    planCommentText.includes('địa bàn') ||
+                    planCommentText.includes('clm') || 
+                    planCommentText.includes('5.1')
+                );
+
+                // 1. GIAO DIỆN THU NHỎ (compact): Chỉ hiện 1 trong 2 loại đóng phiếu theo rule!
+                if (isRule51) {
+                    compactActionHtml = `
+                        <button class="btn-close-blue" style="padding:2px 8px; font-size:10px; height:24px; line-height:1; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '5.1')" title="Theo nội dung phân tích: Đóng phiếu theo hướng 5.1 (chuyển VTT). Mở rộng dòng để chọn Đóng 2.6, Tiền kiểm lại hoặc Mở TTS">
+                            Đóng 5.1
+                        </button>
+                    `;
+                } else {
+                    compactActionHtml = `
+                        <button class="btn-close-green" style="padding:2px 8px; font-size:10px; height:24px; line-height:1; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '2.6')" title="Theo nội dung phân tích: Đóng phiếu theo hướng 2.6 (đóng trên TTS). Mở rộng dòng để chọn Đóng 5.1, Tiền kiểm lại hoặc Mở TTS">
+                            Đóng 2.6
+                        </button>
+                    `;
+                }
+
+                // 2. GIAO DIỆN MỞ RỘNG (expanded): Hiện thêm loại còn lại + Cho phép Tiền kiểm lại và Mở TTS!
                 if (isStep26) {
                     actionHtml = `
-                                <div style="display:flex; flex-direction:column; align-items:center; gap:3px;">
-                                    ${stageBadge}
-                                    <button class="btn-close-green" style="padding:4px 10px; font-size:10.5px; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '2.6')" title="Đóng dứt điểm phiếu tại bước 2.6">
-                                        Đóng 2.6
-                                    </button>
-                                </div>
-                            `;
-                    compactActionHtml = `
-                                <button class="btn-close-green" style="padding:2px 8px; font-size:10px; height:24px; line-height:1; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '2.6')" title="Đóng dứt điểm phiếu tại bước 2.6">
-                                    Đóng 2.6
-                                </button>
-                            `;
+                        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                            <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Tiền kiểm lại</button>
+                            <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; display:inline-flex; align-items:center; gap:3px;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở trang chi tiết phiếu trên TTS Mới">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+                                Mở TTS
+                            </button>
+                            <button class="btn-close-green" style="padding:5px 12px; font-size:11.5px; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '2.6')" title="Đóng dứt điểm phiếu tại bước 2.6">
+                                Đóng 2.6
+                            </button>
+                        </div>
+                    `;
                 } else {
                     actionHtml = `
-                                <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                                    ${stageBadge}
-                                    <div style="display:flex; gap:4px; margin-top:2px;">
-                                        <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '2.6')" title="Chuyển bước 2.6 để đóng phiếu trên mạng lưới">
-                                            Đóng 2.6
-                                        </button>
-                                        <button class="btn-close-blue" style="padding:4px 8px; font-size:10.5px; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '5.1')" title="Chuyển phương án xử lý 5.1 sang VNPT Tỉnh / VTT địa bàn">
-                                            Đóng 5.1
-                                        </button>
-                                    </div>
-                                </div>
-                            `;
-                    compactActionHtml = `
-                                <div style="display:inline-flex; align-items:center; justify-content:center; gap:3px;">
-                                    <button class="btn-close-green" style="padding:2px 6px; font-size:10px; height:24px; line-height:1; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '2.6')" title="Đóng 2.6">
-                                        Đóng 2.6
-                                    </button>
-                                    <button class="btn-close-blue" style="padding:2px 6px; font-size:10px; height:24px; line-height:1; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '5.1')" title="Đóng 5.1">
-                                        Đóng 5.1
-                                    </button>
-                                </div>
-                            `;
+                        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                            <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Tiền kiểm lại</button>
+                            <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; display:inline-flex; align-items:center; gap:3px;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở trang chi tiết phiếu trên TTS Mới">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+                                Mở TTS
+                            </button>
+                            <button class="btn-close-green" style="padding:5px 10px; font-size:11px; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '2.6')" title="Chuyển bước 2.6 để đóng phiếu trên mạng lưới">
+                                Đóng 2.6
+                            </button>
+                            <button class="btn-close-blue" style="padding:5px 10px; font-size:11px; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '5.1')" title="Chuyển phương án xử lý 5.1 sang VNPT Tỉnh / VTT địa bàn">
+                                Đóng 5.1
+                            </button>
+                        </div>
+                    `;
                 }
             }
         } else {
@@ -1366,53 +1388,51 @@ function renderTicketsTable(force = false) {
                 ? `<span class="badge-status badge-yellow" style="font-size:10px; padding:2px 6px; font-weight:700; margin-bottom:2px;">CHƯA ĐÓNG</span>`
                 : '';
             if (isOtherPakh) {
-                // Thoại / SMS TTS Cũ: Chỉ giữ nút Đóng thủ công
-                actionHtml = `
-                            <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                                ${statusBadgeAll}
-                                <button class="btn-manual-orange" style="padding:4px 9px; font-size:10.5px; margin-top:2px;" onclick="manualCloseTtsOldTicket('${t.phone}', '${escapeHtml(cleanTicketCode)}', this)" title="Chuyển sang trang Xử lý sự cố trên TTS Cũ để đóng thủ công">
-                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
-                                    Đóng thủ công
-                                </button>
-                            </div>
-                        `;
+                // Thoại / SMS TTS Cũ:
                 compactActionHtml = `
-                            <button class="btn-manual-orange" style="padding:2px 6px; font-size:10px; height:24px; line-height:1;" onclick="manualCloseTtsOldTicket('${t.phone}', '${escapeHtml(cleanTicketCode)}', this)" title="Mở Xử lý sự cố trên TTS Cũ để đóng thủ công">
+                    <button class="btn-manual-orange" style="padding:2px 6px; font-size:10px; height:24px; line-height:1;" onclick="manualCloseTtsOldTicket('${t.phone}', '${escapeHtml(cleanTicketCode)}', this)" title="Mở Xử lý sự cố trên TTS Cũ để đóng thủ công">
+                        Đóng thủ công
+                    </button>
+                `;
+                actionHtml = `
+                    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                        <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Tiền kiểm lại</button>
+                        <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; display:inline-flex; align-items:center; gap:3px;" onclick="manualCloseTtsOldTicket('${t.phone}', '${escapeHtml(cleanTicketCode)}', this)" title="Mở trang Xử lý sự cố TTS Cũ">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+                            Mở TTS Cũ
+                        </button>
+                        <button class="btn-manual-orange" style="padding:5px 12px; font-size:11.5px;" onclick="manualCloseTtsOldTicket('${t.phone}', '${escapeHtml(cleanTicketCode)}', this)" title="Chuyển sang trang Xử lý sự cố trên TTS Cũ để đóng thủ công">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+                            Đóng thủ công
+                        </button>
+                    </div>
+                `;
+            } else {
+                // Mobile Internet TTS Cũ:
+                compactActionHtml = `
+                    <button class="btn-close-green" style="padding:2px 7px; font-size:10px; height:24px; line-height:1;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu TTS Cũ">
+                        ${t.can_close ? 'Đóng phiếu' : 'Đóng'}
+                    </button>
+                `;
+                actionHtml = `
+                    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                        <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Tiền kiểm lại</button>
+                        <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; display:inline-flex; align-items:center; gap:3px;" onclick="manualCloseTtsOldTicket('${t.phone}', '${escapeHtml(cleanTicketCode)}', this)" title="Mở trang Xử lý sự cố TTS Cũ">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+                            Mở TTS Cũ
+                        </button>
+                        ${t.can_close ? `
+                            <button class="btn-close-green" style="padding:5px 12px; font-size:11.5px;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu ngay">
+                                <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                                Đóng phiếu
+                            </button>
+                        ` : `
+                            <button class="btn-close-green" style="padding:5px 12px; font-size:11.5px;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="KTV kiểm tra ý kiến phân tích & phương án rồi bấm để đóng thủ công qua API">
                                 Đóng thủ công
                             </button>
-                        `;
-            } else {
-                // Mobile Internet TTS Cũ: Chỉ giữ nút Đóng phiếu / Đóng thủ công
-                if (t.can_close) {
-                    actionHtml = `
-                                <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                                    ${statusBadgeAll}
-                                    <button class="btn-close-green" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu ngay">
-                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                                        Đóng phiếu
-                                    </button>
-                                </div>
-                            `;
-                } else {
-                    actionHtml = `
-                                <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                                    ${statusBadgeAll}
-                                    <span class="badge-close-yellow" title="${t.cannot_close_reason || 'Chưa đủ điều kiện tự động đóng, dành cho KTV kiểm tra xử lý'}">
-                                        <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
-                                        KTV xử lý
-                                    </span>
-                                    <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px; margin-top:2px;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="KTV kiểm tra ý kiến phân tích & phương án rồi bấm để đóng thủ công qua API">
-                                        Đóng thủ công
-                                    </button>
-                                </div>
-                            `;
-                }
-
-                compactActionHtml = `
-                            <button class="btn-close-green" style="padding:2px 7px; font-size:10px; height:24px; line-height:1;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu TTS Cũ">
-                                Đóng
-                            </button>
-                        `;
+                        `}
+                    </div>
+                `;
             }
         }
 
@@ -2643,6 +2663,11 @@ async function triggerTtsNewAutoCloseAll(btnElem) {
 }
 
 async function openTtsNewTicketDetail(ticketCode, phone, incidentTime, btnElem) {
+    const cleanCode = (ticketCode || '').split('\n')[0].trim();
+    if (cleanCode && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(cleanCode).catch(() => {});
+    }
+
     const originalHtml = btnElem ? btnElem.innerHTML : '';
     if (btnElem) {
         btnElem.disabled = true;
@@ -2650,11 +2675,18 @@ async function openTtsNewTicketDetail(ticketCode, phone, incidentTime, btnElem) 
         btnElem.style.opacity = '0.7';
     }
 
+    const ttsNewToken = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+
     try {
         const res = await fetch('/api/ttsnew/open_detail', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticket_code: ticketCode, phone, incident_time: incidentTime })
+            body: JSON.stringify({ 
+                ticket_code: cleanCode, 
+                phone: phone, 
+                incident_time: incidentTime,
+                token: ttsNewToken || ''
+            })
         });
         const data = await res.json();
         if (data.success) {
@@ -2666,9 +2698,12 @@ async function openTtsNewTicketDetail(ticketCode, phone, incidentTime, btnElem) 
                     btnElem.style.opacity = '1';
                 }, 2000);
             }
+            alert(data.message || `Đã mở chi tiết phiếu ${cleanCode} trên trình duyệt TTS Mới!`);
         } else {
-            window.open('https://tts.vnptnet.vn/tts/ticket/quan-ly-phieu/chi-tiet-phieu-pakh', '_blank');
-            alert(data.message || "Không thể chuyển trang tự động. Đã mở tab TTS Mới thủ công.");
+            // Không mở trang chi tiết trực tiếp bằng window.open vì Angular sẽ không có state dẫn đến trang trắng!
+            // Thay vào đó mở trang Quản lý phiếu kèm mã phiếu đã copy sẵn trong clipboard.
+            window.open('https://tts.vnptnet.vn/tts/ticket/quan-ly-phieu', '_blank');
+            alert(`Đã sao chép mã phiếu [${cleanCode}] vào clipboard và mở trang Quản lý phiếu TTS Mới.\nBạn chỉ cần dán (Ctrl+V) mã phiếu vào ô tìm kiếm để xem trực tiếp!`);
             if (btnElem) {
                 btnElem.disabled = false;
                 btnElem.innerHTML = originalHtml;
@@ -2676,8 +2711,8 @@ async function openTtsNewTicketDetail(ticketCode, phone, incidentTime, btnElem) 
             }
         }
     } catch (e) {
-        window.open('https://tts.vnptnet.vn/tts/ticket/quan-ly-phieu/chi-tiet-phieu-pakh', '_blank');
-        alert("Lỗi khi mở chi tiết phiếu: " + e);
+        window.open('https://tts.vnptnet.vn/tts/ticket/quan-ly-phieu', '_blank');
+        alert(`Đã sao chép mã phiếu [${cleanCode}] và mở trang Quản lý phiếu TTS Mới.\n(Ctrl+V để dán mã phiếu tìm kiếm).`);
         if (btnElem) {
             btnElem.disabled = false;
             btnElem.innerHTML = originalHtml;
@@ -2688,22 +2723,33 @@ async function openTtsNewTicketDetail(ticketCode, phone, incidentTime, btnElem) 
 
 async function manualCloseTtsNewTicket(ticketCode, phone, incidentTime, btnElem) {
     const cleanCode = (ticketCode || '').split('\n')[0].trim();
-    // Copy mã phiếu vào clipboard để KTV tiện tìm kiếm / dán trên TTS Mới
     if (cleanCode && navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(cleanCode).catch(() => {});
     }
 
-    // Chuyển qua trang chi tiết phiếu PAKH của TTS Mới trong tab mới
-    window.open('https://tts.vnptnet.vn/tts/ticket/quan-ly-phieu/chi-tiet-phieu-pakh', '_blank');
+    const ttsNewToken = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
 
-    // Đồng thời gọi API backend để nếu máy chủ đang chạy Chrome CDP thì tự động đưa tab đến phiếu đó
+    // Thử gửi yêu cầu mở trực tiếp trên tab Chrome CDP đang chạy có đẩy đủ router state
     try {
         fetch('/api/ttsnew/open_detail', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticket_code: cleanCode, phone, incident_time: incidentTime })
-        }).catch(() => {});
-    } catch (e) {}
+            body: JSON.stringify({ 
+                ticket_code: cleanCode, 
+                phone: phone, 
+                incident_time: incidentTime,
+                token: ttsNewToken || ''
+            })
+        }).then(res => res.json()).then(data => {
+            if (!data.success) {
+                window.open('https://tts.vnptnet.vn/tts/ticket/quan-ly-phieu', '_blank');
+            }
+        }).catch(() => {
+            window.open('https://tts.vnptnet.vn/tts/ticket/quan-ly-phieu', '_blank');
+        });
+    } catch (e) {
+        window.open('https://tts.vnptnet.vn/tts/ticket/quan-ly-phieu', '_blank');
+    }
 }
 
 async function manualCloseTtsOldTicket(phone, ticketCode, btnElem) {
