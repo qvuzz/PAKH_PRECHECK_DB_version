@@ -617,7 +617,7 @@ function selectModule(sys, srv, updateUrl = true) {
 
     if (srv === 'call') {
         if (thCategory) thCategory.innerText = 'Loại Cuộc Gọi';
-        if (thProfile) thProfile.innerText = 'Trạng Thái (SAPC)';
+        if (thProfile) thProfile.innerText = 'Hồ Sơ (HSS/VoLTE)';
         if (thInfrastructure) thInfrastructure.innerText = 'Sóng';
         if (thCemData) thCemData.innerText = 'Trạm & Cell';
         if (thAiSummary) thAiSummary.innerText = 'Nội Dung Phản Ánh';
@@ -1608,6 +1608,17 @@ function renderTicketsTable(force = false) {
                     ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:11px; padding:3px 8px; border-radius:4px; display:inline-block; font-weight:700;">NAM: 1 (KHÓA DỊCH VỤ)</span>`
                     : `<span style="background:#dcfce7; color:#15803d; border:1px solid #86efac; font-size:11px; padding:3px 8px; border-radius:4px; display:inline-block; font-weight:700;">NAM: 0 (MỞ DỊCH VỤ)</span>`;
 
+                const hssDigits = (hssVal || '').replace(/\D/g, '');
+                const isStrangeHss = hssDigits.length >= 3 || hssVal.includes('PROFILE LẠ');
+                let hssBadge = '';
+                if (isStrangeHss) {
+                    hssBadge = `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:11px; padding:2px 7px; border-radius:4px; display:inline-block; font-weight:700;" title="Cảnh báo HSS Profile lạ: có thể lỗi cấu hình hoặc chưa kích hoạt VoLTE đúng cách">⚠️ HSS: ${escapeHtml(hssVal)} (PROFILE LẠ)</span>`;
+                } else if (hssVal) {
+                    hssBadge = `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-size:11px; padding:2px 7px; border-radius:4px; display:inline-block; font-weight:700;" title="HSS Profile của thuê bao trên Core (Cần thiết cho cấu hình VoLTE/IMS)">HSS: ${escapeHtml(hssVal)} (VoLTE)</span>`;
+                } else {
+                    hssBadge = `<span style="color:#94a3b8; font-size:10.5px;">HSS: -- (VoLTE chưa xác định)</span>`;
+                }
+
                 let pkgContent = '';
                 if (sapcItems.length > 0) {
                     pkgContent = `
@@ -1626,19 +1637,32 @@ function renderTicketsTable(force = false) {
                 }
                 pkgHtml = `
                     <div style="font-family:'JetBrains Mono', monospace; font-size:11.5px;">
-                        <div>${callStatusBadge}</div>
+                        <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:6px;">
+                            <div>${callStatusBadge}</div>
+                            <div>${hssBadge}</div>
+                        </div>
                         ${pkgContent}
                     </div>
                 `;
 
                 // Bản thu gọn 1 dòng cho cuộc gọi
-                compactProfileHtml = isLocked
+                let cParts = [];
+                if (hssVal) {
+                    if (isStrangeHss) {
+                        cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">HSS: ${escapeHtml(hssVal)} (LẠ)</span>`);
+                    } else {
+                        cParts.push(`<span style="background:#eff6ff; color:#1d4ed8; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #bfdbfe;">HSS: ${escapeHtml(hssVal)} (VoLTE)</span>`);
+                    }
+                }
+                cParts.push(isLocked
                     ? `<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 6px; border-radius:3px;">NAM: 1 (Khóa)</span>`
-                    : `<span style="color:#15803d; font-weight:700; font-family:'JetBrains Mono', monospace;">NAM: 0 (Mở)</span>`;
+                    : `<span style="color:#15803d; font-weight:700; font-family:'JetBrains Mono', monospace;">NAM: 0 (Mở)</span>`
+                );
                 if (sapcLines.length > 0) {
                     let firstPkg = sapcLines[0].replace(/^SAPC:\s*/gi, '').trim();
-                    compactProfileHtml += ` | <span style="color:#475569; font-weight:500;">${escapeHtml(firstPkg)}</span>`;
+                    cParts.push(`<span style="color:#475569; font-weight:500;">Gói: ${escapeHtml(firstPkg)}</span>`);
                 }
+                compactProfileHtml = cParts.join(' | ');
             } else {
                 let btoolsHtml = `
                     <div style="font-size:10.5px; line-height:1.4; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; margin-top:4px;">
