@@ -1169,6 +1169,10 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
                 except Exception:
                     pass
 
+        conn.commit()
+        conn.close()
+        conn = None
+
         # 2. PHÁT HIỆN & TỰ ĐỘNG NẠP PHIẾU MỚI TINH VÀO ĐÚNG PHÂN HỆ MODULE
         for it in active_list:
             it_tid = str(it.get("ticketId") or "")
@@ -1210,10 +1214,13 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
                 except Exception:
                     pass
 
-        conn.commit()
-        conn.close()
         return {"success": True, "updated": updated_count}
     except Exception as ex:
+        if 'conn' in locals() and conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
         return {"success": False, "message": str(ex)}
 
 

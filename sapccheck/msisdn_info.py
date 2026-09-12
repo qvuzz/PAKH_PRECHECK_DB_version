@@ -173,15 +173,20 @@ def tra_cell_tu_so_dien_thoai(sdt, session=None):
         # ĐỌC COOKIE FIREFOX
         # ==========================================================
         try:
-            if browser_cookie3 is None:
-                return {'error': 'Không có browser_cookie3 để đọc cookie Firefox dự phòng'}
-            cj = browser_cookie3.firefox(
-                domain_name='10.155.42.218'
-            )
+            import sys
+            from pathlib import Path
+            root_dir = str(Path(__file__).resolve().parent.parent)
+            if root_dir not in sys.path:
+                sys.path.insert(0, root_dir)
+            from auth_extractor import extract_firefox_cookies
+            cj = extract_firefox_cookies("10.155.42")
+            if not cj and browser_cookie3:
+                try:
+                    cj = browser_cookie3.firefox(domain_name='10.155.42.218')
+                except Exception:
+                    cj = {}
         except Exception as e:
-            return {
-                'error': f'Không đọc được cookie Firefox:\n{str(e)}'
-            }
+            return {'error': f'Không đọc được cookie Firefox: {e}'}
 
         # ==========================================================
         # GỌI API
