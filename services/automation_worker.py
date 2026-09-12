@@ -39,6 +39,18 @@ def automation_worker_loop():
                     state.log("STEP", "--- BẮT ĐẦU QUÉT: TTS MỚI - MOBILE INTERNET ---")
                     from services.tts_new_data import execute_tts_new_data_cycle
                     execute_tts_new_data_cycle()
+                elif sc in ("tts_new_call", "tts_new_voice_call"):
+                    state.log("STEP", "--- BẮT ĐẦU QUÉT: TTS MỚI - CUỘC GỌI ---")
+                    from services.tts_new_voice import execute_tts_new_call_cycle
+                    execute_tts_new_call_cycle()
+                elif sc == "tts_new_sms":
+                    state.log("STEP", "--- BẮT ĐẦU QUÉT: TTS MỚI - TIN NHẮN ---")
+                    from services.tts_new_voice import execute_tts_new_sms_cycle
+                    execute_tts_new_sms_cycle()
+                elif sc == "tts_new_other":
+                    state.log("STEP", "--- BẮT ĐẦU QUÉT: TTS MỚI - GÓI CƯỚC / PA KHÁC ---")
+                    from services.tts_new_voice import execute_tts_new_other_cycle
+                    execute_tts_new_other_cycle()
                 elif sc == "tts_new_voice":
                     state.log("STEP", "--- BẮT ĐẦU QUÉT: TTS MỚI - THOẠI / SMS / GÓI ---")
                     from services.tts_new_voice import execute_tts_new_voice_cycle

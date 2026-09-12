@@ -25,8 +25,18 @@ SPA_ROUTES = [
     "/index.html",
     "/ttscu/data",
     "/ttscu/voice",
+    "/ttscu/mobileinternet",
+    "/ttscu/voice_sms",
     "/ttsmoi/data",
+    "/ttsmoi/mobileinternet",
     "/ttsmoi/voice",
+    "/ttsmoi/voice_sms",
+    "/ttsmoi/cuoc-goi",
+    "/ttsmoi/call",
+    "/ttsmoi/tin-nhan",
+    "/ttsmoi/sms",
+    "/ttsmoi/khac",
+    "/ttsmoi/other",
     "/thong-ke",
     "/lich-su"
 ]

@@ -317,6 +317,40 @@ def filter_data_tickets(raw_tickets: list) -> list:
     return [it for it in raw_tickets if is_mobile_internet_data_ticket(it)]
 
 
+def is_call_ticket(it: dict) -> bool:
+    title = str(it.get("title") or "").strip().lower()
+    return any(k in title for k in [
+        "gọi đi trong nước", "nhận cuộc gọi đến trong nước", "nhận cuộc gọi dến trong nước",
+        "cuộc gọi đi và đến", "bị khóa spam cuộc gọi", "giữ cuộc gọi", "gọi quốc tế", "vowifi"
+    ])
+
+
+def filter_call_tickets(raw_tickets: list) -> list:
+    """Lọc danh sách phiếu thuộc module Cuộc gọi."""
+    return [it for it in raw_tickets if is_call_ticket(it)]
+
+
+def is_sms_ticket(it: dict) -> bool:
+    title = str(it.get("title") or "").strip().lower()
+    return any(k in title for k in [
+        "nhận tin nhắn", "khóa spam tin nhắn", "tin nhắn (sms)", "gửi tin nhắn", "tin nhắn rác"
+    ]) or ("tin nhắn" in title and "cvqt" not in title)
+
+
+def filter_sms_tickets(raw_tickets: list) -> list:
+    """Lọc danh sách phiếu thuộc module Tin nhắn."""
+    return [it for it in raw_tickets if is_sms_ticket(it)]
+
+
+def is_other_ticket(it: dict) -> bool:
+    return not is_mobile_internet_data_ticket(it) and not is_call_ticket(it) and not is_sms_ticket(it)
+
+
+def filter_other_tickets(raw_tickets: list) -> list:
+    """Lọc danh sách phiếu thuộc module Gói cước / PA Khác."""
+    return [it for it in raw_tickets if is_other_ticket(it)]
+
+
 def filter_non_data_tickets(raw_tickets: list) -> list:
     """
     Lọc danh sách các phiếu NGOÀI Mobile Internet (Thoại, SMS, Gói cước, CVQT, MNP...).
@@ -456,6 +490,12 @@ def get_ttsnew_tickets_for_precheck(driver=None, max_workers: int = 8, service_t
             raise
     if service_type == "data":
         target_tickets = filter_data_tickets(raw_tickets)
+    elif service_type in ("call", "voice", "cuoc_goi"):
+        target_tickets = filter_call_tickets(raw_tickets)
+    elif service_type in ("sms", "tin_nhan"):
+        target_tickets = filter_sms_tickets(raw_tickets)
+    elif service_type in ("other", "khac"):
+        target_tickets = filter_other_tickets(raw_tickets)
     elif service_type == "voice_sms":
         target_tickets = filter_non_data_tickets(raw_tickets)
     else:

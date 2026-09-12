@@ -330,6 +330,30 @@ def save_tickets_bulk(ticket_list):
         save_or_update_ticket(t)
 
 DATA_PKG_SQL = "(package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước Mobile Internet%' AND package_title NOT LIKE '%Mobile Internet (M0/Gói Data)%' AND package_title NOT LIKE '%CVQT - DV Mobile Internet (Data)%')"
+
+CALL_PKG_SQL = """(
+    package_title LIKE '%Gọi đi trong nước%' 
+    OR package_title LIKE '%Nhận cuộc gọi đến trong nước%' 
+    OR package_title LIKE '%Nhận cuộc gọi dến trong nước%'
+    OR package_title LIKE '%Cuộc gọi đi và đến%'
+    OR package_title LIKE '%Bị khóa Spam cuộc gọi%'
+    OR package_title LIKE '%Giữ cuộc gọi%'
+    OR package_title LIKE '%Gọi Quốc tế%'
+    OR package_title LIKE '%VoWifi%'
+)"""
+
+SMS_PKG_SQL = """(
+    package_title LIKE '%nhận tin nhắn%' 
+    OR package_title LIKE '%khóa spam tin nhắn%' 
+    OR package_title LIKE '%Tin nhắn (SMS)%' 
+    OR package_title LIKE '%Tin nhắn (sms)%' 
+    OR package_title LIKE '%gửi tin nhắn đi và đến%' 
+    OR package_title LIKE '%gửi tin nhắn đi%' 
+    OR package_title LIKE '%Tin nhắn rác%'
+    OR (package_title LIKE '%Tin nhắn%' AND package_title NOT LIKE '%CVQT%')
+)"""
+
+OTHER_PKG_SQL = f"(NOT {DATA_PKG_SQL} AND NOT {CALL_PKG_SQL} AND NOT {SMS_PKG_SQL})"
 VOICE_PKG_SQL = f"(package_title IS NULL OR NOT {DATA_PKG_SQL})"
 
 def is_mobile_internet_ticket(package_title: str) -> bool:
@@ -341,6 +365,19 @@ def is_mobile_internet_ticket(package_title: str) -> bool:
             return False
         return True
     return False
+
+def is_call_ticket(package_title: str) -> bool:
+    pkg = (package_title or "").strip().lower()
+    return any(k in pkg for k in [
+        "gọi đi trong nước", "nhận cuộc gọi đến trong nước", "nhận cuộc gọi dến trong nước",
+        "cuộc gọi đi và đến", "bị khóa spam cuộc gọi", "giữ cuộc gọi", "gọi quốc tế", "vowifi"
+    ])
+
+def is_sms_ticket(package_title: str) -> bool:
+    pkg = (package_title or "").strip().lower()
+    return any(k in pkg for k in [
+        "nhận tin nhắn", "khóa spam tin nhắn", "tin nhắn (sms)", "gửi tin nhắn", "tin nhắn rác"
+    ]) or ("tin nhắn" in pkg and "cvqt" not in pkg)
 
 def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", service_type=None):
     """
@@ -354,6 +391,12 @@ def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", s
         service_sql = ""
         if service_type == "data":
             service_sql = f" AND {DATA_PKG_SQL}"
+        elif service_type in ("call", "voice", "cuoc_goi"):
+            service_sql = f" AND {CALL_PKG_SQL}"
+        elif service_type in ("sms", "tin_nhan"):
+            service_sql = f" AND {SMS_PKG_SQL}"
+        elif service_type in ("other", "khac"):
+            service_sql = f" AND {OTHER_PKG_SQL}"
         elif service_type == "voice_sms":
             service_sql = f" AND {VOICE_PKG_SQL}"
 
@@ -447,6 +490,30 @@ def get_system_counts():
         """).fetchone()
         counts["tts_new_data"] = c3[0] if c3 else 0
 
+        c_call = conn.execute(f"""
+            SELECT count(*) FROM tickets 
+            WHERE source = 'tts_new' 
+              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+              AND {CALL_PKG_SQL}
+        """).fetchone()
+        counts["tts_new_call"] = c_call[0] if c_call else 0
+
+        c_sms = conn.execute(f"""
+            SELECT count(*) FROM tickets 
+            WHERE source = 'tts_new' 
+              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+              AND {SMS_PKG_SQL}
+        """).fetchone()
+        counts["tts_new_sms"] = c_sms[0] if c_sms else 0
+
+        c_other = conn.execute(f"""
+            SELECT count(*) FROM tickets 
+            WHERE source = 'tts_new' 
+              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+              AND {OTHER_PKG_SQL}
+        """).fetchone()
+        counts["tts_new_other"] = c_other[0] if c_other else 0
+
         c4 = conn.execute(f"""
             SELECT count(*) FROM tickets 
             WHERE source = 'tts_new' 
@@ -525,9 +592,15 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
             query += " AND source = ?"
             params.append(source)
 
-    # Lọc theo loại nghiệp vụ (data / voice_sms)
+    # Lọc theo loại nghiệp vụ (data / call / sms / other / voice_sms)
     if service_type == "data":
         query += f" AND {DATA_PKG_SQL}"
+    elif service_type in ("call", "voice", "cuoc_goi"):
+        query += f" AND {CALL_PKG_SQL}"
+    elif service_type in ("sms", "tin_nhan"):
+        query += f" AND {SMS_PKG_SQL}"
+    elif service_type in ("other", "khac"):
+        query += f" AND {OTHER_PKG_SQL}"
     elif service_type == "voice_sms":
         query += f" AND {VOICE_PKG_SQL}"
 

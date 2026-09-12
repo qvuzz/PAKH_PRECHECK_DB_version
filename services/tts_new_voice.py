@@ -18,11 +18,18 @@ from db_manager import (
 )
 import ttsnew_api
 
-def execute_ttsnew_voice_cycle():
+def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
+    type_labels = {
+        "call": "Cuộc gọi",
+        "sms": "Tin nhắn",
+        "other": "Gói cước / PA Khác",
+        "voice_sms": "Thoại / SMS / Gói"
+    }
+    lbl = type_labels.get(service_type, "Thoại / SMS")
     state.status = "PROCESSING"
-    state.status_message = "Đang quét phiếu Thoại / SMS TTS Mới..."
-    state.current_step = "Đang lấy danh sách phiếu Thoại / SMS TTS Mới"
-    state.log("STEP", "⚡ Bắt đầu quét danh sách phiếu Thoại / SMS từ TTS Mới...")
+    state.status_message = f"Đang quét phiếu {lbl} TTS Mới..."
+    state.current_step = f"Đang lấy danh sách phiếu {lbl} TTS Mới"
+    state.log("STEP", f"⚡ Bắt đầu quét danh sách phiếu {lbl} từ TTS Mới...")
 
     try:
         from ttsnew_api import get_ttsnew_tickets_for_precheck
@@ -31,12 +38,12 @@ def execute_ttsnew_voice_cycle():
         from auth_extractor import get_chrome_debug_driver
         driver = get_chrome_debug_driver()
 
-        voice_tickets, total_scanned = get_ttsnew_tickets_for_precheck(driver=driver, service_type="voice_sms")
+        voice_tickets, total_scanned = get_ttsnew_tickets_for_precheck(driver=driver, service_type=service_type)
         if not voice_tickets:
-            state.log("WARN", f"ℹ️ Đã quét {total_scanned} phiếu trên TTS Mới nhưng không có phiếu Thoại / SMS / Gói cước nào đang xử lý.")
+            state.log("WARN", f"ℹ️ Đã quét {total_scanned} phiếu trên TTS Mới nhưng không có phiếu {lbl} nào đang xử lý.")
             return 0
 
-        state.log("SUCCESS", f"Thu được {len(voice_tickets)} phiếu Thoại / SMS từ TTS Mới (Tổng quét: {total_scanned}). Đang nạp vào bảng...")
+        state.log("SUCCESS", f"Thu được {len(voice_tickets)} phiếu {lbl} từ TTS Mới (Tổng quét: {total_scanned}). Đang nạp vào bảng...")
 
         # Bước 1: Nạp nhanh toàn bộ phiếu vào Database trước với status CHỜ TIỀN KIỂM
         active_codes = set()
@@ -72,7 +79,7 @@ def execute_ttsnew_voice_cycle():
             save_or_update_ticket(rec)
 
         if active_codes:
-            sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="voice_sms")
+            sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type=service_type)
 
         state.log("INFO", f"✅ Đã nạp xong {len(voice_tickets)} phiếu lên bảng. Đang tiến hành tra cứu Core...")
 
@@ -176,11 +183,11 @@ def execute_ttsnew_voice_cycle():
                     state.log("WARN", "Nhận được yêu cầu dừng.")
                     break
 
-        state.log("SUCCESS", f"🎉 Hoàn tất chu kỳ tiền kiểm Thoại / SMS TTS Mới cho {len(voice_tickets)} phiếu.")
+        state.log("SUCCESS", f"🎉 Hoàn tất chu kỳ tiền kiểm {lbl} TTS Mới cho {len(voice_tickets)} phiếu.")
         return len(voice_tickets)
 
     except Exception as e:
-        state.log("ERROR", f"Lỗi quét phiếu Thoại / SMS TTS Mới: {e}")
+        state.log("ERROR", f"Lỗi quét phiếu {lbl} TTS Mới: {e}")
         return 0
     finally:
         state.status = "IDLE"
@@ -188,8 +195,17 @@ def execute_ttsnew_voice_cycle():
         state.current_step = "Sẵn sàng"
 
 
-# Alias tương thích
+# Alias & Helper cycles cho từng module
 execute_tts_new_voice_cycle = execute_ttsnew_voice_cycle
+
+def execute_tts_new_call_cycle():
+    return execute_ttsnew_voice_cycle(service_type="call")
+
+def execute_tts_new_sms_cycle():
+    return execute_ttsnew_voice_cycle(service_type="sms")
+
+def execute_tts_new_other_cycle():
+    return execute_ttsnew_voice_cycle(service_type="other")
 
 
 

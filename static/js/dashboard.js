@@ -190,6 +190,9 @@ async function fetchStatus() {
             const bOldApiData = document.getElementById('badgeOldApiData');
             const bOldApiVoice = document.getElementById('badgeOldApiVoice');
             const bNewData = document.getElementById('badgeNewData');
+            const bNewCall = document.getElementById('badgeNewCall');
+            const bNewSms = document.getElementById('badgeNewSms');
+            const bNewOther = document.getElementById('badgeNewOther');
             const bNewVoice = document.getElementById('badgeNewVoice');
             const bTotalClosed = document.getElementById('badgeTotalClosed');
             const bTotalAll = document.getElementById('badgeTotalAll');
@@ -199,6 +202,9 @@ async function fetchStatus() {
             if (bOldApiData) bOldApiData.innerText = sc.tts_old_api_data || 0;
             if (bOldApiVoice) bOldApiVoice.innerText = sc.tts_old_api_voice || 0;
             if (bNewData) bNewData.innerText = sc.tts_new_data || 0;
+            if (bNewCall) bNewCall.innerText = sc.tts_new_call || 0;
+            if (bNewSms) bNewSms.innerText = sc.tts_new_sms || 0;
+            if (bNewOther) bNewOther.innerText = sc.tts_new_other || 0;
             if (bNewVoice) bNewVoice.innerText = sc.tts_new_voice || 0;
             if (bTotalClosed) bTotalClosed.innerText = sc.total_closed || 0;
             if (bTotalAll) bTotalAll.innerText = sc.total_all || 0;
@@ -570,7 +576,11 @@ function selectModule(sys, srv, updateUrl = true) {
     if (updateUrl) {
         let routePath = '/ttscu/data';
         if (sys === 'tts_new') {
-            routePath = (srv === 'data') ? '/ttsmoi/data' : '/ttsmoi/voice';
+            if (srv === 'data') routePath = '/ttsmoi/data';
+            else if (srv === 'call') routePath = '/ttsmoi/cuoc-goi';
+            else if (srv === 'sms') routePath = '/ttsmoi/tin-nhan';
+            else if (srv === 'other') routePath = '/ttsmoi/khac';
+            else routePath = '/ttsmoi/voice';
         } else {
             routePath = (srv === 'data') ? '/ttscu/data' : '/ttscu/voice';
         }
@@ -662,8 +672,14 @@ function handleSpaRoute(pathname) {
     const p = (pathname || window.location.pathname).toLowerCase().replace(/\/$/, '') || '/';
     if (p === '/ttsmoi/data' || p === '/ttsmoi/mobileinternet') {
         selectModule('tts_new', 'data', false);
+    } else if (p === '/ttsmoi/cuoc-goi' || p === '/ttsmoi/call' || p === '/ttsmoi/calls') {
+        selectModule('tts_new', 'call', false);
+    } else if (p === '/ttsmoi/tin-nhan' || p === '/ttsmoi/sms') {
+        selectModule('tts_new', 'sms', false);
+    } else if (p === '/ttsmoi/khac' || p === '/ttsmoi/other') {
+        selectModule('tts_new', 'other', false);
     } else if (p === '/ttsmoi/voice' || p === '/ttsmoi/voice_sms') {
-        selectModule('tts_new', 'voice_sms', false);
+        selectModule('tts_new', 'call', false);
     } else if (p === '/ttscu/voice' || p === '/ttscu/voice_sms') {
         selectModule('tts_old_api', 'voice_sms', false);
     } else if (p === '/thong-ke' || p === '/analytics') {
@@ -743,18 +759,31 @@ async function startOldVoiceScan() {
     return startTtsOldApiVoiceScan();
 }
 
-async function startNewVoiceScan() {
+async function startNewVoiceScan(srvType = null) {
+    const srv = srvType || currentService;
+    let endpoint = '/api/ttsnew/scan_voice';
+    let label = 'Thoại / SMS';
+    if (srv === 'call') {
+        endpoint = '/api/ttsnew/scan_call';
+        label = 'Cuộc gọi';
+    } else if (srv === 'sms') {
+        endpoint = '/api/ttsnew/scan_sms';
+        label = 'Tin nhắn';
+    } else if (srv === 'other') {
+        endpoint = '/api/ttsnew/scan_other';
+        label = 'Gói cước / PA Khác';
+    }
     const btn = document.getElementById('btnScanNewVoice');
-    const originalHtml = btn ? btn.innerHTML : 'Quét Phiếu Thoại/SMS';
+    const originalHtml = btn ? btn.innerHTML : `Quét Phiếu ${label}`;
     if (btn) {
         btn.disabled = true;
         btn.innerHTML = '<span class="status-dot processing" style="display:inline-block; margin-right:6px;"></span> Đang kết nối...';
     }
     try {
-        const res = await fetch('/api/ttsnew/scan_voice', { method: 'POST' });
+        const res = await fetch(endpoint, { method: 'POST' });
         const data = await res.json();
         if (!data.success) {
-            alert(data.message || "Không thể quét phiếu Thoại/SMS TTS Mới.");
+            alert(data.message || `Không thể quét phiếu ${label} TTS Mới.`);
             if (btn) {
                 btn.disabled = false;
                 btn.innerHTML = originalHtml;
@@ -904,6 +933,9 @@ async function loadTickets(force = false, resetPage = false) {
             const bOldApiData = document.getElementById('badgeOldApiData');
             const bOldApiVoice = document.getElementById('badgeOldApiVoice');
             const bNewData = document.getElementById('badgeNewData');
+            const bNewCall = document.getElementById('badgeNewCall');
+            const bNewSms = document.getElementById('badgeNewSms');
+            const bNewOther = document.getElementById('badgeNewOther');
             const bNewVoice = document.getElementById('badgeNewVoice');
             const bTotalClosed = document.getElementById('badgeTotalClosed');
             const bTotalAll = document.getElementById('badgeTotalAll');
@@ -913,6 +945,9 @@ async function loadTickets(force = false, resetPage = false) {
             if (bOldApiData) bOldApiData.innerText = sc.tts_old_api_data || 0;
             if (bOldApiVoice) bOldApiVoice.innerText = sc.tts_old_api_voice || 0;
             if (bNewData) bNewData.innerText = sc.tts_new_data || 0;
+            if (bNewCall) bNewCall.innerText = sc.tts_new_call || 0;
+            if (bNewSms) bNewSms.innerText = sc.tts_new_sms || 0;
+            if (bNewOther) bNewOther.innerText = sc.tts_new_other || 0;
             if (bNewVoice) bNewVoice.innerText = sc.tts_new_voice || 0;
             if (bTotalClosed) bTotalClosed.innerText = sc.total_closed || 0;
             if (bTotalAll) bTotalAll.innerText = sc.total_all || 0;
@@ -1888,6 +1923,12 @@ async function manualRefreshDashboard() {
         } else if (currentSystem === 'tts_new') {
             if (currentService === 'data') {
                 fetch('/api/ttsnew/run-now', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
+            } else if (currentService === 'call') {
+                fetch('/api/ttsnew/scan_call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
+            } else if (currentService === 'sms') {
+                fetch('/api/ttsnew/scan_sms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
+            } else if (currentService === 'other') {
+                fetch('/api/ttsnew/scan_other', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
             } else if (currentService === 'voice_sms') {
                 fetch('/api/ttsnew/scan_voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
             }
@@ -2465,6 +2506,9 @@ function getSelectedScopes() {
     if (document.getElementById('chkScopeOldData')?.checked) scopes.push('tts_old_data');
     if (document.getElementById('chkScopeOldVoice')?.checked) scopes.push('tts_old_voice');
     if (document.getElementById('chkScopeNewData')?.checked) scopes.push('tts_new_data');
+    if (document.getElementById('chkScopeNewCall')?.checked) scopes.push('tts_new_call');
+    if (document.getElementById('chkScopeNewSms')?.checked) scopes.push('tts_new_sms');
+    if (document.getElementById('chkScopeNewOther')?.checked) scopes.push('tts_new_other');
     if (document.getElementById('chkScopeNewVoice')?.checked) scopes.push('tts_new_voice');
     return scopes;
 }
@@ -2475,14 +2519,17 @@ function updateScopeSummaryLabel(scopes) {
     const len = scopes.length;
     if (len === 0) {
         lbl.innerText = 'Chưa chọn phạm vi';
-    } else if (len === 4) {
-        lbl.innerText = 'Quét: Tất cả (4)';
+    } else if (len >= 5) {
+        lbl.innerText = `Quét: Tất cả (${len})`;
     } else if (len === 1) {
         const nameMap = {
             'tts_old_data': 'TTS Cũ (Data)',
-            'tts_old_voice': 'TTS Cũ (Thoại/SMS/Gói/PA Khác)',
+            'tts_old_voice': 'TTS Cũ (Thoại/SMS/Gói)',
             'tts_new_data': 'TTS Mới (Data)',
-            'tts_new_voice': 'TTS Mới (Thoại/SMS/Gói/PA Khác)'
+            'tts_new_call': 'TTS Mới (Cuộc gọi)',
+            'tts_new_sms': 'TTS Mới (Tin nhắn)',
+            'tts_new_other': 'TTS Mới (Gói cước/Khác)',
+            'tts_new_voice': 'TTS Mới (Thoại/SMS/Gói)'
         };
         lbl.innerText = `Quét: ${nameMap[scopes[0]] || scopes[0]}`;
     } else {
@@ -2494,10 +2541,16 @@ function syncScopeCheckboxes(scopes) {
     const chkOldData = document.getElementById('chkScopeOldData');
     const chkOldVoice = document.getElementById('chkScopeOldVoice');
     const chkNewData = document.getElementById('chkScopeNewData');
+    const chkNewCall = document.getElementById('chkScopeNewCall');
+    const chkNewSms = document.getElementById('chkScopeNewSms');
+    const chkNewOther = document.getElementById('chkScopeNewOther');
     const chkNewVoice = document.getElementById('chkScopeNewVoice');
     if (chkOldData) chkOldData.checked = scopes.includes('tts_old_data');
     if (chkOldVoice) chkOldVoice.checked = scopes.includes('tts_old_voice');
     if (chkNewData) chkNewData.checked = scopes.includes('tts_new_data');
+    if (chkNewCall) chkNewCall.checked = scopes.includes('tts_new_call');
+    if (chkNewSms) chkNewSms.checked = scopes.includes('tts_new_sms');
+    if (chkNewOther) chkNewOther.checked = scopes.includes('tts_new_other');
     if (chkNewVoice) chkNewVoice.checked = scopes.includes('tts_new_voice');
     updateScopeSummaryLabel(scopes);
 }

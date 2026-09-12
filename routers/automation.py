@@ -127,6 +127,15 @@ async def trigger_run_now(request: Request):
                         execute_tts_old_api_voice_cycle()
                     elif sc == "tts_new_data":
                         execute_tts_new_data_cycle()
+                    elif sc in ("tts_new_call", "tts_new_voice_call"):
+                        from services.tts_new_voice import execute_tts_new_call_cycle
+                        execute_tts_new_call_cycle()
+                    elif sc == "tts_new_sms":
+                        from services.tts_new_voice import execute_tts_new_sms_cycle
+                        execute_tts_new_sms_cycle()
+                    elif sc == "tts_new_other":
+                        from services.tts_new_voice import execute_tts_new_other_cycle
+                        execute_tts_new_other_cycle()
                     elif sc == "tts_new_voice":
                         execute_tts_new_voice_cycle()
             except Exception as ex_m:
@@ -174,6 +183,33 @@ def run_now_tts_new():
     else:
         threading.Thread(target=execute_tts_new_data_cycle, daemon=True).start()
         return {"success": True, "message": "Đã kích hoạt quét tiền kiểm TTS Mới..."}
+
+
+@router.post("/ttsnew/scan_call")
+def scan_tts_new_call():
+    if state.status == "PROCESSING":
+        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
+    from services.tts_new_voice import execute_tts_new_call_cycle
+    threading.Thread(target=execute_tts_new_call_cycle, daemon=True).start()
+    return {"success": True, "message": "Đang tiến hành quét phiếu Cuộc gọi từ TTS Mới..."}
+
+
+@router.post("/ttsnew/scan_sms")
+def scan_tts_new_sms():
+    if state.status == "PROCESSING":
+        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
+    from services.tts_new_voice import execute_tts_new_sms_cycle
+    threading.Thread(target=execute_tts_new_sms_cycle, daemon=True).start()
+    return {"success": True, "message": "Đang tiến hành quét phiếu Tin nhắn từ TTS Mới..."}
+
+
+@router.post("/ttsnew/scan_other")
+def scan_tts_new_other():
+    if state.status == "PROCESSING":
+        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
+    from services.tts_new_voice import execute_tts_new_other_cycle
+    threading.Thread(target=execute_tts_new_other_cycle, daemon=True).start()
+    return {"success": True, "message": "Đang tiến hành quét phiếu Gói cước & PA Khác từ TTS Mới..."}
 
 
 @router.post("/ttsnew/scan_voice")

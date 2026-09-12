@@ -359,9 +359,19 @@
                             <span>TTS Mới — Mobile Internet (Data)</span>
                         </label>
                         <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
-                            <input type="checkbox" id="chkScopeNewVoice" value="tts_new_voice"
+                            <input type="checkbox" id="chkScopeNewCall" value="tts_new_call"
                                 onchange="handleScopeChange()">
-                            <span>TTS Mới — Thoại/SMS/Gói/PA Khác</span>
+                            <span>TTS Mới — Cuộc gọi</span>
+                        </label>
+                        <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
+                            <input type="checkbox" id="chkScopeNewSms" value="tts_new_sms"
+                                onchange="handleScopeChange()">
+                            <span>TTS Mới — Tin nhắn</span>
+                        </label>
+                        <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
+                            <input type="checkbox" id="chkScopeNewOther" value="tts_new_other"
+                                onchange="handleScopeChange()">
+                            <span>TTS Mới — Gói cước & PA Khác</span>
                         </label>
                     </div>
                 </div>
@@ -473,14 +483,32 @@
                     </div>
                     <span class="nav-badge" id="badgeNewData">0</span>
                 </button>
-                <button class="nav-item" id="nav-tts_new-voice_sms" onclick="selectModule('tts_new', 'voice_sms')">
+                <button class="nav-item" id="nav-tts_new-call" onclick="selectModule('tts_new', 'call')">
                     <div class="nav-item-left">
                         <div class="nav-item-text">
-                            <span class="nav-item-title">Thoại/SMS/Gói/PA Khác</span>
-                            <span class="nav-item-sub">Tiền kiểm On-Demand</span>
+                            <span class="nav-item-title">Cuộc gọi</span>
+                            <span class="nav-item-sub">Gọi đi / Nhận cuộc gọi</span>
                         </div>
                     </div>
-                    <span class="nav-badge" id="badgeNewVoice">0</span>
+                    <span class="nav-badge" id="badgeNewCall">0</span>
+                </button>
+                <button class="nav-item" id="nav-tts_new-sms" onclick="selectModule('tts_new', 'sms')">
+                    <div class="nav-item-left">
+                        <div class="nav-item-text">
+                            <span class="nav-item-title">Tin nhắn</span>
+                            <span class="nav-item-sub">Gửi / Nhận / Spam SMS</span>
+                        </div>
+                    </div>
+                    <span class="nav-badge" id="badgeNewSms">0</span>
+                </button>
+                <button class="nav-item" id="nav-tts_new-other" onclick="selectModule('tts_new', 'other')">
+                    <div class="nav-item-left">
+                        <div class="nav-item-text">
+                            <span class="nav-item-title">Gói cước / PA Khác</span>
+                            <span class="nav-item-sub">Sóng / SIM / CVQT / VAS</span>
+                        </div>
+                    </div>
+                    <span class="nav-badge" id="badgeNewOther">0</span>
                 </button>
             </div>
 
@@ -813,7 +841,7 @@
 
 
 
-    <script src="/static/js/dashboard.js?v=3.9"></script>
+    <script src="/static/js/dashboard.js?v=4.0"></script>
 </body>
 
 </html>
