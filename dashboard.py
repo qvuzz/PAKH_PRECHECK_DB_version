@@ -108,6 +108,21 @@ async def lifespan(app: FastAPI):
     worker_thread = threading.Thread(target=automation_worker_loop, daemon=True)
     worker_thread.start()
 
+    # Khởi chạy luồng live sync siêu nhẹ cho TTS Mới (REST API, cập nhật bước trực tiếp không tốn RAM)
+    def _live_tts_new_sync_loop():
+        while True:
+            try:
+                time.sleep(12)
+                from ttsnew_api import sync_tts_new_live_steps, get_cached_token
+                tok = get_cached_token()
+                if tok:
+                    sync_tts_new_live_steps(tok)
+            except Exception:
+                pass
+
+    live_sync_thread = threading.Thread(target=_live_tts_new_sync_loop, daemon=True)
+    live_sync_thread.start()
+
     # Mở tab trên Chrome Debug
     open_in_chrome_debug(f"http://localhost:{PORT}")
 

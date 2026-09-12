@@ -334,11 +334,99 @@ def execute_tts_new_data_cycle():
                             state.log("SUCCESS", f"   ↳ {close_res.get('message')}")
                             if close_res.get("round") == 0 or "2.4" in close_res.get("step_name", ""):
                                 rec["ticket_status"] = "Đã chuyển 2.4"
+                                save_or_update_ticket(rec)
+                                # TỰ ĐỘNG CHUYỂN TIẾP SANG 2.6 HOẶC 5.1 THEO CHUỖI LIVE
+                                try:
+                                    time.sleep(1.5)
+                                    raw_act = fetch_active_tickets(token, limit=100)
+                                    next_f_id = None
+                                    for r_it in raw_act:
+                                        if (ticket.get("ticket_id") and str(r_it.get("ticketId")) == str(ticket.get("ticket_id"))) or \
+                                           (phone_84 and phone_84 in str(r_it.get("contactPhone", ""))):
+                                            next_f_id = r_it.get("id")
+                                            break
+                                    if next_f_id:
+                                        state.log("STEP", f"🤖 [Tự Đóng Live] Phiếu {phone_84} tiếp tục chuyển từ 2.4 sang 2.6/5.1...")
+                                        c_res2 = api_transfer_ttsnew_ticket(
+                                            token=token,
+                                            ticket_flow_id=next_f_id,
+                                            ticket_id=ticket.get("ticket_id"),
+                                            phone=phone_84,
+                                            ticket_code=ticket_code,
+                                            status=status,
+                                            closing_content=comment,
+                                            assign_content=action_plan
+                                        )
+                                        if c_res2.get("success"):
+                                            state.log("SUCCESS", f"   ↳ {c_res2.get('message')}")
+                                            if "2.6" in c_res2.get("step_name", ""):
+                                                rec["ticket_status"] = "Chờ đóng lần 2"
+                                                save_or_update_ticket(rec)
+                                                # TIẾP TỤC ĐÓNG DỨT ĐIỂM NẾU SANG 2.6
+                                                time.sleep(1.5)
+                                                raw_act3 = fetch_active_tickets(token, limit=100)
+                                                f3_id = None
+                                                for r_it3 in raw_act3:
+                                                    if (ticket.get("ticket_id") and str(r_it3.get("ticketId")) == str(ticket.get("ticket_id"))) or \
+                                                       (phone_84 and phone_84 in str(r_it3.get("contactPhone", ""))):
+                                                        f3_id = r_it3.get("id")
+                                                        break
+                                                if f3_id:
+                                                    state.log("STEP", f"🤖 [Tự Đóng Live] Phiếu {phone_84} đóng dứt điểm tại bước 2.6...")
+                                                    c_res3 = api_transfer_ttsnew_ticket(
+                                                        token=token,
+                                                        ticket_flow_id=f3_id,
+                                                        ticket_id=ticket.get("ticket_id"),
+                                                        phone=phone_84,
+                                                        ticket_code=ticket_code,
+                                                        status=status,
+                                                        closing_content=comment,
+                                                        assign_content=action_plan
+                                                    )
+                                                    if c_res3.get("success"):
+                                                        state.log("SUCCESS", f"   ↳ {c_res3.get('message')}")
+                                                        rec["ticket_status"] = "Đã đóng"
+                                                        save_or_update_ticket(rec)
+                                            else:
+                                                rec["ticket_status"] = "Chuyển VTT"
+                                                save_or_update_ticket(rec)
+                                except Exception as ex_chain:
+                                    state.log("WARN", f"Lỗi auto-chain cho {phone_84}: {ex_chain}")
                             elif close_res.get("round") == 1:
                                 rec["ticket_status"] = "Chờ đóng lần 2" if "2.6" in close_res.get("step_name", "") else "Chuyển VTT"
+                                save_or_update_ticket(rec)
+                                # TIẾP TỤC ĐÓNG DỨT ĐIỂM NẾU SANG 2.6
+                                if "2.6" in close_res.get("step_name", ""):
+                                    try:
+                                        time.sleep(1.5)
+                                        raw_act3 = fetch_active_tickets(token, limit=100)
+                                        f3_id = None
+                                        for r_it3 in raw_act3:
+                                            if (ticket.get("ticket_id") and str(r_it3.get("ticketId")) == str(ticket.get("ticket_id"))) or \
+                                               (phone_84 and phone_84 in str(r_it3.get("contactPhone", ""))):
+                                                f3_id = r_it3.get("id")
+                                                break
+                                        if f3_id:
+                                            state.log("STEP", f"🤖 [Tự Đóng Live] Phiếu {phone_84} đóng dứt điểm tại bước 2.6...")
+                                            c_res3 = api_transfer_ttsnew_ticket(
+                                                token=token,
+                                                ticket_flow_id=f3_id,
+                                                ticket_id=ticket.get("ticket_id"),
+                                                phone=phone_84,
+                                                ticket_code=ticket_code,
+                                                status=status,
+                                                closing_content=comment,
+                                                assign_content=action_plan
+                                            )
+                                            if c_res3.get("success"):
+                                                state.log("SUCCESS", f"   ↳ {c_res3.get('message')}")
+                                                rec["ticket_status"] = "Đã đóng"
+                                                save_or_update_ticket(rec)
+                                    except Exception:
+                                        pass
                             else:
                                 rec["ticket_status"] = "Đã đóng"
-                            save_or_update_ticket(rec)
+                                save_or_update_ticket(rec)
                         else:
                             state.log("WARN", f"   ↳ ⚠️ [Phiếu lỗi] Không thể tự động chuyển bước phiếu {phone_84}: {close_res.get('message')}")
                             rec["ticket_status"] = "Phiếu lỗi"

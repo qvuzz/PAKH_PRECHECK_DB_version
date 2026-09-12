@@ -804,14 +804,39 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
             return {"success": False, "message": post_res.get("message", f"Lỗi chuyển sang bước {next_step_name}")}
 
         new_status = "Chuyển VTT" if is_step_5_1 else "Chờ đóng lần 2"
+        clean_code = (ticket_code or "").split("\n")[0].strip()
+        new_flow_id = None
+        new_actual_step = next_step_name
+        try:
+            time.sleep(1.2)
+            raw_active = fetch_active_tickets(token, limit=100)
+            for r_it in raw_active:
+                if (ticket_id and str(r_it.get("ticketId")) == str(ticket_id)) or \
+                   (clean_code and clean_code in str(r_it.get("ticketCode", ""))):
+                    new_flow_id = r_it.get("id")
+                    break
+            if new_flow_id and not is_step_5_1:
+                url_st = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={new_flow_id}"
+                r_st = requests.get(url_st, headers=headers, timeout=5).json()
+                c_nd = (r_st.get("data") or {}).get("currentNodes", [{}])[0]
+                if c_nd.get("name"):
+                    new_actual_step = c_nd["name"]
+        except Exception:
+            pass
+
+        new_ticket_code_val = f"{clean_code}\n[Quy trình Chất lượng mạng & dịch vụ di động]\n{new_actual_step}" if not is_step_5_1 else ticket_code
         try:
             from db_manager import get_db_connection
             conn = get_db_connection()
             conn.execute("""
                 UPDATE tickets 
-                SET ticket_status = ?, closed_by = ?, updated_at = CURRENT_TIMESTAMP 
+                SET flow_id = COALESCE(?, flow_id),
+                    ticket_code = ?,
+                    ticket_status = ?, 
+                    closed_by = ?, 
+                    updated_at = CURRENT_TIMESTAMP 
                 WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
-            """, (new_status, actor_name, ticket_id, f"{ticket_code}%", phone))
+            """, (new_flow_id, new_ticket_code_val, new_status, actor_name, ticket_id, f"{clean_code}%", phone))
             conn.commit()
             conn.close()
         except Exception:
@@ -986,15 +1011,40 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
         if post_res.get("isError"):
             return {"success": False, "message": post_res.get("message", f"Lỗi từ hệ thống TTS khi chuyển sang bước {next_step_name}")}
 
-        # 4. Cập nhật trạng thái phiếu trong DB tickets.db
+        # 4. Tra cứu ngay flow mới trên TTS Mới để cập nhật trực tiếp DB theo thời gian thực (Live)
+        clean_code = (ticket_code or "").split("\n")[0].strip()
+        new_flow_id = None
+        new_actual_step = next_step_name
+        try:
+            time.sleep(1.2)
+            raw_active = fetch_active_tickets(token, limit=100)
+            for r_it in raw_active:
+                if (ticket_id and str(r_it.get("ticketId")) == str(ticket_id)) or \
+                   (clean_code and clean_code in str(r_it.get("ticketCode", ""))):
+                    new_flow_id = r_it.get("id")
+                    break
+            if new_flow_id:
+                url_st = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={new_flow_id}"
+                r_st = requests.get(url_st, headers=headers, timeout=5).json()
+                c_nd = (r_st.get("data") or {}).get("currentNodes", [{}])[0]
+                if c_nd.get("name"):
+                    new_actual_step = c_nd["name"]
+        except Exception:
+            pass
+
+        new_ticket_code_val = f"{clean_code}\n[2.4_QT_CLM_02]\n{new_actual_step}"
         try:
             from db_manager import get_db_connection
             conn = get_db_connection()
             conn.execute("""
                 UPDATE tickets 
-                SET ticket_status = 'Đã chuyển 2.4', closed_by = ?, updated_at = CURRENT_TIMESTAMP 
+                SET flow_id = COALESCE(?, flow_id),
+                    ticket_code = ?,
+                    ticket_status = 'Chưa đóng', 
+                    closed_by = ?, 
+                    updated_at = CURRENT_TIMESTAMP 
                 WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
-            """, (actor_name, ticket_id, f"{ticket_code}%", phone))
+            """, (new_flow_id, new_ticket_code_val, actor_name, ticket_id, f"{clean_code}%", phone))
             conn.commit()
             conn.close()
         except Exception:
@@ -1010,4 +1060,97 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
         }
     except Exception as e:
         return {"success": False, "message": f"Lỗi ngoại lệ khi chuyển bước 2.4: {str(e)}"}
+
+
+def sync_tts_new_live_steps(token: str = "") -> dict:
+    """
+    Đồng bộ live siêu tốc (REST API OneOSS Gateway, < 1.5 giây) trạng thái bước và flow_id 
+    của các phiếu TTS Mới đang mở trên dashboard mà không cần cào lại BTools/SAPC/CEM.
+    """
+    if not token or not str(token).strip():
+        token = get_cached_token()
+    if not token:
+        return {"success": False, "message": "Chưa có token TTS Mới"}
+
+    if not token.startswith("Bearer "):
+        token = "Bearer " + token
+
+    try:
+        active_list = fetch_active_tickets(token, limit=100)
+    except Exception as e:
+        return {"success": False, "message": f"Lỗi fetch active tickets: {e}"}
+
+    try:
+        from db_manager import get_db_connection
+        conn = get_db_connection()
+        db_rows = conn.execute("""
+            SELECT ticket_id, ticket_code, phone, flow_id, ticket_status 
+            FROM tickets 
+            WHERE source = 'tts_new' AND ticket_status NOT IN ('Đã đóng', 'Da dong')
+        """).fetchall()
+
+        if not db_rows:
+            conn.close()
+            return {"success": True, "updated": 0}
+
+        active_map = {}
+        for it in active_list:
+            tid = it.get("ticketId")
+            if tid:
+                active_map[str(tid)] = it
+            code = str(it.get("ticketCode") or "")
+            if code:
+                clean_c = code.split("\n")[0].strip()
+                active_map[clean_c] = it
+
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Authorization": token,
+            "Origin": "https://tts.vnptnet.vn",
+            "Referer": "https://tts.vnptnet.vn/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+
+        updated_count = 0
+        for row in db_rows:
+            tid_str = str(row["ticket_id"] or "")
+            raw_code = str(row["ticket_code"] or "")
+            clean_c = raw_code.split("\n")[0].strip()
+
+            matched_it = active_map.get(tid_str) or active_map.get(clean_c)
+            if matched_it:
+                latest_flow_id = matched_it.get("id")
+                # Nếu flow_id khác hoặc bước hiện tại cần làm mới
+                if latest_flow_id and (str(row["flow_id"]) != str(latest_flow_id) or "2.3" in raw_code or "2.4" in raw_code):
+                    try:
+                        url_step = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={latest_flow_id}"
+                        r_step = requests.get(url_step, headers=headers, timeout=5).json()
+                        c_nodes = (r_step.get("data") or {}).get("currentNodes", [])
+                        if c_nodes:
+                            c_node = c_nodes[0]
+                            c_name = str(c_node.get("name") or "")
+                            c_proc = str((c_node.get("processData") or {}).get("processName") or "")
+                            
+                            new_code_lines = [clean_c]
+                            if c_proc:
+                                new_code_lines.append(f"[{c_proc}]")
+                            if c_name:
+                                new_code_lines.append(c_name)
+                            new_ticket_code = "\n".join(new_code_lines)
+
+                            if str(row["flow_id"]) != str(latest_flow_id) or raw_code != new_ticket_code:
+                                conn.execute("""
+                                    UPDATE tickets 
+                                    SET flow_id = ?, ticket_code = ?, updated_at = CURRENT_TIMESTAMP 
+                                    WHERE ticket_id = ? AND source = 'tts_new'
+                                """, (latest_flow_id, new_ticket_code, row["ticket_id"]))
+                                updated_count += 1
+                    except Exception:
+                        pass
+        conn.commit()
+        conn.close()
+        return {"success": True, "updated": updated_count}
+    except Exception as ex:
+        return {"success": False, "message": str(ex)}
+
 
