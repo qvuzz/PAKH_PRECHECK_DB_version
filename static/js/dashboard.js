@@ -1491,7 +1491,7 @@ function renderTicketsTable(force = false) {
                 if (m) cParts.push(`<span style="color:#0369a1; font-weight:700; font-family:'JetBrains Mono', monospace;">Radio: ${escapeHtml(m[1].trim())}</span>`);
             }
             if (hssVal || raw.includes('HSS:')) {
-                const targetHss = hssVal || (raw.match(/HSS:\s*([^\|\n\\]+)/) ? raw.match(/HSS:\s*([^\|\n\\]+/)[1].trim() : '');
+                const targetHss = hssVal || (raw.match(/HSS:\s*([^\|\n\\]+)/) ? raw.match(/HSS:\s*([^\|\n\\]+)/)[1].trim() : '');
                 const hssDigits = targetHss.replace(/\D/g, '');
                 if (hssDigits.length >= 3 || targetHss.includes('PROFILE LẠ')) {
                     cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">HSS: ${escapeHtml(targetHss)} (PROFILE LẠ)</span>`);
