@@ -315,14 +315,6 @@
                 <span>Đã đóng hôm nay:</span>
                 <strong id="statClosedTickets" style="color:#16a34a;">0</strong>
             </div>
-            <div class="stat-pill">
-                <span>Chu kỳ:</span>
-                <strong id="statCycles">0</strong>
-            </div>
-            <div class="stat-pill" id="pillCountdown" title="Thời gian đếm ngược đến chu kỳ quét tiếp theo">
-                <span>Đếm ngược:</span>
-                <strong id="countdownBadgeUnified" style="color:var(--primary);">--:--</strong>
-            </div>
         </div>
 
         <div class="top-controls-container">
@@ -376,31 +368,12 @@
                     </div>
                 </div>
 
-                <!-- 2. Tick Lặp & ô nhập thời gian bên cạnh -->
-                <div class="ctrl-item"
-                    style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#334155; margin:0 3px;">
-                    <label style="display:flex; align-items:center; gap:5px; cursor:pointer; user-select:none;"
-                        title="Tick chọn để quét lặp lại theo chu kỳ định kỳ. Bỏ tick nếu chỉ muốn quét 1 lần.">
-                        <input type="checkbox" id="chkLoopUnified" checked onchange="toggleLoopOption(this.checked)"
-                            style="width:15px; height:15px; accent-color:#005baa; cursor:pointer;">
-                        <span>Lặp:</span>
-                    </label>
-                    <input type="text" inputmode="numeric" pattern="[0-9]*" id="inpIntervalUnified"
-                        class="ctrl-input-sm" value="15" maxlength="3"
-                        oninput="this.value = this.value.replace(/[^0-9]/g, '')"
-                        style="width:38px; text-align:center; padding:3px 4px; font-size:12px; font-weight:600;"
-                        title="Thời gian chờ giữa các chu kỳ quét (phút)">
-                    <span id="lblIntervalMinutes">phút</span>
-                </div>
-
-                <!-- 4. Nút Bắt đầu / Dừng nhập chung thành 1 nút duy nhất -->
-                <button id="btnToggleUnified" class="btn-sm btn-primary" onclick="toggleUnifiedAutomation()"
-                    title="Bắt đầu quét ngay lập tức (Nếu tick Lặp sẽ tiếp tục chu kỳ tự động)"
-                    style="min-width:92px; justify-content:center;">
-                    <svg id="iconToggleUnified" viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
-                        <polygon points="5 3 19 12 5 21 5 3" />
+                <!-- 2. Nút icon Refresh làm mới & quét tiền kiểm ngay lập tức -->
+                <button type="button" id="btnRefreshScan" class="btn-icon-refresh" onclick="triggerManualScan()"
+                    title="Làm mới & kích hoạt quét tiền kiểm ngay">
+                    <svg id="iconRefreshScan" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
                     </svg>
-                    <span id="lblToggleUnified">Bắt đầu</span>
                 </button>
             </div>
 
@@ -904,7 +877,7 @@
         </div>
     </div>
 
-    <script src="/static/js/dashboard.js?v=4.1"></script>
+    <script src="/static/js/dashboard.js?v=4.2"></script>
 </body>
 
 </html>

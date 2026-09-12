@@ -178,28 +178,15 @@ async function fetchStatus() {
         window.currentServerStatus = data.status;
         const isUnifiedRunning = isRunning || (data.status === 'PROCESSING') || (data.status === 'WAITING');
 
-        // Điều khiển Nút duy nhất Bắt đầu / Dừng (Click Bắt đầu đổi sang Dừng, click Dừng đổi sang Bắt đầu)
-        const btnToggle = document.getElementById('btnToggleUnified');
-        const iconToggle = document.getElementById('iconToggleUnified');
-        const lblToggle = document.getElementById('lblToggleUnified');
-
-        if (!window.isToggleInProgress && btnToggle) {
-            btnToggle.disabled = false;
-            btnToggle.style.opacity = '1';
-            btnToggle.style.cursor = 'pointer';
-
-            if (isUnifiedRunning) {
-                // ĐANG CHẠY: HIỂN THỊ NÚT "DỪNG" MÀU ĐỎ
-                btnToggle.className = 'btn-sm btn-danger';
-                btnToggle.title = 'Tiến trình đang quét / chờ lặp. Bấm để Dừng lại!';
-                if (iconToggle) iconToggle.innerHTML = '<rect x="4" y="4" width="16" height="16" rx="2"/>';
-                if (lblToggle) lblToggle.innerText = 'Dừng';
+        // Điều khiển Nút Refresh Icon: xoay khi hệ thống đang quét ngầm (PROCESSING)
+        const btnRefresh = document.getElementById('btnRefreshScan');
+        if (btnRefresh) {
+            if (data.status === 'PROCESSING') {
+                btnRefresh.classList.add('spinning');
+                btnRefresh.title = 'Hệ thống đang tiền kiểm chuyên sâu...';
             } else {
-                // ĐÃ DỪNG: HIỂN THỊ NÚT "BẮT ĐẦU" MÀU XANH
-                btnToggle.className = 'btn-sm btn-primary';
-                btnToggle.title = 'Bắt đầu quét ngay lập tức (Nếu tick Lặp sẽ tiếp tục chu kỳ tự động)';
-                if (iconToggle) iconToggle.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
-                if (lblToggle) lblToggle.innerText = 'Bắt đầu';
+                btnRefresh.classList.remove('spinning');
+                btnRefresh.title = 'Làm mới & kích hoạt quét tiền kiểm ngay';
             }
         }
 
@@ -2978,78 +2965,55 @@ function toggleLoopOption(isChecked) {
     }
 }
 
-async function toggleUnifiedAutomation() {
-    if (window.isToggleInProgress) return;
-    const isRunningNow = isRunning || (window.currentServerStatus === 'PROCESSING') || (window.currentServerStatus === 'WAITING');
-    if (isRunningNow) {
-        await stopAutomation();
-    } else {
-        await startUnifiedAutomation();
+// KÍCH HOẠT LÀM MỚI & QUÉT TIỀN KIỂM NGAY LẬP TỨC KHI BẤM ICON REFRESH
+async function triggerManualScan() {
+    const btnRefresh = document.getElementById('btnRefreshScan');
+    if (btnRefresh) {
+        btnRefresh.classList.add('spinning');
     }
+    const scopes = getSelectedScopes();
+    const chkAutoClose = document.getElementById('chkAutoCloseUnified');
+    const autoClose = isSystemAdmin ? (chkAutoClose ? chkAutoClose.checked : false) : false;
+    const autoCloseMode = autoClose ? 'all' : 'none';
+
+    try {
+        const res = await fetch('/api/run-now', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                scan_scopes: scopes,
+                auto_close: autoClose,
+                auto_close_mode: autoCloseMode
+            })
+        });
+        const data = await res.json();
+        if (!data.success && data.message) {
+            console.log("Run-now:", data.message);
+        }
+    } catch (e) {
+        console.error("Lỗi kích hoạt quét ngay:", e);
+    } finally {
+        await fetchStatus();
+        await loadTickets(true);
+        setTimeout(() => {
+            if (btnRefresh && window.currentServerStatus !== 'PROCESSING') {
+                btnRefresh.classList.remove('spinning');
+            }
+        }, 1200);
+    }
+}
+
+async function toggleUnifiedAutomation() {
+    await triggerManualScan();
 }
 
 async function startUnifiedAutomation() {
-    window.isToggleInProgress = true;
-    const scopes = getSelectedScopes();
-    const chkAutoClose = document.getElementById('chkAutoCloseUnified');
-    // Máy Client chỉ được phép quét & tiền kiểm, vô hiệu hóa tự đóng phiếu
-    const autoClose = isSystemAdmin ? (chkAutoClose ? chkAutoClose.checked : false) : false;
-    const autoCloseMode = autoClose ? 'all' : 'none';
-    const chkLoop = document.getElementById('chkLoopUnified');
-    const isLoop = chkLoop ? chkLoop.checked : true;
-    const inpInterval = document.getElementById('inpIntervalUnified');
-    const interval = inpInterval ? (parseInt(inpInterval.value) || 15) : 15;
-
-    const btnToggle = document.getElementById('btnToggleUnified');
-    const lblToggle = document.getElementById('lblToggleUnified');
-    if (btnToggle) {
-        btnToggle.disabled = true;
-        btnToggle.style.opacity = '0.75';
-        if (lblToggle) lblToggle.innerText = 'Đang bật...';
-    }
-
-    try {
-        if (isLoop) {
-            // Chạy chu kỳ lặp tự động (Worker lập tức quét ngay chu kỳ 1)
-            const res = await fetch('/api/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    scan_scopes: scopes,
-                    auto_close: autoClose,
-                    auto_close_mode: autoCloseMode,
-                    interval_minutes: interval
-                })
-            });
-            const data = await res.json();
-            if (!data.success && data.error) {
-                alert("⚠️ " + data.error);
-            }
-        } else {
-            // Không lặp: Quét ngay lập tức 1 lần (One-off scan)
-            const res = await fetch('/api/run-now', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    scan_scopes: scopes,
-                    auto_close: autoClose,
-                    auto_close_mode: autoCloseMode
-                })
-            });
-            const data = await res.json();
-            if (!data.success && data.message) {
-                alert("⚠️ " + data.message);
-            }
-        }
-    } catch (e) {
-        alert("Lỗi kết nối khi bắt đầu quét: " + e);
-    } finally {
-        setTimeout(async () => {
-            window.isToggleInProgress = false;
-            await fetchStatus();
-        }, 500);
-    }
+    await triggerManualScan();
 }
+
+window.triggerManualScan = triggerManualScan;
+window.toggleUnifiedAutomation = toggleUnifiedAutomation;
+window.startUnifiedAutomation = startUnifiedAutomation;
 
 // Alias tương thích
 const runNowUnified = startUnifiedAutomation;

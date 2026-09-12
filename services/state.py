@@ -29,10 +29,10 @@ def normalize_phone_vn(phone_raw: str) -> str:
 class AutomationState:
     def __init__(self):
         self.lock = threading.Lock()
-        self.is_running = False
+        self.is_running = True
         self.status = "IDLE"  # IDLE, PROCESSING, WAITING, STOPPING
-        self.status_message = "Sẵn sàng khởi động"
-        self.interval_minutes = 15  # Mặc định chu kỳ 15 phút
+        self.status_message = "Hệ thống tự động tiền kiểm đang hoạt động"
+        self.interval_minutes = 2.5  # Chu kỳ quét chuyên sâu nền tự động (BTools + SAPC)
         self.auto_close = False  # Mặc định KHÔNG tự đóng để đảm bảo an toàn, KTV phải chủ động bật & xác nhận 2 lần
         self.scan_scopes = ["tts_old_data", "tts_new_data"]  # Danh sách phạm vi quét: 'tts_old_data', 'tts_old_voice', 'tts_new_data', 'tts_new_voice'
         self.auto_close_mode = "none"  # 'all', 'tts_old', 'tts_new', 'none'

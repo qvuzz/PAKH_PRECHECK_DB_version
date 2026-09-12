@@ -2099,3 +2099,38 @@
             color: #ffffff;
             border-color: #4338ca;
         }
+
+        /* NÚT REFRESH ICON GỌN NHẸ TRÊN TOPBAR */
+        .btn-icon-refresh {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-sm, 6px);
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            color: var(--primary, #005baa);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+            padding: 0;
+            flex-shrink: 0;
+        }
+        .btn-icon-refresh:hover {
+            background: #f0f7ff;
+            border-color: var(--primary, #005baa);
+            color: var(--primary, #005baa);
+            transform: translateY(-1px);
+            box-shadow: 0 2px 5px rgba(0, 91, 170, 0.15);
+        }
+        .btn-icon-refresh:active {
+            transform: translateY(0);
+        }
+        .btn-icon-refresh.spinning svg {
+            animation: spinRefresh 0.8s linear infinite;
+        }
+        @keyframes spinRefresh {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
