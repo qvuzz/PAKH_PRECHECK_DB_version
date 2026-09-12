@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Sơ Đồ Luồng Quy Trình Tự Động Hóa VNPT PRECHECK</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+        }
+        body {
+            background: #f8fafc;
+            padding: 24px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .flowchart-container {
+            width: 1520px;
+            background: #ffffff;
+            border: 2px solid #cbd5e1;
+            border-radius: 16px;
+            padding: 28px 32px 24px;
+            box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08);
+        }
+        /* Header Title */
+        .chart-header {
+            text-align: center;
+            margin-bottom: 24px;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 16px;
+            position: relative;
+        }
+        .main-badge {
+            display: inline-block;
+            background: #e0f2fe;
+            color: #005baa;
+            font-size: 12px;
+            font-weight: 800;
+            padding: 3px 12px;
+            border-radius: 20px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 6px;
+            border: 1px solid #bae6fd;
+        }
+        .chart-title {
+            font-size: 23px;
+            font-weight: 800;
+            color: #0f172a;
+            letter-spacing: -0.01em;
+            text-transform: uppercase;
+        }
+        .chart-subtitle {
+            font-size: 13.5px;
+            color: #475569;
+            margin-top: 4px;
+        }
+        .copyright-tag {
+            position: absolute;
+            right: 0;
+            bottom: 16px;
+            font-size: 11px;
+            color: #64748b;
+            font-style: italic;
+        }
+
+        /* 5-Step Pipeline Grid */
+        .pipeline-grid {
+            display: grid;
+            grid-template-columns: 260px 38px 430px 38px 330px 38px 330px;
+            align-items: stretch;
+            margin-bottom: 20px;
+        }
+
+        .step-col {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .step-header {
+            padding: 8px 12px;
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .sh-step1 { background: linear-gradient(135deg, #1e40af, #2563eb); }
+        .sh-step2 { background: linear-gradient(135deg, #0369a1, #0284c7); }
+        .sh-step3 { background: linear-gradient(135deg, #4f46e5, #6366f1); }
+        .sh-step4 { background: linear-gradient(135deg, #0f766e, #0d9488); }
+
+        /* Connector arrows */
+        .arrow-col {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .arrow-icon {
+            width: 28px;
+            height: 28px;
+            background: #e2e8f0;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #475569;
+            font-weight: 900;
+            font-size: 14px;
+        }
+
+        /* Cards inside steps */
+        .card {
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+        .card-title {
+            font-size: 12.5px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* Step 1 Cards */
+        .card-tts-old { border-left: 4px solid #f59e0b; }
+        .card-tts-new { border-left: 4px solid #3b82f6; }
+        .card-worker  { border-left: 4px solid #10b981; background: #f0fdf4; }
+
+        /* Step 2 Cards (Branching Data vs Voice) */
+        .sub-branch-data {
+            background: #f0f9ff;
+            border: 1.5px solid #7dd3fc;
+            border-radius: 8px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .sub-branch-voice {
+            background: #faf5ff;
+            border: 1.5px dashed #c084fc;
+            border-radius: 8px;
+            padding: 10px;
+        }
+
+        .data-source-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+        .source-pill {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 11px;
+        }
+        .source-pill strong {
+            display: block;
+            font-size: 11.5px;
+            color: #0369a1;
+            margin-bottom: 2px;
+        }
+
+        .vpn-warn-pill {
+            background: #fee2e2;
+            border: 1px solid #f87171;
+            color: #b91c1c;
+            font-size: 10.5px;
+            font-weight: 700;
+            padding: 3px 6px;
+            border-radius: 4px;
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Step 3: Scenarios Engine */
+        .scenario-box {
+            background: #ffffff;
+            border: 1.5px solid #a5b4fc;
+            border-radius: 8px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .scenario-item {
+            background: #f5f3ff;
+            border: 1px solid #ddd6fe;
+            border-radius: 5px;
+            padding: 5px 8px;
+            font-size: 11px;
+        }
+        .scenario-item strong {
+            color: #4338ca;
+            font-size: 11.5px;
+        }
+
+        /* Step 4: Decision & Action */
+        .decision-auto {
+            background: #ecfdf5;
+            border: 2px solid #34d399;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.1);
+        }
+        .decision-manual {
+            background: #fffbeb;
+            border: 2px dashed #f59e0b;
+            border-radius: 8px;
+            padding: 12px;
+        }
+        .badge-pct {
+            display: inline-block;
+            background: #059669;
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: 12px;
+        }
+
+        /* Bottom Row: Synchronization & Security Footer */
+        .bottom-sync-bar {
+            background: linear-gradient(90deg, #1e293b, #334155);
+            border-radius: 10px;
+            color: #f8fafc;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            margin-top: 6px;
+        }
+        .sync-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .sync-badge {
+            background: #0284c7;
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 10.5px;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="flowchart-container">
+    <!-- Header -->
+    <div class="chart-header">
+        <div class="main-badge">KIẾN TRÚC VẬN HÀNH TOÀN TRÌNH • VNPT PRECHECK</div>
+        <div class="chart-title">SƠ ĐỒ LUỒNG QUY TRÌNH TỰ ĐỘNG HÓA TIỀN KIỂM & XỬ LÝ ĐÓNG PHIẾU PAKH</div>
+        <div class="chart-subtitle">Tự động hóa toàn trình Mobile Internet (85% - 90%) kết hợp Nền tảng tiền kiểm tra tập trung đa dịch vụ trên mạng di động VNPT</div>
+        <div class="copyright-tag">Copyright by quangvu@vnpt.vn • Sep.2026</div>
+    </div>
+
+    <!-- 4-Step Pipeline -->
+    <div class="pipeline-grid">
+        <!-- BƯỚC 1 -->
+        <div class="step-col">
+            <div class="step-header sh-step1">
+                <span>1. KẾT NỐI & CÀO PHIẾU</span>
+                <span>REST API</span>
+            </div>
+
+            <div class="card card-tts-old">
+                <div class="card-title">
+                    <span style="color:#f59e0b;">●</span> Máy chủ TTS Cũ (tts.vnpt.vn)
+                </div>
+                <div style="color:#475569; font-size:11.5px;">
+                    • Kết nối REST API tốc độ cao<br>
+                    • Trích xuất token phiên Chrome (CDP)<br>
+                    • Quét toàn bộ mọi loại phiếu
+                </div>
+            </div>
+
+            <div class="card card-tts-new">
+                <div class="card-title">
+                    <span style="color:#3b82f6;">●</span> Máy chủ TTS Mới (tts.vnptnet.vn)
+                </div>
+                <div style="color:#475569; font-size:11.5px;">
+                    • Gọi trực tiếp REST API Endpoint<br>
+                    • Lọc chuyên mục Data / Voice / SMS<br>
+                    • Chạy ngầm, không mở tab duyệt
+                </div>
+            </div>
+
+            <div class="card card-worker">
+                <div class="card-title" style="color:#059669;">
+                    <span>⚙️</span> Luồng Tự Động (Worker Loop)
+                </div>
+                <div style="color:#047857; font-size:11px;">
+                    Định kỳ quét ngầm hoặc kích hoạt tức thì (Run Now) -> Lưu CSDL SQLite WAL
+                </div>
+            </div>
+        </div>
+
+        <!-- ARROW 1 -> 2 -->
+        <div class="arrow-col">
+            <div class="arrow-icon">➔</div>
+        </div>
+
+        <!-- BƯỚC 2 -->
+        <div class="step-col">
+            <div class="step-header sh-step2">
+                <span>2. PHÂN LUỒNG & TIỀN KIỂM ĐA NGUỒN</span>
+                <span>CORE / CEM / SAPC</span>
+            </div>
+
+            <!-- Phân luồng Data -->
+            <div class="sub-branch-data">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <strong style="color:#0369a1; font-size:12px;">NHÁNH 1: MOBILE INTERNET (DATA)</strong>
+                    <span style="background:#0284c7; color:#fff; font-size:9.5px; font-weight:800; padding:1px 6px; border-radius:10px;">TRỌNG TÂM (>80%)</span>
+                </div>
+
+                <div class="data-source-grid">
+                    <div class="source-pill">
+                        <strong>Hồ sơ Core HLR/HSS</strong>
+                        • Sóng Radio: 4G / 5G / 3G<br>
+                        • Cờ NAM: 0 (Mở) / 1 (Khóa GPRS)<br>
+                        • HSS Profile, IPv4/IPv6 WAN
+                    </div>
+                    <div class="source-pill">
+                        <strong>Chính sách cước SAPC</strong>
+                        • Gói cước data đang sử dụng<br>
+                        • Quota dung lượng còn lại<br>
+                        • Hạn dùng, trạng thái bóp băng thông
+                    </div>
+                    <div class="source-pill">
+                        <strong>Trạm phát sóng CEM</strong>
+                        • Top 3 Cell bắt sóng 5 ngày<br>
+                        • Trạm ưu thế (Dominant Cell %)<br>
+                        • Phân tích App Usage
+                        <div class="vpn-warn-pill">⚠️ Cảnh báo đỏ: App VPN / 1.1.1.1</div>
+                    </div>
+                    <div class="source-pill">
+                        <strong>Lịch sử phiên BTools</strong>
+                        • Data sessions, dung lượng<br>
+                        • Throughput Tải lên / Tải xuống<br>
+                        • Đối soát mốc thời gian tiếp nhận
+                    </div>
+                </div>
+
+                <div style="background:#ffffff; border:1px solid #bae6fd; border-radius:5px; padding:4px 8px; font-size:10.5px; color:#0369a1;">
+                    ✨ <strong>Tóm tắt AI / NLP Offline:</strong> Bóc tách 6 trường cốt lõi (hiện tượng, thời gian, địa bàn, ứng dụng lỗi).
+                </div>
+            </div>
+
+            <!-- Phân luồng Voice/SMS -->
+            <div class="sub-branch-voice">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <strong style="color:#7e22ce; font-size:11.5px;">NHÁNH 2: THOẠI / SMS / GÓI / PA KHÁC</strong>
+                    <span style="background:#9333ea; color:#fff; font-size:9px; font-weight:800; padding:1px 5px; border-radius:10px;">TIỀN KIỂM TẬP TRUNG</span>
+                </div>
+                <div style="color:#6b21a8; font-size:10.5px;">
+                    • Tự động tiền kiểm nhanh Core HLR/HSS (công nghệ mạng, cờ khóa cước, trạm BTS phục vụ).<br>
+                    • Đưa về <strong>Tab Voice/SMS</strong> trên Dashboard hỗ trợ KTV ra quyết định xử lý nhanh.
+                </div>
+            </div>
+        </div>
+
+        <!-- ARROW 2 -> 3 -->
+        <div class="arrow-col">
+            <div class="arrow-icon">➔</div>
+        </div>
+
+        <!-- BƯỚC 3 -->
+        <div class="step-col">
+            <div class="step-header sh-step3">
+                <span>3. ĐỘNG CƠ CHẨN ĐOÁN (25 KỊCH BẢN)</span>
+                <span>LOGIC ENGINE</span>
+            </div>
+
+            <div class="scenario-box">
+                <div style="font-weight:700; font-size:11.5px; color:#312e81; border-bottom:1px solid #e0e7ff; padding-bottom:4px;">
+                    🧠 Đối soát tương quan đa chiều: Core + Cước + Sóng vô tuyến + Thời điểm tiếp nhận
+                </div>
+
+                <div class="scenario-item">
+                    <strong>Nhóm 1: Core HLR/HSS & NAM (4 kịch bản)</strong>
+                    Khóa GPRS NAM=1, chưa khai profile 4G, phản ánh 5G nhưng trạm chưa phát, MS Purged.
+                </div>
+
+                <div class="scenario-item">
+                    <strong>Nhóm 2: Chính sách cước SAPC (6 kịch bản)</strong>
+                    Hết quota hạ băng thông, gói hết hạn, chỉ có PAYGO, gói tích hợp Home, gia hạn trong ngày.
+                </div>
+
+                <div class="scenario-item">
+                    <strong>Nhóm 3: Phiên BTools & Thời điểm (6 kịch bản)</strong>
+                    Data >10MB sau tiếp nhận (tự phục hồi), chưa có phiên sau tiếp nhận, lưu lượng yếu trạm cố định.
+                </div>
+
+                <div class="scenario-item">
+                    <strong>Nhóm 4: Chất lượng sóng vô tuyến (3 kịch bản)</strong>
+                    Không bắt được 4G, rớt mạng 4G về 2G/3G, trạm BTS mất liên lạc / bảo dưỡng.
+                </div>
+
+                <div class="scenario-item">
+                    <strong>Nhóm 5: Treo Data & Thiết bị đầu cuối (6 kịch bản)</strong>
+                    Lệch Service ID, Treo dữ liệu, lỗi VPN / 1.1.1.1, sai APN m3-world, máy chưa bật data.
+                </div>
+            </div>
+
+            <div style="background:#eef2ff; border:1px solid #c7d2fe; border-radius:6px; padding:6px 10px; font-size:11px; color:#3730a3;">
+                <strong>Kết xuất tự động:</strong><br>
+                • <strong>Cột 10:</strong> Ý kiến phân tích kỹ thuật chuẩn hóa.<br>
+                • <strong>Cột 11:</strong> Phương án tư vấn xử lý / Hướng điều phối.
+            </div>
+        </div>
+
+        <!-- ARROW 3 -> 4 -->
+        <div class="arrow-col">
+            <div class="arrow-icon">➔</div>
+        </div>
+
+        <!-- BƯỚC 4 -->
+        <div class="step-col">
+            <div class="step-header sh-step4">
+                <span>4. ĐÓNG PHIẾU & ĐIỀU PHỐI</span>
+                <span>REST API ACTION</span>
+            </div>
+
+            <!-- Tự động đóng -->
+            <div class="decision-auto">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <strong style="color:#065f46; font-size:12px;">TỰ ĐỘNG ĐÓNG TRỰC TIẾP</strong>
+                    <span class="badge-pct">85% - 90%</span>
+                </div>
+                <div style="color:#047857; font-size:11px; line-height:1.4;">
+                    • Áp dụng cho <strong>20 kịch bản chuẩn</strong> (hết quota bóp băng thông, gói hết hạn, cờ NAM=1, khách hàng đã dùng tốt sau tiếp nhận, lỗi VPN...).<br>
+                    • Gọi REST API đóng trực tiếp ngầm lên máy chủ TTS (1 - 2s/phiếu).<br>
+                    • <strong>Giải phóng hoàn toàn thao tác thủ công!</strong>
+                </div>
+            </div>
+
+            <!-- Đóng 1-click -->
+            <div class="decision-manual">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <strong style="color:#92400e; font-size:12px;">ĐÓNG 1-CLICK AN TOÀN</strong>
+                </div>
+                <div style="color:#78350f; font-size:11px; line-height:1.4;">
+                    • Dành cho phiếu Data đặc thù (nghi trạm BTS suy hao, bảo dưỡng...) & phiếu Thoại/SMS.<br>
+                    • Tự động điền sẵn form TTS: B0, Cột 10, Cột 11.<br>
+                    • KTV duyệt 1 giây và bấm Lưu, hoặc tạo phiếu CLM chuyển Kỹ thuật địa bàn.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Synchronization & Security Bar (GIAI ĐOẠN 5) -->
+    <div class="bottom-sync-bar">
+        <div class="sync-item">
+            <span class="sync-badge">GIAI ĐOẠN 5</span>
+            <span style="font-weight:700;">ĐỒNG BỘ & QUẢN TRỊ:</span>
+            <span>Cập nhật trạng thái "Đã đóng" trên CSDL SQLite WAL</span>
+        </div>
+        <div class="sync-item">
+            <span class="sync-badge" style="background:#10b981;">KPI SLA >98%</span>
+            <span>Live Log thời gian thực</span>
+        </div>
+        <div class="sync-item">
+            <span class="sync-badge" style="background:#6366f1;">BÁO CÁO EXCEL</span>
+            <span>Xuất 12 cột chuẩn hóa quy chuẩn VNPT</span>
+        </div>
+        <div class="sync-item">
+            <span class="sync-badge" style="background:#f59e0b;">BẢO MẬT LAN</span>
+            <span>Cô lập Token an toàn thông tin (auth_tts.py)</span>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>

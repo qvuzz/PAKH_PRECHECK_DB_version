@@ -48,6 +48,10 @@ temp.txt
 scratch_*
 ttsnew_token_cache.json
 tts_old_token_cache.json
+btools_cookie.json
+lan_sessions.json
+sapccheck/cookies.json
+cookies.json
 screenshot_*.png
 
 # OS / editor artifacts

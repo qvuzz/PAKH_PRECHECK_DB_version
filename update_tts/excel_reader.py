@@ -17,6 +17,7 @@ LEVEL_1_ACCESS_STATUSES = {
 AUTO_CLOSE_STATUSES_NO_ACCESS_CHECK = {
     "không bắt được sóng 4g",           # KC_01_NO_4G
     "chưa khai báo profile 4g",         # KC_07_NO_4G_PROFILE
+    "profile lạ",                       # HSS Profile từ 3 chữ số trở lên
     "bắt sóng 4g kém",                  # KC_02_WEAK_4G
     "thuê bao bị bóp băng thông",       # KC_03_THROTTLED
     "lỗi gói cước / thiết bị treo",     # KC_04
@@ -132,6 +133,11 @@ def is_level_1_auto_close_candidate(record):
     Tất cả các trường hợp đã được định nghĩa trong bảng cấu hình đóng đều trả về True.
     """
     status = normalize_text(record.get("status", ""))
+    ai_sum = str(record.get("ai_summary", "")).lower()
+
+    # Phản ánh lỗi ứng dụng cụ thể -> Dành cho KTV review, không tự động đóng
+    if "lỗi ứng dụng" in status or "lỗi ứng dụng cụ thể" in ai_sum:
+        return False
 
     if status == LEVEL_1_STATUS:
         return True

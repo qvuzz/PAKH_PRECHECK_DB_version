@@ -64,7 +64,93 @@ def load_dashboard_html() -> str:
     return "<h1>Lỗi: Không tìm thấy file templates/dashboard.html</h1>"
 
 
-ACTIVE_LAN_SESSIONS = {}
+LAN_SESSIONS_FILE = BASE_DIR / "lan_sessions.json"
+
+def _load_lan_sessions():
+    if LAN_SESSIONS_FILE.exists():
+        try:
+            with open(LAN_SESSIONS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _save_lan_sessions():
+    try:
+        with open(LAN_SESSIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(ACTIVE_LAN_SESSIONS, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+ACTIVE_LAN_SESSIONS = _load_lan_sessions()
+
+def resolve_ttsnew_token(client_ip: str, is_local: bool, client_tok: str = "") -> tuple:
+    """
+    Xác định token và thông tin KTV thực hiện trên TTS Mới:
+    1. Ưu tiên token client gửi lên (nếu là JWT Bearer hợp lệ có chứa chuỗi mã hóa).
+    2. Nếu không có, lấy từ ACTIVE_LAN_SESSIONS[client_ip] (tài khoản KTV vừa qua bước OTP trên máy này).
+    3. Nếu là máy chủ Localhost (Admin): cho phép lấy từ Chrome máy chủ.
+    4. Nếu là máy client LAN: TUYỆT ĐỐI KHÔNG dùng token máy chủ (ngăn chặn hoàn toàn việc KTV đóng phiếu bị nhầm sang tên Admin).
+    Trả về: (token: str, user_info: dict)
+    """
+    import base64
+    def _decode_jwt(tok_str: str) -> dict:
+        try:
+            raw = tok_str.replace("Bearer ", "").strip()
+            parts = raw.split(".")
+            if len(parts) >= 2:
+                p = parts[1]
+                p += "=" * ((4 - len(p) % 4) % 4)
+                data = json.loads(base64.b64decode(p).decode("utf-8"))
+                u = data.get("userInfo") or {}
+                return {
+                    "userName": u.get("userName") or data.get("sub") or "KTV",
+                    "displayName": u.get("name") or u.get("userName") or data.get("sub") or "KTV",
+                    "userId": u.get("userId") or 0
+                }
+        except Exception:
+            pass
+        return {}
+
+    # 1. Kiểm tra token gửi từ client
+    tok = (client_tok or "").strip()
+    if tok and len(tok) > 30 and "." in tok:
+        if not tok.startswith("Bearer "):
+            tok = f"Bearer {tok}"
+        user_info = _decode_jwt(tok)
+        if user_info.get("userName"):
+            if client_ip not in ACTIVE_LAN_SESSIONS:
+                ACTIVE_LAN_SESSIONS[client_ip] = {}
+            ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok
+            ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
+            ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
+            _save_lan_sessions()
+            return tok, user_info
+
+    # 2. Kiểm tra phiên LAN session của IP này
+    if client_ip in ACTIVE_LAN_SESSIONS:
+        lan_tok = (ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_token") or "").strip()
+        if lan_tok and len(lan_tok) > 30 and "." in lan_tok:
+            if not lan_tok.startswith("Bearer "):
+                lan_tok = f"Bearer {lan_tok}"
+            user_info = ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_user") or _decode_jwt(lan_tok)
+            return lan_tok, user_info
+
+    # 3. Nếu là máy chủ local (Admin), cho phép fallback lấy từ Chrome máy chủ
+    if is_local:
+        try:
+            from ttsnew_api import extract_token_from_browser
+            srv_tok = extract_token_from_browser()
+            if srv_tok:
+                if not srv_tok.startswith("Bearer "):
+                    srv_tok = f"Bearer {srv_tok}"
+                user_info = _decode_jwt(srv_tok)
+                return srv_tok, user_info
+        except Exception:
+            pass
+
+    return "", {}
+
 
 # ==============================================================================
 # HTTP REQUEST HANDLER & ROUTER
@@ -168,19 +254,55 @@ class DashboardHandler(BaseHTTPRequestHandler):
             
             token = ""
             user_info = {}
-            if client_ip in ACTIVE_LAN_SESSIONS and (time.time() - ACTIVE_LAN_SESSIONS[client_ip].get("timestamp", 0) < 86400):
-                token = ACTIVE_LAN_SESSIONS[client_ip].get("token", "")
-                user_info = ACTIVE_LAN_SESSIONS[client_ip].get("user", {})
-            elif is_local:
-                # CHỈ lấy từ Chrome Debug trên máy chủ NẾU request xuất phát từ chính máy chủ (Localhost)
-                token, user_info = extract_token_from_browser()
+            lan_ttsnew_tok = ""
+            lan_ttsnew_usr = {}
+            if client_ip in ACTIVE_LAN_SESSIONS:
+                if time.time() - ACTIVE_LAN_SESSIONS[client_ip].get("timestamp", 0) < 86400:
+                    token = ACTIVE_LAN_SESSIONS[client_ip].get("token", "")
+                    user_info = ACTIVE_LAN_SESSIONS[client_ip].get("user", {})
+                if time.time() - ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_timestamp", 0) < 86400:
+                    lan_ttsnew_tok = ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_token", "")
+                    lan_ttsnew_usr = ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_user", {})
+
+            # Lấy token đang hoạt động từ máy chủ (TTS Cũ & TTS Mới)
+            srv_token, srv_user = "", {}
+            try:
+                from tts_old_api import extract_token_from_browser as extract_old_token
+                srv_token, srv_user = extract_old_token()
+            except Exception:
+                pass
+
+            srv_ttsnew_token = ""
+            try:
+                from ttsnew_api import get_cached_token
+                srv_ttsnew_token = get_cached_token()
+                if not srv_ttsnew_token:
+                    from auth_extractor import get_universal_ttsnew_token
+                    srv_ttsnew_token = get_universal_ttsnew_token()
+            except Exception:
+                pass
+
+            if is_local:
+                if not token:
+                    token = srv_token
+                    user_info = srv_user
+                client_server_token = srv_token
+                client_server_ttsnew = srv_ttsnew_token
+            else:
+                client_server_token = ""
+                client_server_ttsnew = ""
 
             self._send_json({
                 "is_local": is_local,
                 "client_ip": client_ip,
-                "has_server_token": bool(token),
-                "server_user": user_info,
-                "server_token": token
+                "has_server_token": bool(client_server_token),
+                "server_user": srv_user if is_local else {},
+                "server_token": client_server_token,
+                "server_ttsnew_token": client_server_ttsnew,
+                "token": token,
+                "user": user_info,
+                "ttsnew_token": client_server_ttsnew if is_local else lan_ttsnew_tok,
+                "ttsnew_user": srv_user if is_local else lan_ttsnew_usr
             })
 
         # 4. Danh sách phiếu
@@ -252,6 +374,34 @@ class DashboardHandler(BaseHTTPRequestHandler):
             state.clear_logs()
             self._send_json({"success": True, "message": "Đã xóa toàn bộ nhật ký"})
 
+        elif parsed.path == "/api/btools/status":
+            from btools_manager import get_active_btools_cookie, verify_btools_cookie
+            cookie = get_active_btools_cookie()
+            is_valid, msg = verify_btools_cookie(cookie) if cookie else (False, "Chưa có Cookie BTools")
+            self._send_json({
+                "success": True,
+                "connected": is_valid,
+                "message": msg,
+                "has_cookie": bool(cookie)
+            })
+
+        elif parsed.path == "/api/services/status":
+            from services_checker import get_services_health
+            force_check = qs.get("force", ["0"])[0] in ("1", "true", "yes")
+            health = get_services_health(force=force_check)
+            self._send_json({
+                "success": True,
+                "services": health
+            })
+
+        elif parsed.path == "/api/ttsnew/extract_token":
+            from ttsnew_api import extract_token_from_browser
+            tok = extract_token_from_browser()
+            if tok:
+                self._send_json({"success": True, "token": tok, "message": "Đã trích xuất token TTS Mới từ Chrome máy chủ"})
+            else:
+                self._send_json({"success": False, "message": "Không tìm thấy phiên TTS Mới trên Chrome máy chủ (cổng 9222)"})
+
         else:
             self.send_error(404, "Not Found")
 
@@ -284,13 +434,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             user_info = body.get("user") or {}
             client_ip = self.client_address[0]
             if token:
-                ACTIVE_LAN_SESSIONS[client_ip] = {
-                    "token": token,
-                    "user": user_info,
-                    "timestamp": time.time()
-                }
+                if client_ip not in ACTIVE_LAN_SESSIONS:
+                    ACTIVE_LAN_SESSIONS[client_ip] = {}
+                ACTIVE_LAN_SESSIONS[client_ip]["token"] = token
+                ACTIVE_LAN_SESSIONS[client_ip]["user"] = user_info
+                ACTIVE_LAN_SESSIONS[client_ip]["timestamp"] = time.time()
                 try:
-                    state.log("SUCCESS", f"[AUTH] Da lien ket phien KTV cho IP: {client_ip}")
+                    u_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or "KTV"
+                    state.log("SUCCESS", f"🔑 [AUTH] Đã kết nối phiên TTS Cũ cho [{u_display}] (IP: {client_ip})")
                 except Exception:
                     pass
                 self._send_json({"success": True, "message": f"Đã kết nối phiên cho IP {client_ip}"})
@@ -302,29 +453,51 @@ class DashboardHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/login":
             username = body.get("username", "").strip()
             password = body.get("password", "").strip()
+            system = str(body.get("system") or "tts_old").strip()
 
             from services.auth_tts import authenticate_tts_step1
-            result = authenticate_tts_step1(username, password)
+            result = authenticate_tts_step1(username, password, system=system)
 
             if result.get("success"):
                 client_ip = self.client_address[0]
+                is_local = (client_ip in ("127.0.0.1", "localhost", "::1"))
                 token = result.get("token", "")
+                ttsnew_token = result.get("ttsnew_token", "")
                 user_info = result.get("user", {})
-                ACTIVE_LAN_SESSIONS[client_ip] = {
-                    "token": token,
-                    "user": user_info,
-                    "timestamp": time.time()
-                }
-                if token:
-                    save_cached_auth(token, user_info)
-                user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or username
+                if client_ip not in ACTIVE_LAN_SESSIONS:
+                    ACTIVE_LAN_SESSIONS[client_ip] = {}
+                if system == "tts_new":
+                    tok_to_save = ttsnew_token or token
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok_to_save
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
+                    if tok_to_save:
+                        from ttsnew_api import save_cached_token
+                        save_cached_token(tok_to_save)
+                else:
+                    ACTIVE_LAN_SESSIONS[client_ip]["token"] = token
+                    ACTIVE_LAN_SESSIONS[client_ip]["user"] = user_info
+                    ACTIVE_LAN_SESSIONS[client_ip]["timestamp"] = time.time()
+                    if ttsnew_token:
+                        ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = ttsnew_token
+                        ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
+                        from ttsnew_api import save_cached_token
+                        save_cached_token(ttsnew_token)
+                    if token:
+                        save_cached_auth(token, user_info)
+                _save_lan_sessions()
+
+                user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or user_info.get("displayName") or username
+                sys_label = "TTS Mới" if system == "tts_new" else "TTS Cũ"
                 try:
-                    state.log("SUCCESS", f"🔑 [XÁC THỰC] {user_display} (IP: {client_ip}) đã đăng nhập TTS thành công!")
+                    state.log("SUCCESS", f"🔑 [XÁC THỰC {sys_label}] {user_display} (IP: {client_ip}) đã đăng nhập thành công!")
                 except Exception:
                     pass
                 self._send_json({
                     "success": True,
                     "token": token,
+                    "ttsnew_token": ttsnew_token or (token if system == "tts_new" else ""),
+                    "system": system,
                     "user": user_info
                 })
             elif result.get("otp_required"):
@@ -334,6 +507,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "session_id": result.get("session_id"),
                     "username": result.get("username", username),
                     "phone": result.get("phone", ""),
+                    "system": system,
                     "message": result.get("message", "Vui lòng nhập mã OTP để tiếp tục.")
                 })
             else:
@@ -353,23 +527,45 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
             if result.get("success"):
                 client_ip = self.client_address[0]
+                is_local = (client_ip in ("127.0.0.1", "localhost", "::1"))
                 token = result.get("token", "")
+                ttsnew_token = result.get("ttsnew_token", "")
                 user_info = result.get("user", {})
-                ACTIVE_LAN_SESSIONS[client_ip] = {
-                    "token": token,
-                    "user": user_info,
-                    "timestamp": time.time()
-                }
-                if token:
-                    save_cached_auth(token, user_info)
-                user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or "KTV"
+                system = result.get("system", "tts_old")
+                if client_ip not in ACTIVE_LAN_SESSIONS:
+                    ACTIVE_LAN_SESSIONS[client_ip] = {}
+                if system == "tts_new":
+                    tok_to_save = ttsnew_token or token
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok_to_save
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
+                    if tok_to_save:
+                        from ttsnew_api import save_cached_token
+                        save_cached_token(tok_to_save)
+                else:
+                    ACTIVE_LAN_SESSIONS[client_ip]["token"] = token
+                    ACTIVE_LAN_SESSIONS[client_ip]["user"] = user_info
+                    ACTIVE_LAN_SESSIONS[client_ip]["timestamp"] = time.time()
+                    if ttsnew_token:
+                        ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = ttsnew_token
+                        ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
+                        from ttsnew_api import save_cached_token
+                        save_cached_token(ttsnew_token)
+                    if token:
+                        save_cached_auth(token, user_info)
+                _save_lan_sessions()
+
+                user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or user_info.get("displayName") or "KTV"
+                sys_label = "TTS Mới" if system == "tts_new" else "TTS Cũ"
                 try:
-                    state.log("SUCCESS", f"🔑 [XÁC THỰC OTP] {user_display} (IP: {client_ip}) đã qua bước OTP thành công!")
+                    state.log("SUCCESS", f"🔑 [XÁC THỰC OTP {sys_label}] {user_display} (IP: {client_ip}) đã qua bước OTP thành công!")
                 except Exception:
                     pass
                 self._send_json({
                     "success": True,
                     "token": token,
+                    "ttsnew_token": ttsnew_token or (token if system == "tts_new" else ""),
+                    "system": system,
                     "user": user_info
                 })
             else:
@@ -387,11 +583,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         # 1. Bật tự động
         elif parsed.path == "/api/start":
+            client_ip = self.client_address[0]
+            is_local = client_ip in ("127.0.0.1", "localhost", "::1")
             state.is_running = True
             state.stop_requested = False
+            state.trigger_now_requested = True
             if "scan_scopes" in body:
                 state.scan_scopes = list(body["scan_scopes"])
-            if "auto_close_mode" in body:
+            if not is_local:
+                # Máy client chỉ được quét & tiền kiểm, vô hiệu hóa tự đóng
+                state.auto_close = False
+                state.auto_close_mode = "none"
+            elif "auto_close_mode" in body:
                 state.auto_close_mode = str(body["auto_close_mode"]).strip()
                 state.auto_close = (state.auto_close_mode != "none")
             elif "auto_close" in body:
@@ -404,16 +607,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
             engine = body.get("engine", getattr(state, "engine", "api"))
             state.engine = engine
 
-            state.status_message = "Đã khởi động tiến trình quét tự động."
-            state.log("INFO", f"🚀 Khởi động chu kỳ quét tự động! Phạm vi: {state.scan_scopes} | Chế độ đóng phiếu: [{state.auto_close_mode}] | Lặp: {state.interval_minutes} phút")
+            state.status_message = "Đang bắt đầu quét ngay lập tức..."
+            state.log("INFO", f"🚀 BẮT ĐẦU QUÉT NGAY LẬP TỨC! Phạm vi: {state.scan_scopes} | Chế độ đóng phiếu: [{state.auto_close_mode}] | Lặp: {state.interval_minutes} phút | Client: {client_ip}")
             self._send_json({"success": True, "scan_scopes": state.scan_scopes, "auto_close_mode": state.auto_close_mode, "auto_close": state.auto_close})
 
         # 1.1. Cập nhật cấu hình (Phạm vi quét, Chế độ đóng phiếu, v.v.)
         elif parsed.path == "/api/config":
+            client_ip = self.client_address[0]
+            is_local = client_ip in ("127.0.0.1", "localhost", "::1")
             if "scan_scopes" in body:
                 state.scan_scopes = list(body["scan_scopes"])
                 state.log("INFO", f"⚙️ Đã cập nhật phạm vi quét: {state.scan_scopes}")
-            if "auto_close_mode" in body:
+            if not is_local:
+                state.auto_close = False
+                state.auto_close_mode = "none"
+            elif "auto_close_mode" in body:
                 state.auto_close_mode = str(body["auto_close_mode"]).strip()
                 state.auto_close = (state.auto_close_mode != "none")
                 state.log("INFO", f"⚙️ Đã chuyển chế độ đóng phiếu: [{state.auto_close_mode}]")
@@ -430,17 +638,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/stop":
             state.stop_requested = True
             state.is_running = False
-            state.log("WARN", "⏹️ DỪNG VÒNG LẶP TỰ ĐỘNG.")
+            state.log("WARN", "⏹️ DỪNG TIẾN TRÌNH QUÉT.")
             self._send_json({"success": True})
 
         # 3. Quét ngay (Theo các phạm vi đã chọn)
         elif parsed.path == "/api/run-now":
+            client_ip = self.client_address[0]
+            is_local = client_ip in ("127.0.0.1", "localhost", "::1")
             if state.status == "PROCESSING":
                 self._send_json({"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."})
             else:
                 scopes = body.get("scan_scopes") or getattr(state, "scan_scopes", ["tts_old_data", "tts_new_data"])
                 if not scopes:
                     scopes = ["tts_old_data"]
+                if not is_local:
+                    state.auto_close = False
+                    state.auto_close_mode = "none"
+                elif "auto_close_mode" in body:
+                    state.auto_close_mode = str(body["auto_close_mode"]).strip()
+                    state.auto_close = (state.auto_close_mode != "none")
+                elif "auto_close" in body:
+                    state.auto_close = bool(body["auto_close"])
+                    state.auto_close_mode = "all" if state.auto_close else "none"
                 if state.is_running:
                     state.trigger_now_requested = True
                     state.log("INFO", f"⚡ KÍCH HOẠT QUÉT NGAY LẬP TỨC! (Phạm vi: {', '.join(scopes)})")
@@ -502,6 +721,73 @@ class DashboardHandler(BaseHTTPRequestHandler):
             else:
                 threading.Thread(target=execute_tts_new_voice_cycle, daemon=True).start()
                 self._send_json({"success": True, "message": "Đang tiến hành quét phiếu Thoại / SMS từ TTS Mới..."})
+
+        elif parsed.path == "/api/btools/cookie":
+            cookie_input = str(body.get("cookie") or body.get("raw") or "").strip()
+            if not cookie_input:
+                self._send_json({"success": False, "message": "Cookie không được để trống"})
+                return
+            from btools_manager import save_btools_cookie
+            is_valid, msg = save_btools_cookie(cookie_input)
+            self._send_json({
+                "success": is_valid,
+                "connected": is_valid,
+                "message": msg
+            })
+
+        elif parsed.path == "/api/btools/open_tab":
+            from auth_extractor import get_chrome_debug_driver
+            driver = get_chrome_debug_driver()
+            if not driver:
+                self._send_json({"success": False, "message": "Không tìm thấy trình duyệt Chrome kết nối cổng 9222"})
+                return
+            btools_found = False
+            for h in driver.window_handles:
+                driver.switch_to.window(h)
+                if "10.159.21.241" in driver.current_url:
+                    btools_found = True
+                    break
+            if not btools_found:
+                driver.switch_to.new_window('tab')
+                driver.get("http://10.159.21.241:9267/B_tools_v2/")
+            self._send_json({"success": True, "message": "Đã mở tab BTools trên trình duyệt Chrome"})
+
+        elif parsed.path == "/api/ttsnew/token":
+            tok_input = str(body.get("token") or "").strip()
+            user_info = body.get("user") or {}
+            if not tok_input:
+                self._send_json({"success": False, "message": "Token không được để trống"})
+                return
+            if not tok_input.startswith("Bearer ") and "." in tok_input:
+                tok_input = f"Bearer {tok_input}"
+
+            client_ip = self.client_address[0]
+            is_local = client_ip in ("127.0.0.1", "localhost", "::1")
+
+            if client_ip not in ACTIVE_LAN_SESSIONS:
+                ACTIVE_LAN_SESSIONS[client_ip] = {}
+            ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok_input
+            ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
+            ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
+            _save_lan_sessions()
+
+            from ttsnew_api import save_cached_token
+            save_cached_token(tok_input)
+
+            u_name = user_info.get("displayName") or user_info.get("username") or "KTV"
+            try:
+                state.log("SUCCESS", f"🔑 [AUTH] Đã kết nối token TTS Mới cho [{u_name}] (IP: {client_ip})")
+            except Exception:
+                pass
+            self._send_json({"success": True, "message": "Xác thực và lưu token TTS Mới thành công!"})
+
+        elif parsed.path == "/api/ttsnew/extract_token":
+            from ttsnew_api import extract_token_from_browser
+            tok = extract_token_from_browser()
+            if tok:
+                self._send_json({"success": True, "token": tok, "message": "Đã trích xuất token TTS Mới từ Chrome máy chủ"})
+            else:
+                self._send_json({"success": False, "message": "Không tìm thấy phiên TTS Mới trên Chrome máy chủ (cổng 9222)"})
 
         # 7. Mở chi tiết phiếu trên TTS Mới (chi-tiet-phieu-pakh)
         elif parsed.path == "/api/ttsnew/open_detail":
@@ -640,8 +926,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
             code = row["ticket_code"] if (row and row["ticket_code"]) else ticket_code
             clean_code = code.split("\n")[0].strip() if code else ""
             status_val = str(row["status"] or "") if row else ""
-            comment_val = comment_custom or (str(row["comment"] or "").strip() if row else "")
-            action_plan_val = action_plan_custom or (str(row["action_plan"] or "").strip() if row else "")
+            comment_val = comment_custom or (str(row["comment"] or "").strip() if (row and "comment" in row.keys()) else "")
+            action_plan_val = action_plan_custom or (str(row["action_plan"] or "").strip() if (row and "action_plan" in row.keys()) else "")
+            # Tuyệt đối không cho đóng phiếu loại PAKH khác (Thoại/SMS/Gói cước/CVQT) bằng API
+            if row:
+                from db_manager import is_mobile_internet_ticket
+                if not is_mobile_internet_ticket(row["package_title"]):
+                    self._send_json({
+                        "success": False,
+                        "message": "Tuyệt đối không đóng phiếu loại PAKH khác (Thoại/SMS/Gói cước/CVQT) bằng API! Vui lòng bấm 'Đóng thủ công' để xử lý trên giao diện web TTS."
+                    })
+                    return
 
             # Kiểm tra THÔNG TIN MỞ LẠI TTS: Nếu số lần mở lại > 0, cần cờ force từ KTV
             reopen_cnt = int(row["reopen_count"] or 0) if (row and "reopen_count" in row.keys()) else 0
@@ -659,17 +954,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
             is_local = client_ip in ("127.0.0.1", "localhost", "::1")
             client_tok = (body.get("token") or "").strip()
 
-            from ttsnew_api import extract_token_from_browser, fetch_active_tickets, api_transfer_ttsnew_ticket
-            tok = client_tok
+            from ttsnew_api import fetch_active_tickets, api_transfer_ttsnew_ticket
+            tok, ktv_user = resolve_ttsnew_token(client_ip, is_local, client_tok)
             if not tok:
-                if is_local:
-                    tok = extract_token_from_browser()
-                else:
-                    self._send_json({"success": False, "message": "Bạn chưa kết nối tài khoản TTS Mới của mình trên trình duyệt này. Vui lòng bấm vào nút đăng nhập/kết nối tài khoản để hệ thống ghi nhận đúng tên bạn!"})
-                    return
-            if not tok:
-                self._send_json({"success": False, "message": "Không tìm thấy Bearer Token của TTS Mới. Hãy mở tab tts.vnptnet.vn."})
+                self._send_json({
+                    "success": False, 
+                    "message": "Không tìm thấy phiên xác thực TTS Mới của bạn. Vui lòng bấm vào biểu tượng TTS MỚI trên thanh công cụ để kết nối tài khoản KTV của bạn trước khi đóng phiếu!"
+                })
                 return
+
+            ktv_name = ktv_user.get("displayName") or ktv_user.get("userName") or "Kỹ thuật viên"
+            state.log("STEP", f"Đang gửi yêu cầu xử lý phiếu {clean_code or phone} trên TTS Mới bởi [{ktv_name}] (IP: {client_ip})...")
 
             try:
                 raw_active = fetch_active_tickets(tok, limit=1000)
@@ -716,14 +1011,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         # 7.2. Tự động đóng hàng loạt phiếu TTS Mới (Quy trình 2 vòng)
         elif parsed.path == "/api/ttsnew/close_all":
-            from ttsnew_api import extract_token_from_browser, fetch_active_tickets, filter_data_tickets, api_transfer_ttsnew_ticket
-            tok = extract_token_from_browser()
+            from ttsnew_api import fetch_active_tickets, filter_data_tickets, api_transfer_ttsnew_ticket
+            client_ip = self.client_address[0]
+            is_local = client_ip in ("127.0.0.1", "localhost", "::1")
+            client_tok = (body.get("token") or "").strip()
+            tok, ktv_user = resolve_ttsnew_token(client_ip, is_local, client_tok)
             if not tok:
-                self._send_json({"success": False, "message": "Không tìm thấy token TTS Mới."})
+                self._send_json({
+                    "success": False, 
+                    "message": "Không tìm thấy phiên xác thực TTS Mới. Vui lòng kết nối tài khoản KTV của bạn trước khi thực hiện đóng tự động."
+                })
                 return
 
+            ktv_name = ktv_user.get("displayName") or ktv_user.get("userName") or "KTV"
             def _run_close_all():
-                state.log("STEP", "🚀 Bắt đầu tự động chuyển bước/đóng tất cả phiếu TTS Mới đủ điều kiện...")
+                state.log("STEP", f"🚀 Bắt đầu tự động chuyển bước/đóng tất cả phiếu TTS Mới bởi [{ktv_name}]...")
                 try:
                     raw = fetch_active_tickets(tok, limit=1000)
                     data_tickets = filter_data_tickets(raw)
@@ -910,9 +1212,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
                             from cem_client import CEMClient, save_cem_data_to_file
                             cem_client = CEMClient(driver=driver)
                             cem_recs = cem_client.get_subscriber_history_5days(phone, days=5)
-                            if cem_recs:
-                                cem_desc = CEMClient.extract_top_cells_summary(cem_recs)
                             app_evs = cem_client.get_subscriber_app_events(phone, days=5)
+                            if cem_recs:
+                                cem_desc = CEMClient.extract_top_cells_summary(cem_recs, app_events=app_evs)
+                            else:
+                                vpn_suffix = ""
+                                if app_evs:
+                                    try:
+                                        from report_bot import detect_vpn_application
+                                        vname = detect_vpn_application(app_evs)
+                                        if vname:
+                                            vpn_suffix = f"\n⚠️ CẢNH BÁO VPN: Phát hiện thiết bị có app {vname}"
+                                    except Exception:
+                                        pass
+                                cem_desc = (f"Không có dữ liệu CEM (5 ngày) [Cell HSS: {cell_desc}]{vpn_suffix}" if cell_desc and cell_desc != "--" else f"Không có dữ liệu CEM (5 ngày){vpn_suffix}")
                             if app_evs:
                                 app_usage_str = CEMClient.extract_top_apps_summary(app_evs)
                             save_cem_data_to_file(phone, cem_recs, app_evs, base_dir=BASE_DIR)
@@ -1012,6 +1325,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
 
             ticket_dict = dict(row)
+            # Tuyệt đối không cho đóng phiếu loại PAKH khác (Thoại/SMS/Gói cước/CVQT) bằng API
+            from db_manager import is_mobile_internet_ticket
+            if not is_mobile_internet_ticket(ticket_dict.get("package_title")):
+                self._send_json({
+                    "success": False,
+                    "message": "Tuyệt đối không đóng phiếu loại PAKH khác (Thoại/SMS/Gói cước/CVQT) bằng API! Vui lòng bấm 'Đóng thủ công' để xử lý trên giao diện web TTS."
+                })
+                return
+
             if not ticket_dict.get("id_yeu_cau") and ticket_dict.get("flow_id"):
                 ticket_dict["id_yeu_cau"] = ticket_dict["flow_id"]
             if not ticket_dict.get("ma_ccos") and ticket_dict.get("ticket_code"):
@@ -1036,14 +1358,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
             user_name = client_user_name
 
             if not token:
-                if is_local:
+                if client_ip in ACTIVE_LAN_SESSIONS and ACTIVE_LAN_SESSIONS[client_ip].get("token"):
+                    token = ACTIVE_LAN_SESSIONS[client_ip]["token"]
+                    u_inf = ACTIVE_LAN_SESSIONS[client_ip].get("user") or {}
+                    user_id = user_id or u_inf.get("Id") or u_inf.get("id") or 0
+                    user_name = user_name or u_inf.get("HoTen") or u_inf.get("TaiKhoan") or "Kỹ thuật viên"
+                elif is_local:
                     token, user_info = extract_token_from_browser()
                     if user_info:
                         user_id = user_id or user_info.get("Id") or user_info.get("id") or 0
                         user_name = user_name or user_info.get("HoTen") or user_info.get("TaiKhoan") or "Quản trị viên"
                 else:
-                    self._send_json({"success": False, "message": "Bạn chưa kết nối tài khoản TTS Cũ của mình trên trình duyệt này. Vui lòng bấm vào nút kết nối tài khoản để hệ thống ghi nhận đúng tên bạn khi đóng phiếu!"})
+                    self._send_json({"success": False, "message": "Bạn chưa kết nối tài khoản TTS Cũ của mình trên trình duyệt này. Vui lòng bấm vào nút TTS CŨ trên thanh công cụ để đăng nhập trước khi đóng phiếu!"})
                     return
+
+            if token and not user_id and client_ip in ACTIVE_LAN_SESSIONS:
+                u_inf = ACTIVE_LAN_SESSIONS[client_ip].get("user") or {}
+                user_id = user_id or u_inf.get("Id") or u_inf.get("id") or 0
+                user_name = user_name or u_inf.get("HoTen") or u_inf.get("TaiKhoan") or "Kỹ thuật viên"
 
             if not token:
                 self._send_json({"success": False, "message": "Không tìm thấy token scnntttoken của TTS Cũ. Vui lòng kết nối tài khoản TTS trước."})
@@ -1079,6 +1411,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 user_id=user_id,
                 dry_run=False
             )
+            if not ok and ("401" in str(msg) or "Authorization has been denied" in str(msg)):
+                fresh_token, fresh_user = extract_token_from_browser()
+                if fresh_token and fresh_token != token:
+                    state.log("INFO", "🔄 Token TTS Cũ đã hết hạn, tự động trích xuất token mới từ trình duyệt và thử lại...")
+                    token = fresh_token
+                    if fresh_user:
+                        user_id = fresh_user.get("Id") or user_id
+                        user_name = fresh_user.get("HoTen") or fresh_user.get("TaiKhoan") or user_name
+                    nguyen_nhan_map = fetch_nguyen_nhan_list_api(token)
+                    if matched_nn:
+                        id_nn = nguyen_nhan_map.get(matched_nn.lower()) or nguyen_nhan_map.get(matched_nn) or 1016
+                    ok, msg = close_tts_old_ticket_api(
+                        ticket=ticket_dict,
+                        id_nguyen_nhan=id_nn,
+                        noi_dung=full_content,
+                        token=token,
+                        user_id=user_id,
+                        dry_run=False
+                    )
+
             if ok:
                 update_ticket_field(phone, "ticket_status", "Đã đóng", incident_time=incident_time)
                 update_ticket_field(phone, "closed_by", user_name, incident_time=incident_time)
@@ -1087,7 +1439,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             else:
                 state.log("WARN", msg)
 
-            self._send_json({"success": ok, "message": msg, "closed_by": user_name})
+            self._send_json({
+                "success": ok, 
+                "message": msg, 
+                "closed_by": user_name,
+                "token": token,
+                "user_id": user_id
+            })
 
         else:
             self.send_error(404, "Not Found")

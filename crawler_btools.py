@@ -92,15 +92,24 @@ def _get_btools_cookie_via_cdp_ws(port=9222):
 
 def get_btools_cookie(driver=None, force_refresh=False):
     """
-    Lấy chuỗi cookie xác thực của BTools từ bất kỳ trình duyệt nào (Chrome, Edge, Firefox).
+    Lấy chuỗi cookie xác thực của BTools từ btools_manager hoặc bất kỳ trình duyệt nào.
     Tuyệt đối KHÔNG gọi driver.switch_to.window() để không làm gián đoạn người dùng.
     """
     global _BTOOLS_COOKIE_CACHE
     if _BTOOLS_COOKIE_CACHE and not force_refresh:
         return _BTOOLS_COOKIE_CACHE
 
+    # 1. Sử dụng btools_manager (kiểm tra cookie đã lưu / Chrome CDP Browser Target)
+    try:
+        from btools_manager import get_active_btools_cookie
+        cookie_val = get_active_btools_cookie(driver=driver, force_refresh=force_refresh)
+        if cookie_val:
+            _BTOOLS_COOKIE_CACHE = cookie_val
+            return _BTOOLS_COOKIE_CACHE
+    except Exception:
+        pass
 
-    # 1. Trích xuất đa trình duyệt (Chrome, Edge, Firefox, browser_cookie3)
+    # 2. Trích xuất đa trình duyệt fallback
     try:
         from auth_extractor import get_universal_btools_cookie
         cookie_val = get_universal_btools_cookie(driver=driver)
@@ -112,20 +121,13 @@ def get_btools_cookie(driver=None, force_refresh=False):
 
     cookie_val = None
 
-    # 2. Fallback qua CDP Network.getAllCookies từ Selenium driver (nếu có)
+    # 3. Fallback qua CDP Network.getAllCookies từ Selenium driver (nếu có)
     if driver:
         try:
             cookies = driver.execute_cdp_cmd("Network.getAllCookies", {}).get("cookies", [])
             btools_cookies = [f"{c['name']}={c['value']}" for c in cookies if "10.159.21.241" in c.get("domain", "")]
             if btools_cookies:
                 cookie_val = "; ".join(btools_cookies)
-        except Exception:
-            pass
-
-    # 3. Fallback qua CDP WebSocket tới port 9222
-    if not cookie_val:
-        try:
-            cookie_val = _get_btools_cookie_via_cdp_ws()
         except Exception:
             pass
 

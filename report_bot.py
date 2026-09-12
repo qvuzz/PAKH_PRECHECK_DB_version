@@ -60,7 +60,11 @@ def get_formatted_sapc_packages(phone_84, fallback_btools=""):
                 if radio and radio.lower() != "none":
                     sub_tags.append(f"Radio: {radio}")
                 if hss_prof:
-                    sub_tags.append(f"HSS: {hss_prof}")
+                    hss_digits = re.sub(r'\D', '', hss_prof)
+                    if len(hss_digits) >= 3:
+                        sub_tags.append(f"HSS: {hss_prof} (PROFILE LẠ)")
+                    else:
+                        sub_tags.append(f"HSS: {hss_prof}")
                 if ipv4:
                     sub_tags.append(f"IP: {ipv4}")
                 if nam_val == "1":
@@ -268,9 +272,19 @@ def detect_vpn_application(app_events):
     elif isinstance(app_events, list):
         for item in app_events:
             if isinstance(item, dict):
-                app_name = str(item.get("up_application") or item.get("app_name") or item.get("name") or "").strip().lower()
-                if app_name:
-                    app_names.add(app_name)
+                # Trường hợp 1: item là hour-bucket với top_list bên trong (format CEM app_usage_5days)
+                top_list = item.get("top_list")
+                if isinstance(top_list, list):
+                    for sub_item in top_list:
+                        if isinstance(sub_item, dict):
+                            app_name = str(sub_item.get("up_application") or sub_item.get("app_name") or sub_item.get("name") or "").strip().lower()
+                            if app_name:
+                                app_names.add(app_name)
+                else:
+                    # Trường hợp 2: item trực tiếp có up_application
+                    app_name = str(item.get("up_application") or item.get("app_name") or item.get("name") or "").strip().lower()
+                    if app_name:
+                        app_names.add(app_name)
             elif isinstance(item, str):
                 app_names.add(item.strip().lower())
     elif isinstance(app_events, str):
@@ -510,6 +524,37 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             "FFF2CC"
         )
 
+    # 🎯 KỊCH BẢN HSS PROFILE LẠ (HSS Profile từ 3 chữ số trở lên)
+    # Profile bình thường: 10, 20, 23 (4G/thông thường) hoặc 55, 56, 65, 66, 67 (5G).
+    # Khi thấy HSS Profile từ 3 chữ số trở lên:
+    # - Nếu bắt được IP (113.x.x.x hoặc 172.x.x.x) -> Nhận định lỗi profile và chuyển IT kiểm tra khai báo lại HSS profile cho khách hàng.
+    # - Bôi đỏ cảnh báo PROFILE LẠ.
+    hss_profile = str(sub_info.get("HSS Profile") or "").strip()
+    hss_digits = re.sub(r'\D', '', hss_profile)
+    if len(hss_digits) >= 3:
+        ipv4_val = str(sub_info.get("IPv4") or sub_info.get("IP") or "").strip()
+        has_captured_ip = ipv4_val.startswith("113.") or ipv4_val.startswith("172.")
+        
+        if has_captured_ip:
+            comment_text = (
+                f"Thuê bao có HSS Profile ({hss_profile}) là profile lạ (từ 3 chữ số trở lên), thiết bị vẫn bắt được IP ({ipv4_val}) "
+                f"nhưng không sử dụng được dịch vụ do lỗi sai cấu hình Profile Core (profile thông thường: 10, 20, 23 hoặc 5G: 55, 56, 65, 66, 67)."
+            )
+            action_text = f"Chuyển IT kiểm tra khai báo lại HSS Profile cho khách hàng (Profile: {hss_profile}, IP: {ipv4_val})."
+        else:
+            comment_text = (
+                f"HSS Profile của thuê bao ({hss_profile}) có từ 3 chữ số trở lên, là profile lạ/bất thường "
+                f"(profile thông thường: 10, 20, 23 hoặc 5G: 55, 56, 65, 66, 67)."
+            )
+            action_text = f"Chuyển IT kiểm tra khai báo lại HSS Profile cho khách hàng."
+
+        return (
+            "PROFILE LẠ",
+            comment_text,
+            action_text,
+            "FFC7CE"
+        )
+
     # 2. KỊCH BẢN MOBILE INTERNET 5G
     combined_report_text = f"{package_title} {ticket_content}".lower()
     # Loại bỏ các cụm dung lượng như 1.5GB, 5GB, 15GB, 5G/ngày, 2.5G data... tránh nhận diện nhầm là mạng 5G
@@ -545,14 +590,56 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     "FFF2CC"
                 )
 
-    # 🎯 KỊCH BẢN ĐẶC THÙ 1: Kiểm tra App Usage có xuất hiện ứng dụng VPN / 1.1.1.1 / Cloudflare
+    # 🔍 BTOOLS GROUND TRUTH: Trích xuất các phiên Downlink trên BTools
+    downlink_sessions = []
+    if clean_data:
+        for r in clean_data:
+            try:
+                dl = float(r.get("DATA_VOLUME_DOWNLINK") or 0)
+                if dl > 0:
+                    downlink_sessions.append(dl)
+            except (ValueError, TypeError):
+                pass
+
+    max_dl_session = max(downlink_sessions, default=0)
+    has_large_btools_session = max_dl_session >= 11_500_000  # Có phiên >= 11.5MB (> 11MB)
+    all_btools_sessions_under_11mb = bool(len(downlink_sessions) >= 2 and all(s < 11_500_000 for s in downlink_sessions))
+    all_in_vpn_block_range = bool(len(downlink_sessions) >= 2 and all(4_500_000 <= s <= 11_500_000 for s in downlink_sessions))
+
+    # Kiểm tra phản ánh KH có báo chậm / lag / chập chờn hay không
+    combined_report_text = f"{package_title} {ticket_content}".lower()
+    slow_keywords = [
+        "chậm", "cham", "load chậm", "load cham", "truy cập chậm", "truy cap cham",
+        "lag", "quay vòng", "quay vong", "chập chờn", "chap chon", "kém", "kem",
+        "yếu", "yeu", "chậm chờn", "tải chậm", "tai cham", "chậm lag", "không ổn định",
+        "khong on dinh", "bị giật", "bi giat", "load mãi", "quay mãi", "rớt mạng"
+    ]
+    is_reported_slow = any(k in combined_report_text for k in slow_keywords)
+
+    # 🎯 KỊCH BẢN ĐẶC THÙ 1: Kiểm tra App Usage / BTools đối với VPN / 1.1.1.1 / Cloudflare
+    # CHỈ KÍCH HOẠT KHI:
+    # 1. Các phiên BTools đều bị bóp < 11MB (nghi ngờ VPN, CEM có thể có hoặc chưa có dữ liệu)
+    # HOẶC 2. Khách hàng báo CHẬM trong nội dung phản ánh VÀ có phát hiện app VPN trong CEM
     detected_vpn = detect_vpn_application(app_events)
-    if detected_vpn:
+    
+    is_vpn_scenario = False
+    vpn_app_name = detected_vpn or "1.1.1.1 / Cloudflare"
+
+    if all_btools_sessions_under_11mb and (all_in_vpn_block_range or detected_vpn):
+        is_vpn_scenario = True
+        if not detected_vpn:
+            vpn_app_name = "VPN / 1.1.1.1"
+    elif is_reported_slow and detected_vpn:
+        is_vpn_scenario = True
+
+    # Nếu KH có phiên dữ liệu lớn (> 11MB, hàng chục/hàng trăm MB) VÀ KHÔNG báo chậm:
+    # -> BTools ưu tiên tuyệt đối, KHÔNG kết luận lỗi do VPN mà để BTools đánh giá bình thường
+    if is_vpn_scenario and not (has_large_btools_session and not is_reported_slow):
         vpn_note = f"vào ngày tiếp nhận phản ánh ({incident_time_str[:10]})" if incident_time_str else "gần đây"
         return (
             "ĐANG SỬ DỤNG VPN / 1.1.1.1",
-            f"Dữ liệu CEM ghi nhận {vpn_note}, thiết bị của khách hàng có phát sinh lưu lượng qua ứng dụng mạng riêng ảo ({detected_vpn}). Khi bật VPN, lưu lượng đi quốc tế bị bóp dung lượng dẫn đến tình trạng load chậm hoặc mất kết nối dịch vụ.",
-            f"Hướng dẫn khách hàng tạm thời tắt/gỡ ứng dụng VPN ({detected_vpn}) trên máy, sau đó bật lại dữ liệu di động để truy cập bình thường." + action_suffix,
+            f"Dữ liệu CEM ghi nhận {vpn_note}, thiết bị của khách hàng có phát sinh lưu lượng qua ứng dụng mạng riêng ảo ({vpn_app_name}). Khi bật VPN, lưu lượng đi quốc tế bị bóp dung lượng dẫn đến tình trạng load chậm hoặc mất kết nối dịch vụ.",
+            f"Hướng dẫn khách hàng tạm thời tắt/gỡ ứng dụng VPN ({vpn_app_name}) trên máy, sau đó bật lại dữ liệu di động để truy cập bình thường." + action_suffix,
             "E2EFDA"
         )
 
@@ -861,6 +948,26 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         ]
     )
 
+    # 🎯 PHÁT HIỆN PHẢN ÁNH LỖI ỨNG DỤNG CỤ THỂ (ZALO, TIKTOK, FACEBOOK, YOUTUBE, GAME...)
+    app_indicators = [
+        "zalo", "tiktok", "tik tok", "facebook", "youtube", "ytb", "messenger", 
+        "telegram", "viber", "liên quân", "lien quan", "free fire", "freefire", 
+        "pubg", "game", "shopee", "lazada", "vnedu", "my vnpt"
+    ]
+    matched_apps = [app.title() for app in app_indicators if re.search(r'\b' + re.escape(app) + r'\b', ticket_content_lower)]
+    is_app_specific_issue = bool(matched_apps) and (
+        "truy cập báo:" in ticket_content_lower 
+        or "ứng dụng" in ticket_content_lower 
+        or "app" in ticket_content_lower
+        or "lỗi ứng dụng cụ thể" in ticket_content_lower
+        or any(k in ticket_content_lower for k in [
+            "báo đang kết nối", "báo kết nối", "không lướt", "xoay", "quay vòng", 
+            "ping cao", "trừ dung lượng", "trừ data", "không xem được", "không gọi được", 
+            "không gửi được", "chậm", "lag", "không vào được", "không được"
+        ])
+    )
+    app_names_str = ", ".join(list(dict.fromkeys(matched_apps)))
+
     recent_day_str = latest_date_in_log.strftime('%d/%m/%Y') if latest_date_in_log else "gần nhất"
 
     # 🎯 PHÂN TÍCH TỶ LỆ CELL TỪ DỮ LIỆU CEM (ƯU TIÊN THEO NGÀY TIẾP NHẬN SỰ CỐ)
@@ -936,9 +1043,16 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
 
     # 🎯 KỊCH BẢN ĐÁNH GIÁ KHI CÓ MỐC THỜI GIAN TIẾP NHẬN
     if dt_incident:
-        # Trường hợp 1: Có phiên >10MB SAU thời điểm tiếp nhận -> Khách hàng đã dùng được
+        # Trường hợp 1: Có phiên >10MB SAU thời điểm tiếp nhận -> Khách hàng đã dùng được (trừ lỗi ứng dụng cụ thể)
         if has_session_over_10mb_after:
-            if dominant_cell and is_reported_slow:
+            if is_app_specific_issue:
+                return (
+                    "LỖI ỨNG DỤNG (KTV XỬ LÝ)",
+                    f"Khách hàng phản ánh sự cố đối với ứng dụng cụ thể ({app_names_str}). Mặc dù sau thời điểm tiếp nhận ({incident_time_str}) BTools có ghi nhận phiên data ({max_downlink_after/1024/1024:.1f}MB), nhưng sự cố trên ứng dụng chưa được xác minh. Cần Kỹ thuật viên kiểm tra xử lý riêng đối với ứng dụng này, không đóng tự động.",
+                    f"Chuyển Kỹ thuật viên kiểm tra lỗi ứng dụng ({app_names_str}) và liên hệ hỗ trợ trực tiếp khách hàng." + action_suffix,
+                    "FFF2CC"
+                )
+            elif dominant_cell and is_reported_slow:
                 return (
                     "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
                     f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng). Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
@@ -960,14 +1074,36 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     "E2EFDA"
                 )
         
-        # Trường hợp 2: Có phiên >10MB TRƯỚC thời điểm tiếp nhận, nhưng SAU mốc tiếp nhận CHƯA CÓ phiên >10MB -> Cần theo dõi thêm
+        # Trường hợp 2: Có phiên >10MB TRƯỚC thời điểm tiếp nhận, nhưng SAU mốc tiếp nhận CHƯA CÓ phiên >10MB
         elif has_session_over_10mb:
-            return (
-                "THEO DÕI THÊM",
-                f"Thuê bao có sử dụng data trước thời điểm phản ánh, tuy nhiên sau mốc tiếp nhận ({incident_time_str}) chưa ghi nhận phiên phát sinh lưu lượng mới. Cần theo dõi thêm.",
-                "Có thể Khách hàng đang di chuyển vào khu vực sóng kém, hoặc nghẽn mạng tạm thời. Nhờ KH theo dõi thêm giúp." + action_suffix,
-                "FFF2CC"
-            )
+            if is_app_specific_issue:
+                return (
+                    "LỖI ỨNG DỤNG (KTV XỬ LÝ)",
+                    f"Khách hàng phản ánh sự cố đối với ứng dụng cụ thể ({app_names_str}). Cần Kỹ thuật viên kiểm tra xử lý riêng đối với ứng dụng này, không đóng tự động.",
+                    f"Chuyển Kỹ thuật viên kiểm tra lỗi ứng dụng ({app_names_str}) và liên hệ hỗ trợ trực tiếp khách hàng." + action_suffix,
+                    "FFF2CC"
+                )
+            elif dominant_cell and (is_reported_slow or is_reported_multiple_places):
+                return (
+                    "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
+                    f"Khách hàng phản ánh mạng chậm / sự cố. Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% kết nối). Mặc dù trước đó có sử dụng data, nhưng sau mốc tiếp nhận ({incident_time_str}) chưa ghi nhận phiên kết nối mới. Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
+                    "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                    "FFF2CC"
+                )
+            elif is_reported_slow:
+                return (
+                    "LƯU LƯỢNG YẾU",
+                    f"Khách hàng phản ánh mạng chậm. Dữ liệu trước thời điểm tiếp nhận có phát sinh data nhưng sau mốc tiếp nhận ({incident_time_str}) chưa ghi nhận phiên kết nối mới. Nghi ngờ chất lượng sóng tại khu vực khách hàng chưa đảm bảo.",
+                    "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                    "FFF2CC"
+                )
+            else:
+                return (
+                    "THEO DÕI THÊM",
+                    f"Thuê bao có sử dụng data trước thời điểm phản ánh, tuy nhiên sau mốc tiếp nhận ({incident_time_str}) chưa ghi nhận phiên phát sinh lưu lượng mới. Cần theo dõi thêm.",
+                    "Có thể Khách hàng đang di chuyển vào khu vực sóng kém, hoặc nghẽn mạng tạm thời. Nhờ KH theo dõi thêm giúp." + action_suffix,
+                    "FFF2CC"
+                )
 
         # Trường hợp 3: Sau tiếp nhận chỉ có lưu lượng yếu (1MB - 10MB)
         elif is_weak_traffic_after:
@@ -988,7 +1124,14 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
 
     # 🎯 KỊCH BẢN KHI CÓ DỮ LIỆU DATA >10MB (FALLBACK HOẶC KHÔNG CÓ MỐC TIẾP NHẬN)
     if has_session_over_10mb:
-        if dominant_cell and (is_reported_slow or is_reported_multiple_places):
+        if is_app_specific_issue:
+            return (
+                "LỖI ỨNG DỤNG (KTV XỬ LÝ)",
+                f"Khách hàng phản ánh sự cố đối với ứng dụng cụ thể ({app_names_str}). Dữ liệu BTools ngày gần nhất ({recent_day_str}) vẫn ghi nhận phiên kết nối chung ({max_downlink/1024/1024:.1f}MB). Cần Kỹ thuật viên kiểm tra xử lý riêng đối với ứng dụng này, không đóng tự động.",
+                f"Chuyển Kỹ thuật viên kiểm tra lỗi ứng dụng ({app_names_str}) và liên hệ hỗ trợ trực tiếp khách hàng." + action_suffix,
+                "FFF2CC"
+            )
+        elif dominant_cell and (is_reported_slow or is_reported_multiple_places):
             return (
                 "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
                 f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng). Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
@@ -1435,6 +1578,14 @@ def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, 
     title_cell.fill = PatternFill(start_color="1F497D", fill_type="solid")
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 42
+
+    # Subtitle Copyright Banner
+    ws.merge_cells("A2:L2")
+    sub_cell = ws["A2"]
+    sub_cell.value = "VNPT PRECHECK • Copyright by quangvu@vnpt.vn (Sep.2026)"
+    sub_cell.font = Font(name="Segoe UI", size=9.5, italic=True, color="595959")
+    sub_cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[2].height = 18
     
     # 🎯 DANH SÁCH TIÊU ĐỀ CHUẨN (12 CỘT): Đưa "NHẬN ĐỊNH TÌNH TRẠNG" lên Cột 1 và bổ sung NGÀY TIẾP NHẬN + APP USAGE + TRẠNG THÁI PHIẾU
     headers = [
@@ -1462,8 +1613,12 @@ def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, 
         # 🎯 CỘT 1 (A): NHẬN ĐỊNH TÌNH TRẠNG
         s_cell = ws.cell(row=current_row, column=1, value=rec["status"])
         s_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        s_cell.font = Font(name="Segoe UI", size=11, bold=True, color="333333")
-        s_cell.fill = PatternFill(start_color=rec["color"], fill_type="solid")
+        if rec["status"] == "PROFILE LẠ" or "PROFILE LẠ" in str(rec.get("status", "")) or rec.get("color") in ["FFC7CE", "F8D7DA"]:
+            s_cell.font = Font(name="Segoe UI", size=11, bold=True, color="9C0006")
+            s_cell.fill = PatternFill(start_color="FFC7CE", fill_type="solid")
+        else:
+            s_cell.font = Font(name="Segoe UI", size=11, bold=True, color="333333")
+            s_cell.fill = PatternFill(start_color=rec["color"], fill_type="solid")
         
         # 🎯 CỘT 2 (B): SỐ ĐIỆN THOẠI + HYPERLINK BTOOLS
         phone_num = rec["phone"]
@@ -1481,14 +1636,21 @@ def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, 
         ws.cell(row=current_row, column=4, value=inc_time).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
         # 🎯 CỘT 5 (E): GÓI CƯỚC THỰC TẾ (SAPC & BTOOLS)
-        ws.cell(row=current_row, column=5, value=rec["real_packages"]).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        p_val = rec["real_packages"]
+        p_cell5 = ws.cell(row=current_row, column=5, value=p_val)
+        p_cell5.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        if "PROFILE LẠ" in str(p_val):
+            p_cell5.font = Font(name="Segoe UI", size=10.5, color="C00000", bold=True)
 
         # 🎯 CỘT 6 (F): HẠ TẦNG KẾT NỐI
         ws.cell(row=current_row, column=6, value=rec["rat_types"]).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         
         # 🎯 CỘT 7 (G): DỮ LIỆU CEM (TOP 3 CELL BẮT SÓNG TRONG 5 NGÀY)
         cem_text = rec.get("cem_data", "Không có dữ liệu CEM")
-        ws.cell(row=current_row, column=7, value=cem_text).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        cem_cell = ws.cell(row=current_row, column=7, value=cem_text)
+        cem_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        if "CẢNH BÁO VPN" in cem_text or "VPN:" in cem_text:
+            cem_cell.font = Font(name="Segoe UI", size=10.5, color="C00000", bold=True)
 
         # 🎯 CỘT 8 (H): ỨNG DỤNG SỬ DỤNG (APP USAGE TỪ CEM)
         app_text = rec.get("app_usage", "Không có dữ liệu App Usage")
@@ -1530,7 +1692,11 @@ def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, 
         # Vẽ border toàn bộ ô trên hàng (12 cột) và set font size 11
         for c in range(1, 13):
             ws.cell(row=current_row, column=c).border = thin_border
-            if c not in [1, 2, 9, 10, 11, 12]: # Chừa các ô có định dạng font đặc biệt
+            if c not in [1, 2, 5, 7, 9, 10, 11, 12]: # Chừa các ô có định dạng font đặc biệt
+                ws.cell(row=current_row, column=c).font = Font(name="Segoe UI", size=11)
+            elif c == 5 and "PROFILE LẠ" not in str(p_val):
+                ws.cell(row=current_row, column=c).font = Font(name="Segoe UI", size=11)
+            elif c == 7 and "CẢNH BÁO VPN" not in str(cem_text) and "VPN:" not in str(cem_text):
                 ws.cell(row=current_row, column=c).font = Font(name="Segoe UI", size=11)
             elif c in [10, 11] and ws.cell(row=current_row, column=c).font.color.rgb not in ["C00000", "00C00000"]:
                 ws.cell(row=current_row, column=c).font = Font(name="Segoe UI", size=11)

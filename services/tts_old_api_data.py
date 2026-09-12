@@ -199,8 +199,8 @@ def execute_tts_old_api_data_cycle(driver=None):
                     if cem_client is None:
                         cem_client = CEMClient(driver=driver)
                     cem_records = cem_client.get_subscriber_history_5days(phone_84, days=5)
-                    cem_data_str = CEMClient.extract_top_cells_summary(cem_records)
                     app_events = cem_client.get_subscriber_app_events(phone_84, days=5)
+                    cem_data_str = CEMClient.extract_top_cells_summary(cem_records, app_events=app_events)
                     app_usage_str = CEMClient.extract_top_apps_summary(app_events)
                     save_cem_data_to_file(phone_84, cem_records, app_events, base_dir=BASE_DIR)
                 except Exception as ex_cem:
@@ -214,6 +214,17 @@ def execute_tts_old_api_data_cycle(driver=None):
 
                 cell_desc = info_result.get("Cell ID") or info_result.get("ECGI") or "--"
                 rat_type_str = info_result.get("Radio") or "Sóng di động"
+                if not cem_records and cell_desc and cell_desc != "--":
+                    vpn_suffix = ""
+                    if app_events:
+                        try:
+                            from report_bot import detect_vpn_application
+                            vname = detect_vpn_application(app_events)
+                            if vname:
+                                vpn_suffix = f"\n⚠️ CẢNH BÁO VPN: Phát hiện thiết bị có app {vname}"
+                        except Exception:
+                            pass
+                    cem_data_str = f"Không có dữ liệu CEM (5 ngày) [Cell HSS: {cell_desc}]{vpn_suffix}"
 
                 rec = {
                     "phone": phone_84,
@@ -223,7 +234,7 @@ def execute_tts_old_api_data_cycle(driver=None):
                     "status": status_calc,
                     "real_packages": formatted_packages,
                     "rat_types": rat_type_str,
-                    "cem_data": cem_data_str if cem_records else (f"Không có dữ liệu CEM (5 ngày) [Cell HSS: {cell_desc}]" if cell_desc and cell_desc != "--" else "Không có dữ liệu CEM (5 ngày)"),
+                    "cem_data": cem_data_str,
                     "app_usage": app_usage_str,
                     "ai_summary": ai_summary if ai_summary else t.get("content", ""),
                     "comment": comment_calc,
@@ -233,7 +244,9 @@ def execute_tts_old_api_data_cycle(driver=None):
                     "created_time": t.get("created_time") or inc_time,
                     "ticket_id": t.get("ticket_id"),
                     "flow_id": str(t.get("id_yeu_cau") or ""),
-                    "ticket_code": t.get("ma_ccos") or t.get("MaCCOS") or ""
+                    "ticket_code": t.get("ma_ccos") or t.get("MaCCOS") or "",
+                    "phan_hoi_he_thong": t.get("phan_hoi_he_thong", 1),
+                    "id_he_thong": t.get("id_he_thong", 0),
                 }
 
                 # 5. Kiểm tra điều kiện tự động đóng

@@ -83,25 +83,32 @@ def extract_firefox_cookies(domain_keyword: str) -> dict:
         if not os.path.exists(cookie_db):
             continue
 
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            tmp_name = tmp.name
-        try:
-            shutil.copy2(cookie_db, tmp_name)
-            conn = sqlite3.connect(tmp_name)
-            query = "SELECT name, value FROM moz_cookies WHERE host LIKE ?"
-            rows = conn.execute(query, (f"%{domain_keyword}%",)).fetchall()
-            conn.close()
-            for name, val in rows:
-                if name not in results:
-                    results[name] = val
-        except Exception:
-            pass
-        finally:
-            if os.path.exists(tmp_name):
-                try:
-                    os.remove(tmp_name)
-                except Exception:
-                    pass
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_db = os.path.join(tmpdir, "cookies.sqlite")
+            try:
+                shutil.copy2(cookie_db, tmp_db)
+                wal_db = cookie_db + "-wal"
+                if os.path.exists(wal_db):
+                    try:
+                        shutil.copy2(wal_db, tmp_db + "-wal")
+                    except Exception:
+                        pass
+                shm_db = cookie_db + "-shm"
+                if os.path.exists(shm_db):
+                    try:
+                        shutil.copy2(shm_db, tmp_db + "-shm")
+                    except Exception:
+                        pass
+
+                conn = sqlite3.connect(tmp_db)
+                query = "SELECT name, value FROM moz_cookies WHERE host LIKE ?"
+                rows = conn.execute(query, (f"%{domain_keyword}%",)).fetchall()
+                conn.close()
+                for name, val in rows:
+                    if name not in results:
+                        results[name] = val
+            except Exception:
+                pass
     return results
 
 

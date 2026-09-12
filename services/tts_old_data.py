@@ -159,17 +159,29 @@ def execute_tts_old_data_cycle():
             raw_btools_data = extract_btools_single_phone(driver, phone_84, start_d, end_d)
             clean_data = standardize_btools_data(raw_btools_data)
 
-            # Lưu file JSON vào number/
+            # Lưu file JSON vào number/ (fallback dữ liệu BTools chu kỳ trước nếu tạm thời mất kết nối)
             output_dir = str(BASE_DIR / "number")
             os.makedirs(output_dir, exist_ok=True)
             json_filename = os.path.join(output_dir, f"{phone_84}.json")
-            with open(json_filename, "w", encoding="utf-8") as jf:
-                json.dump({
-                    "phone": phone_84,
-                    "package_title": title,
-                    "ticket_content": content,
-                    "btools_technical_data": clean_data if clean_data else []
-                }, jf, ensure_ascii=False, indent=4)
+            if clean_data is None and os.path.exists(json_filename):
+                try:
+                    with open(json_filename, "r", encoding="utf-8") as jf:
+                        cached = json.load(jf)
+                        cached_data = cached.get("btools_technical_data") or cached.get("data")
+                        if cached_data:
+                            clean_data = cached_data
+                            state.log("INFO", f"   ↳ 🔄 Tạm dùng dữ liệu BTools đã lưu từ chu kỳ trước cho {phone_84}")
+                except Exception:
+                    pass
+
+            if clean_data is not None:
+                with open(json_filename, "w", encoding="utf-8") as jf:
+                    json.dump({
+                        "phone": phone_84,
+                        "package_title": title,
+                        "ticket_content": content,
+                        "btools_technical_data": clean_data
+                    }, jf, ensure_ascii=False, indent=4)
 
             # Tra SAPC + HSS Profile
             if sapc_client is not None:
@@ -212,8 +224,8 @@ def execute_tts_old_data_cycle():
                 if cem_client is None:
                     cem_client = CEMClient(driver=driver)
                 cem_records = cem_client.get_subscriber_history_5days(phone_84, days=5)
-                cem_data_str = CEMClient.extract_top_cells_summary(cem_records)
                 app_events = cem_client.get_subscriber_app_events(phone_84, days=5)
+                cem_data_str = CEMClient.extract_top_cells_summary(cem_records, app_events=app_events)
                 app_usage_str = CEMClient.extract_top_apps_summary(app_events)
 
                 save_cem_data_to_file(phone_84, cem_records, app_events, base_dir=BASE_DIR)

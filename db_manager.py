@@ -70,6 +70,14 @@ def init_db():
             conn.execute("ALTER TABLE tickets ADD COLUMN last_reopened_date TEXT;")
         except Exception:
             pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN phan_hoi_he_thong INTEGER DEFAULT 1;")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN id_he_thong INTEGER DEFAULT 0;")
+        except Exception:
+            pass
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS tts_new_stages (
@@ -137,6 +145,21 @@ def check_ticket_can_close(t):
     reopen_count = int(t.get("reopen_count") or 0)
     if reopen_count > 0:
         return False, f"⚠️ Phiếu đã mở lại {reopen_count} lần (THÔNG TIN MỞ LẠI TTS) - KHÔNG ĐÓNG TỰ ĐỘNG, yêu cầu KTV kiểm tra kỹ!"
+
+    # BẢO VỆ AN TOÀN TUYỆT ĐỐI: Chỉ tự động đóng cho phiếu thuộc dịch vụ Mobile Internet / Data
+    pkg_title_raw = str(t.get("package_title") or t.get("title") or "").strip()
+    if pkg_title_raw:
+        pkg_lower = pkg_title_raw.lower()
+        from ttsnew_api import DATA_SERVICE_KEYWORDS
+        is_data = any(k in pkg_lower for k in DATA_SERVICE_KEYWORDS) and "gói cước mobile internet" not in pkg_lower
+        if not is_data:
+            return False, f"Phiếu thuộc dịch vụ [{pkg_title_raw}] (ngoài Data/Mobile Internet) - KHÔNG ĐÓNG TỰ ĐỘNG, KTV xử lý thủ công!"
+
+    # PHẢN ÁNH LỖI ỨNG DỤNG CỤ THỂ (ZALO, TIKTOK...): Bắt buộc KTV review, tuyệt đối không đóng tự động
+    st_raw = str(t.get("status", "")).strip().lower()
+    sum_raw = str(t.get("ai_summary", "") or t.get("ticket_content", "")).lower()
+    if "lỗi ứng dụng" in st_raw or "lỗi ứng dụng cụ thể" in sum_raw:
+        return False, "Khách hàng phản ánh lỗi ứng dụng cụ thể (Zalo, TikTok...) - Dành cho KTV kiểm tra xử lý, không đóng tự động!"
 
     try:
         from update_tts import config as tts_config
@@ -229,7 +252,9 @@ def save_or_update_ticket(t):
         ai_summary = t.get("ai_summary", "")
 
         if existing:
-            if not t.get("force_update_status") and existing["ticket_status"] == "Đã đóng" and ticket_status == "Chưa đóng":
+            # Đối với tts_new (quét trực tiếp từ live API), nếu phiếu đang xuất hiện thì luôn khôi phục 'Chưa đóng'
+            # Chỉ giữ 'Đã đóng' khi là nguồn tts_old và không có force_update_status
+            if source != "tts_new" and not t.get("force_update_status") and existing["ticket_status"] in ("Đã đóng", "Da dong") and ticket_status == "Chưa đóng":
                 ticket_status = "Đã đóng"
             if not ai_summary and "ai_summary" in existing.keys():
                 ai_summary = existing["ai_summary"] or ""
@@ -247,8 +272,9 @@ def save_or_update_ticket(t):
                 phone, incident_time, package_title, real_packages, rat_types,
                 cem_data, app_usage, ticket_content, status, comment,
                 action_plan, color, ticket_status, created_time, ai_summary,
-                source, ticket_code, ticket_id, flow_id, reopen_count, last_reopened_date, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                source, ticket_code, ticket_id, flow_id, reopen_count, last_reopened_date,
+                phan_hoi_he_thong, id_he_thong, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(phone, incident_time) DO UPDATE SET
                 package_title = excluded.package_title,
                 real_packages = excluded.real_packages,
@@ -269,6 +295,8 @@ def save_or_update_ticket(t):
                 flow_id = COALESCE(excluded.flow_id, tickets.flow_id),
                 reopen_count = excluded.reopen_count,
                 last_reopened_date = excluded.last_reopened_date,
+                phan_hoi_he_thong = COALESCE(excluded.phan_hoi_he_thong, tickets.phan_hoi_he_thong),
+                id_he_thong = COALESCE(excluded.id_he_thong, tickets.id_he_thong),
                 updated_at = CURRENT_TIMESTAMP;
         """, (
             phone,
@@ -291,7 +319,9 @@ def save_or_update_ticket(t):
             t.get("ticket_id") or None,
             t.get("flow_id") or None,
             reopen_count,
-            last_reopened_date
+            last_reopened_date,
+            t.get("phan_hoi_he_thong", 1),
+            t.get("id_he_thong", 0),
         ))
     conn.close()
 
@@ -299,8 +329,18 @@ def save_tickets_bulk(ticket_list):
     for t in ticket_list:
         save_or_update_ticket(t)
 
-DATA_PKG_SQL = "(package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước%')"
-VOICE_PKG_SQL = f"NOT {DATA_PKG_SQL}"
+DATA_PKG_SQL = "(package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước Mobile Internet%' AND package_title NOT LIKE '%Mobile Internet (M0/Gói Data)%' AND package_title NOT LIKE '%CVQT - DV Mobile Internet (Data)%')"
+VOICE_PKG_SQL = f"(package_title IS NULL OR NOT {DATA_PKG_SQL})"
+
+def is_mobile_internet_ticket(package_title: str) -> bool:
+    pkg = (package_title or "").strip().lower()
+    if not pkg:
+        return False
+    if "mobile internet" in pkg or "data" in pkg:
+        if "(m0/gói data)" in pkg or "gói cước mobile internet" in pkg or "cvqt" in pkg:
+            return False
+        return True
+    return False
 
 def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", service_type=None):
     """
@@ -335,17 +375,28 @@ def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", s
             """, source_params)
             return
 
-        placeholders = ",".join(["?"] * len(active_keys))
         if key_type == "ticket_code":
-            conn.execute(f"""
-                UPDATE tickets 
-                SET ticket_status = 'Đã đóng', updated_at = CURRENT_TIMESTAMP 
-                WHERE {source_condition}
-                  AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-                  {service_sql}
-                  AND ticket_code NOT IN ({placeholders})
-            """, source_params + list(active_keys))
+            raw_active_keys = [k.split('\n')[0].strip() for k in active_keys if k]
+            if not raw_active_keys:
+                conn.execute(f"""
+                    UPDATE tickets 
+                    SET ticket_status = 'Đã đóng', updated_at = CURRENT_TIMESTAMP 
+                    WHERE {source_condition}
+                      AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+                      {service_sql}
+                """, source_params)
+            else:
+                placeholders = ",".join(["?"] * len(raw_active_keys))
+                conn.execute(f"""
+                    UPDATE tickets 
+                    SET ticket_status = 'Đã đóng', updated_at = CURRENT_TIMESTAMP 
+                    WHERE {source_condition}
+                      AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+                      {service_sql}
+                      AND substr(ticket_code, 1, case when instr(ticket_code, char(10)) > 0 then instr(ticket_code, char(10)) - 1 else length(ticket_code) end) NOT IN ({placeholders})
+                """, source_params + list(raw_active_keys))
         else:
+            placeholders = ",".join(["?"] * len(active_keys))
             conn.execute(f"""
                 UPDATE tickets 
                 SET ticket_status = 'Đã đóng', updated_at = CURRENT_TIMESTAMP 
@@ -578,7 +629,7 @@ def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_
     Thống kê tổng hợp số liệu phân tích chuyên sâu cho các phiếu đã đóng:
     - time_filter: 'all', 'today', '7days', '30days'
     - source_filter: 'all', 'tts_old', 'tts_new'
-    - service_filter: 'all', 'data' (Mobile Internet), 'voice_sms' (Các phiếu còn lại: Thoại/SMS/Gói)
+    - service_filter: 'all', 'data' (Mobile Internet), 'voice_sms' (Thoại/SMS/Gói/PA Khác)
     """
     init_db()
     conn = get_db_connection()

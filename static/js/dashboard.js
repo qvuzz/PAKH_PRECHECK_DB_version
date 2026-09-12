@@ -20,7 +20,14 @@ function updateModeUI(autoClose) {
     const chkNew = document.getElementById('chkAutoCloseNew');
     if (chkNew) chkNew.checked = currentAutoClose;
     const chkUnified = document.getElementById('chkAutoCloseUnified');
-    if (chkUnified) chkUnified.checked = currentAutoClose;
+    if (chkUnified) {
+        if (!isSystemAdmin) {
+            chkUnified.checked = false;
+            chkUnified.disabled = true;
+        } else {
+            chkUnified.checked = currentAutoClose;
+        }
+    }
 
     const modeLabelBadge = document.getElementById('modeLabelBadge');
     const headerModeTag = document.getElementById('headerModeTag');
@@ -47,6 +54,14 @@ function updateModeUI(autoClose) {
 }
 
 async function toggleAutoCloseUnified(isChecked) {
+    if (!isSystemAdmin) {
+        const chkUnified = document.getElementById('chkAutoCloseUnified');
+        if (chkUnified) {
+            chkUnified.checked = false;
+            chkUnified.disabled = true;
+        }
+        return;
+    }
     try {
         updateModeUI(isChecked);
         await fetch('/api/config', {
@@ -92,20 +107,45 @@ async function fetchStatus() {
         if (btnStartNew) btnStartNew.style.display = isNewRunning ? 'none' : 'flex';
         if (btnStopNew) btnStopNew.style.display = isNewRunning ? 'flex' : 'none';
 
-        // Điều khiển Cụm điều khiển thống nhất (Unified)
-        const btnStartUnified = document.getElementById('btnStartUnified');
-        const btnStopUnified = document.getElementById('btnStopUnified');
-        if (btnStartUnified) btnStartUnified.style.display = isRunning ? 'none' : 'inline-flex';
-        if (btnStopUnified) btnStopUnified.style.display = isRunning ? 'inline-flex' : 'none';
+        window.currentServerStatus = data.status;
+        const isUnifiedRunning = isRunning || (data.status === 'PROCESSING') || (data.status === 'WAITING');
+
+        // Điều khiển Nút duy nhất Bắt đầu / Dừng (Click Bắt đầu đổi sang Dừng, click Dừng đổi sang Bắt đầu)
+        const btnToggle = document.getElementById('btnToggleUnified');
+        const iconToggle = document.getElementById('iconToggleUnified');
+        const lblToggle = document.getElementById('lblToggleUnified');
+
+        if (!window.isToggleInProgress && btnToggle) {
+            btnToggle.disabled = false;
+            btnToggle.style.opacity = '1';
+            btnToggle.style.cursor = 'pointer';
+
+            if (isUnifiedRunning) {
+                // ĐANG CHẠY: HIỂN THỊ NÚT "DỪNG" MÀU ĐỎ
+                btnToggle.className = 'btn-sm btn-danger';
+                btnToggle.title = 'Tiến trình đang quét / chờ lặp. Bấm để Dừng lại!';
+                if (iconToggle) iconToggle.innerHTML = '<rect x="4" y="4" width="16" height="16" rx="2"/>';
+                if (lblToggle) lblToggle.innerText = 'Dừng';
+            } else {
+                // ĐÃ DỪNG: HIỂN THỊ NÚT "BẮT ĐẦU" MÀU XANH
+                btnToggle.className = 'btn-sm btn-primary';
+                btnToggle.title = 'Bắt đầu quét ngay lập tức (Nếu tick Lặp sẽ tiếp tục chu kỳ tự động)';
+                if (iconToggle) iconToggle.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
+                if (lblToggle) lblToggle.innerText = 'Bắt đầu';
+            }
+        }
 
         const dot = document.getElementById('statusDot');
-        dot.className = 'status-dot';
-        if (data.status === 'PROCESSING') dot.classList.add('processing');
-        else if (data.status === 'WAITING') dot.classList.add('waiting');
-        else if (isRunning) dot.classList.add('active');
+        if (dot) {
+            dot.className = 'status-dot';
+            if (data.status === 'PROCESSING') dot.classList.add('processing');
+            else if (data.status === 'WAITING') dot.classList.add('waiting');
+            else if (isRunning) dot.classList.add('active');
+        }
         let msg = data.status_message || 'Sẵn sàng';
-        if (msg.includes('Đã dừng')) {
-            msg = 'Tiến trình: Đã dừng';
+        const statusText = document.getElementById('statusText');
+        if (statusText) {
+            statusText.innerText = msg;
         }
         let displayStatus = data.status;
         if (data.status === 'PROCESSING') {
@@ -129,17 +169,17 @@ async function fetchStatus() {
         // Cập nhật chỉ báo trạng thái quét riêng biệt theo từng module ở Sidebar
         const isOldDataScanning = (data.status === 'PROCESSING') && (currentEngine === 'api' || currentEngine === 'selenium');
         const isNewDataScanning = (data.status === 'PROCESSING') && (currentEngine === 'tts_new');
-        
+
         const navOldSub = document.querySelector('#nav-tts_old_api-data .nav-item-sub');
         if (navOldSub) {
-            navOldSub.innerHTML = isOldDataScanning 
-                ? '<span style="color:#0284c7; font-weight:700;">⚡ Đang quét...</span>' 
+            navOldSub.innerHTML = isOldDataScanning
+                ? '<span style="color:#0284c7; font-weight:700;">⚡ Đang quét...</span>'
                 : 'Quét tự động';
         }
         const navNewSub = document.querySelector('#nav-tts_new-data .nav-item-sub');
         if (navNewSub) {
-            navNewSub.innerHTML = isNewDataScanning 
-                ? '<span style="color:#0284c7; font-weight:700;">⚡ Đang quét...</span>' 
+            navNewSub.innerHTML = isNewDataScanning
+                ? '<span style="color:#0284c7; font-weight:700;">⚡ Đang quét...</span>'
                 : 'Quét toàn bộ';
         }
 
@@ -236,17 +276,23 @@ async function fetchStatus() {
 
         const hasError = !window.liveLogDismissed && (window.currentLiveErrCount > 0);
         const pillLog = document.getElementById('pillLiveLog');
-        const logTxt = document.getElementById('liveLogStatusText');
+        const logDot = document.getElementById('liveLogDot');
         const errBadge = document.getElementById('liveLogErrorBadge');
 
         if (pillLog) {
             if (hasError) {
                 pillLog.classList.add('has-error');
-                if (logTxt) logTxt.innerText = 'CÓ LỖI!';
+                if (logDot) {
+                    logDot.className = 'svc-status-dot inactive';
+                    logDot.style.backgroundColor = '#ef4444';
+                }
                 if (errBadge) errBadge.style.display = 'inline-block';
             } else {
                 pillLog.classList.remove('has-error');
-                if (logTxt) logTxt.innerText = 'Bình thường';
+                if (logDot) {
+                    logDot.className = 'svc-status-dot active';
+                    logDot.style.backgroundColor = '#16a34a';
+                }
                 if (errBadge) errBadge.style.display = 'none';
             }
         }
@@ -709,7 +755,7 @@ function switchTableTab(tab) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
     let srvName = 'Mobile Internet';
-    if (currentService === 'voice_sms') srvName = 'Thoại / SMS';
+    if (currentService === 'voice_sms') srvName = 'Thoại/SMS/Gói/PA Khác';
     else if (currentService === 'all') srvName = '';
 
     let title = '';
@@ -952,7 +998,8 @@ function renderTicketsTable(force = false) {
 
         let badgeClass = 'badge-gray';
         if (t.status.includes('BÌNH THƯỜNG') || t.status.includes('VPN')) badgeClass = 'badge-green';
-        else if (t.status.includes('YẾU') || t.status.includes('GÓI')) badgeClass = 'badge-yellow';
+        else if (t.status.includes('PROFILE LẠ') || t.status.includes('LẠ')) badgeClass = 'badge-red';
+        else if (t.status.includes('YẾU') || t.status.includes('GÓI') || t.status.includes('LỖI ỨNG DỤNG') || t.status.includes('ỨNG DỤNG')) badgeClass = 'badge-yellow';
 
         const now = new Date();
         const pad = (n) => String(n).padStart(2, '0');
@@ -971,6 +1018,16 @@ function renderTicketsTable(force = false) {
         }
         const reopenCount = parseInt(t.reopen_count || 0, 10);
 
+        const pkgTitleLower = (t.package_title || '').toLowerCase();
+        const isDataTicket = (currentService === 'data') || (
+            currentService !== 'voice_sms' &&
+            (pkgTitleLower.includes('mobile internet') || pkgTitleLower.includes('data')) &&
+            !pkgTitleLower.includes('(m0/gói data)') &&
+            !pkgTitleLower.includes('gói cước mobile internet') &&
+            !pkgTitleLower.includes('cvqt')
+        );
+        const isOtherPakh = !isDataTicket || (currentService === 'voice_sms');
+
         if (t.ticket_status === 'Đã đóng' || t.ticket_status === 'Da dong') {
             actionHtml = `
                         <div style="display:flex; flex-direction:column; align-items:center; gap:3px;">
@@ -980,9 +1037,13 @@ function renderTicketsTable(force = false) {
             compactActionHtml = `<span class="badge-status badge-green" style="font-weight:700; padding:2px 6px; font-size:10px;">ĐÃ ĐÓNG</span>`;
         } else if (isTtsNew) {
             const hasProfile = t.real_packages && t.real_packages.includes('Radio:');
-            const precheckBtn = hasProfile
-                ? `<span class="badge-status badge-green" style="font-size:10px; padding:3px 6px; font-weight:700;">Đã kiểm Core</span>`
-                : `<button class="btn-precheck-blue" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để tiền kiểm tra Core tức thì">Tiền kiểm Core</button>`;
+            const isErrorStatus = !t.status || t.status.includes('LỖI') || t.status.includes('CHƯA PHÂN LOẠI');
+            const precheckBtn = (hasProfile && !isErrorStatus)
+                ? `<div style="display:inline-flex; align-items:center; gap:3px;">
+                       <span class="badge-status badge-green" style="font-size:9.5px; padding:2px 5px; font-weight:700;">Đã kiểm Core</span>
+                       <button class="btn-sm btn-outline" style="padding:1px 5px; font-size:9.5px; height:20px; line-height:1; color:#0284c7; border-color:#93c5fd;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Kiểm lại</button>
+                   </div>`
+                : `<button class="btn-precheck-blue" style="${isErrorStatus ? 'background:#e11d48; border-color:#be123c;' : ''}" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để tiền kiểm tra Core tức thì">${isErrorStatus ? '⚡ Tiền kiểm lại' : 'Tiền kiểm Core'}</button>`;
 
             let stageBadge = '';
             if (reopenCount > 0) {
@@ -995,54 +1056,109 @@ function renderTicketsTable(force = false) {
                 stageBadge = `<span class="badge-status badge-yellow" style="font-size:10px; padding:2px 6px; font-weight:700;">CHƯA ĐÓNG</span>`;
             }
 
-            actionHtml = `
-                        <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                            ${precheckBtn}
-                            ${stageBadge}
-                            <div style="display:flex; gap:4px; margin-top:2px;">
-                                <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount})" title="${reopenCount > 0 ? 'Phiếu đã mở lại ' + reopenCount + ' lần. Bấm để KTV xác nhận và đóng thủ công' : 'Tự động chuyển bước / đóng phiếu (Vòng 1 -> Vòng 2)'}">
-                                    Đóng phiếu
-                                </button>
-                                <button class="btn-sm btn-outline" style="padding:4px 6px; font-size:10px;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở trang chi tiết phiếu trên TTS Mới">
-                                    Mở TTS
-                                </button>
-                            </div>
-                        </div>
-                    `;
-
-            compactActionHtml = `
-                        <div style="display:inline-flex; align-items:center; justify-content:center; gap:3px;">
-                            <button class="btn-close-green" style="padding:2px 6px; font-size:10px; height:24px; line-height:1; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount})" title="Đóng phiếu TTS Mới">
-                                Đóng
-                            </button>
-                            <button class="btn-sm btn-outline" style="padding:2px 5px; font-size:10px; height:24px; line-height:1; display:inline-flex; align-items:center; justify-content:center;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở chi tiết trên TTS Mới">
-                                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
-                            </button>
-                        </div>
-                    `;
-        } else {
-            const statusBadgeAll = (currentTableTab === 'all')
-                ? `<span class="badge-status badge-yellow" style="font-size:10px; padding:2px 6px; font-weight:700; margin-bottom:2px;">CHƯA ĐÓNG</span>`
-                : '';
-            if (currentService === 'voice_sms' || (currentTableTab === 'all' && t.service_type === 'voice_sms')) {
-                const hasProfile = t.real_packages && t.real_packages.includes('Radio:');
-                const precheckBtn = hasProfile
-                    ? `<span class="badge-status badge-green" style="font-size:10px; padding:3px 6px; font-weight:700;">Đã kiểm Core</span>`
-                    : `<button class="btn-precheck-blue" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để tiền kiểm tra Core tức thì">Tiền kiểm Core</button>`;
+            if (isOtherPakh) {
+                // TUYỆT ĐỐI KHÔNG ĐÓNG BẰNG API: CHỈ CÓ NÚT "ĐÓNG THỦ CÔNG" CHUYỂN SANG TRANG CHI TIẾT PHIẾU
                 actionHtml = `
                             <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
-                                ${statusBadgeAll}
                                 ${precheckBtn}
-                                <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu">
-                                    Đóng phiếu
+                                ${stageBadge}
+                                <button class="btn-manual-orange" style="padding:4px 9px; font-size:10.5px; margin-top:2px;" onclick="manualCloseTtsNewTicket('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Chuyển sang trang chi tiết phiếu trên TTS Mới để đóng thủ công">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+                                    Đóng thủ công
+                                </button>
+                            </div>
+                        `;
+
+                compactActionHtml = `
+                            <div style="display:inline-flex; align-items:center; justify-content:center; gap:3px;">
+                                <button class="btn-manual-orange" style="padding:2px 6px; font-size:10px; height:24px; line-height:1;" onclick="manualCloseTtsNewTicket('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở chi tiết phiếu trên TTS Mới để đóng thủ công">
+                                    Đóng thủ công
+                                </button>
+                                <button class="btn-sm btn-outline" style="padding:2px 5px; font-size:9.5px; height:24px; line-height:1; color:#0284c7; border-color:#93c5fd;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core">
+                                    ⚡
                                 </button>
                             </div>
                         `;
             } else {
+                // Mobile Internet: Cho phép đóng tự động qua API
+                actionHtml = `
+                            <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+                                ${precheckBtn}
+                                ${stageBadge}
+                                <div style="display:flex; gap:4px; margin-top:2px;">
+                                    <button class="btn-close-green" style="padding:4px 8px; font-size:10.5px; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount})" title="${reopenCount > 0 ? 'Phiếu đã mở lại ' + reopenCount + ' lần. Bấm để KTV xác nhận và đóng thủ công' : 'Tự động chuyển bước / đóng phiếu (Vòng 1 -> Vòng 2)'}">
+                                        Đóng phiếu
+                                    </button>
+                                    <button class="btn-sm btn-outline" style="padding:4px 6px; font-size:10px;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở trang chi tiết phiếu trên TTS Mới">
+                                        Mở TTS
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+
+                compactActionHtml = `
+                            <div style="display:inline-flex; align-items:center; justify-content:center; gap:3px;">
+                                <button class="btn-close-green" style="padding:2px 6px; font-size:10px; height:24px; line-height:1; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount})" title="Đóng phiếu TTS Mới">
+                                    Đóng
+                                </button>
+                                <button class="btn-sm btn-outline" style="padding:2px 5px; font-size:9.5px; height:24px; line-height:1; color:#0284c7; border-color:#93c5fd;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core">
+                                    ⚡
+                                </button>
+                                <button class="btn-sm btn-outline" style="padding:2px 5px; font-size:10px; height:24px; line-height:1; display:inline-flex; align-items:center; justify-content:center;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở chi tiết trên TTS Mới">
+                                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+                                </button>
+                            </div>
+                        `;
+            }
+        } else {
+            const statusBadgeAll = (currentTableTab === 'all')
+                ? `<span class="badge-status badge-yellow" style="font-size:10px; padding:2px 6px; font-weight:700; margin-bottom:2px;">CHƯA ĐÓNG</span>`
+                : '';
+            if (isOtherPakh) {
+                // TUYỆT ĐỐI KHÔNG ĐÓNG BẰNG API: CHỈ CÓ NÚT "ĐÓNG THỦ CÔNG" CHUYỂN SANG TRANG XỬ LÝ SỰ CỐ
+                const hasProfile = t.real_packages && t.real_packages.includes('Radio:');
+                const isErrorStatus = !t.status || t.status.includes('LỖI') || t.status.includes('CHƯA PHÂN LOẠI');
+                const precheckBtn = (hasProfile && !isErrorStatus)
+                    ? `<div style="display:inline-flex; align-items:center; gap:3px;">
+                           <span class="badge-status badge-green" style="font-size:9.5px; padding:2px 5px; font-weight:700;">Đã kiểm Core</span>
+                           <button class="btn-sm btn-outline" style="padding:1px 5px; font-size:9.5px; height:20px; line-height:1; color:#0284c7; border-color:#93c5fd;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Kiểm lại</button>
+                       </div>`
+                    : `<button class="btn-precheck-blue" style="${isErrorStatus ? 'background:#e11d48; border-color:#be123c;' : ''}" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để tiền kiểm tra Core tức thì">${isErrorStatus ? '⚡ Tiền kiểm lại' : 'Tiền kiểm Core'}</button>`;
+                actionHtml = `
+                            <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
+                                ${statusBadgeAll}
+                                ${precheckBtn}
+                                <button class="btn-manual-orange" style="padding:4px 9px; font-size:10.5px; margin-top:2px;" onclick="manualCloseTtsOldTicket('${t.phone}', '${escapeHtml(cleanTicketCode)}', this)" title="Chuyển sang trang Xử lý sự cố trên TTS Cũ để đóng thủ công">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+                                    Đóng thủ công
+                                </button>
+                            </div>
+                        `;
+                compactActionHtml = `
+                            <div style="display:inline-flex; align-items:center; justify-content:center; gap:3px;">
+                                <button class="btn-manual-orange" style="padding:2px 6px; font-size:10px; height:24px; line-height:1;" onclick="manualCloseTtsOldTicket('${t.phone}', '${escapeHtml(cleanTicketCode)}', this)" title="Mở Xử lý sự cố trên TTS Cũ để đóng thủ công">
+                                    Đóng thủ công
+                                </button>
+                                <button class="btn-sm btn-outline" style="padding:2px 5px; font-size:9.5px; height:24px; line-height:1; color:#0284c7; border-color:#93c5fd;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core">
+                                    ⚡
+                                </button>
+                            </div>
+                        `;
+            } else {
+                const hasProfile = t.real_packages && t.real_packages.includes('Radio:');
+                const isErrorStatus = !t.status || t.status.includes('LỖI') || t.status.includes('CHƯA PHÂN LOẠI');
+                const precheckBtn = (hasProfile && !isErrorStatus)
+                    ? `<div style="display:inline-flex; align-items:center; gap:3px;">
+                           <span class="badge-status badge-green" style="font-size:9.5px; padding:2px 5px; font-weight:700;">Đã kiểm Core</span>
+                           <button class="btn-sm btn-outline" style="padding:1px 5px; font-size:9.5px; height:20px; line-height:1; color:#0284c7; border-color:#93c5fd;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Kiểm lại</button>
+                       </div>`
+                    : `<button class="btn-precheck-blue" style="${isErrorStatus ? 'background:#e11d48; border-color:#be123c;' : ''}" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để tiền kiểm tra Core tức thì">${isErrorStatus ? '⚡ Tiền kiểm lại' : 'Tiền kiểm Core'}</button>`;
+
                 if (t.can_close) {
                     actionHtml = `
                                 <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
                                     ${statusBadgeAll}
+                                    ${precheckBtn}
                                     <button class="btn-close-green" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu ngay">
                                         <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                                         Đóng phiếu
@@ -1053,6 +1169,7 @@ function renderTicketsTable(force = false) {
                     actionHtml = `
                                 <div style="display:flex; flex-direction:column; align-items:center; gap:4px;">
                                     ${statusBadgeAll}
+                                    ${precheckBtn}
                                     <span class="badge-close-yellow" title="${t.cannot_close_reason || 'Chưa đủ điều kiện tự động đóng, dành cho KTV kiểm tra xử lý'}">
                                         <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
                                         KTV xử lý
@@ -1063,18 +1180,21 @@ function renderTicketsTable(force = false) {
                                 </div>
                             `;
                 }
-            }
 
-            compactActionHtml = `
-                        <button class="btn-close-green" style="padding:2px 7px; font-size:10px; height:24px; line-height:1;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu TTS Cũ">
-                            Đóng
-                        </button>
-                    `;
+                compactActionHtml = `
+                            <div style="display:inline-flex; align-items:center; justify-content:center; gap:3px;">
+                                <button class="btn-close-green" style="padding:2px 7px; font-size:10px; height:24px; line-height:1;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu TTS Cũ">
+                                    Đóng
+                                </button>
+                                <button class="btn-sm btn-outline" style="padding:2px 5px; font-size:9.5px; height:24px; line-height:1; color:#0284c7; border-color:#93c5fd;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core">
+                                    ⚡
+                                </button>
+                            </div>
+                        `;
+            }
         }
 
         // Tóm tắt nội dung chỉ dùng cho Mobile Internet. Các trường hợp khác chỉ đưa nội dung phản ánh vào.
-        const isDataTicket = (currentService === 'data') || (currentService === 'all' && t.package_title && (t.package_title.toLowerCase().includes('data') || t.package_title.toLowerCase().includes('internet')));
-
         let aiSummaryHtml = '--';
         let compactSummaryHtml = '--';
         let compactSummaryTooltip = '';
@@ -1165,7 +1285,7 @@ function renderTicketsTable(force = false) {
         if (t.real_packages && t.real_packages !== '--') {
             const raw = t.real_packages;
             compactProfileTooltip = raw.replace(/\\n/g, ' | ').replace(/\n/g, ' | ');
-            
+
             const lines = raw.split('\\n');
             let currentSection = '';
             let sapcLines = [];
@@ -1268,6 +1388,8 @@ function renderTicketsTable(force = false) {
 
             let gridHtml = '';
             if (radioVal || hssVal || ipVal || namVal || sapcItems.length > 0 || btoolsLines.length > 0) {
+                const hssDigits = (hssVal || '').replace(/\D/g, '');
+                const isStrangeHss = hssDigits.length >= 3 || hssVal.includes('PROFILE LẠ');
                 gridHtml = `
                             <div class="telecom-diag-grid">
                                 <div class="diag-metric-item">
@@ -1276,7 +1398,10 @@ function renderTicketsTable(force = false) {
                                 </div>
                                 <div class="diag-metric-item">
                                     <span class="diag-metric-label">HSS PROFILE</span>
-                                    <span class="diag-metric-val val-hss">${escapeHtml(hssVal || '--')}</span>
+                                    ${isStrangeHss ? 
+                                        `<span class="diag-metric-val val-hss-strange" title="Cảnh báo: HSS Profile từ 3 chữ số trở lên (${escapeHtml(hssVal)})">⚠️ ${escapeHtml(hssVal)} (PROFILE LẠ)</span>` :
+                                        `<span class="diag-metric-val val-hss">${escapeHtml(hssVal || '--')}</span>`
+                                    }
                                 </div>
                                 <div class="diag-metric-item">
                                     <span class="diag-metric-label" style="text-transform:none;">IPv4</span>
@@ -1301,20 +1426,32 @@ function renderTicketsTable(force = false) {
                                 </div>
                             </div>
                         `;
-                    }
+            }
 
-                    let btoolsHtml = '';
-                    if (btoolsLines.length > 0) {
-                        btoolsHtml = `<div style="font-size:10.5px; line-height:1.4; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; margin-top:4px;"><strong style="color:#b45309; font-size:10px; text-transform:uppercase; display:block; margin-bottom:2px; letter-spacing:0.03em;">Data Usage (BTools):</strong> <span style="color:#334155;">${escapeHtml(btoolsLines.join(' '))}</span></div>`;
-                    }
+            let btoolsHtml = `
+                <div style="font-size:10.5px; line-height:1.4; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; margin-top:4px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                        <strong style="color:#b45309; font-size:10px; text-transform:uppercase; letter-spacing:0.03em;">Data Usage (BTools):</strong>
+                        <a href="${btoolsUrl}" target="_blank" style="font-size:10.5px; color:#b45309; font-weight:700; text-decoration:none;" title="Tra cứu BTools cho thuê bao ${t.phone}">Xem BTools ↗</a>
+                    </div>
+                    <span style="color:#334155;">${btoolsLines.length > 0 ? escapeHtml(btoolsLines.join(' ')) : '<span style="color:#94a3b8; font-style:italic;">Chưa có dữ liệu btools hoặc không phát sinh</span>'}</span>
+                </div>
+            `;
 
-                    pkgHtml = `<div>${gridHtml}${btoolsHtml}</div>`;
+            pkgHtml = `<div>${gridHtml}${btoolsHtml}</div>`;
 
             // Tạo bản hiển thị rút gọn 1 dòng cho cột Hồ Sơ
             let cParts = [];
             if (raw.includes('Radio:')) {
                 const m = raw.match(/Radio:\s*([^\|\n\\]+)/);
                 if (m) cParts.push(`<span style="color:#0369a1; font-weight:700; font-family:'JetBrains Mono', monospace;">Radio: ${escapeHtml(m[1].trim())}</span>`);
+            }
+            if (hssVal || raw.includes('HSS:')) {
+                const targetHss = hssVal || (raw.match(/HSS:\s*([^\|\n\\]+)/) ? raw.match(/HSS:\s*([^\|\n\\]+/)[1].trim() : '');
+                const hssDigits = targetHss.replace(/\D/g, '');
+                if (hssDigits.length >= 3 || targetHss.includes('PROFILE LẠ')) {
+                    cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">HSS: ${escapeHtml(targetHss)} (PROFILE LẠ)</span>`);
+                }
             }
             if (raw.includes('NAM: 1') || raw.includes('Khóa GPRS')) {
                 cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">Khóa GPRS</span>`);
@@ -1332,12 +1469,46 @@ function renderTicketsTable(force = false) {
             }
         }
 
+        // Kiểm tra phát hiện app VPN / 1.1.1.1
+        let vpnAppName = null;
+        const vpnKeywords = [
+            '1.1.1.1', 'cloudflare', 'warp', 'vpn', 'expressvpn', 'nordvpn', 'openvpn',
+            'wireguard', 'betternet', 'turbo vpn', 'supervpn', 'surfshark', 'psiphon',
+            'adguard', 'v2ray', 'shadowsocks', 'outline', 'speedify', 'tunnelbear',
+            'hotspot shield', 'windscribe', 'protonvpn', 'hide.me', 'cyberghost'
+        ];
+        const searchVpnText = `${t.cem_data || ''} ${t.app_usage || ''} ${t.comment || ''}`.toLowerCase();
+        for (const kw of vpnKeywords) {
+            if (searchVpnText.includes(kw)) {
+                if (kw === '1.1.1.1' || kw === 'cloudflare' || kw === 'warp') {
+                    vpnAppName = '1.1.1.1 / Warp';
+                } else {
+                    vpnAppName = kw.toUpperCase();
+                }
+                break;
+            }
+        }
+
         let cemHtml = '--';
         if (t.cem_data && t.cem_data !== '--') {
             const lines = t.cem_data.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-            cemHtml = `<div style="font-size:10.5px; line-height:1.35; color:#334155;">` + 
-                      lines.map(line => `<div style="margin-top:2px;">${escapeHtml(line)}</div>`).join('') + 
-                      `</div>`;
+            let hasVpnWarningInLines = false;
+            let renderedLines = lines.map(line => {
+                if (line.includes('CẢNH BÁO VPN') || line.includes('⚠️') || line.toLowerCase().includes('vpn') || line.includes('1.1.1.1')) {
+                    hasVpnWarningInLines = true;
+                    return `<div style="margin-top:4px; padding:3px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:4px; font-weight:700; font-size:10.5px; display:inline-block;">⚠️ ${escapeHtml(line.replace(/^⚠️\s*/, ''))}</div>`;
+                }
+                return `<div style="margin-top:2px;">${escapeHtml(line)}</div>`;
+            });
+
+            // Nếu phát hiện app VPN nhưng trong cem_data chưa có dòng cảnh báo thì tự động bổ sung ngay sau phần Cell
+            if (vpnAppName && !hasVpnWarningInLines) {
+                renderedLines.push(`<div style="margin-top:4px; padding:3px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:4px; font-weight:700; font-size:10.5px; display:inline-block;">⚠️ CẢNH BÁO VPN: Phát hiện thiết bị có dùng app ${escapeHtml(vpnAppName)}</div>`);
+            }
+
+            cemHtml = `<div style="font-size:10.5px; line-height:1.35; color:#334155;">${renderedLines.join('')}</div>`;
+        } else if (vpnAppName) {
+            cemHtml = `<div style="font-size:10.5px; line-height:1.35; color:#334155;"><div style="margin-top:2px; padding:3px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:4px; font-weight:700; font-size:10.5px; display:inline-block;">⚠️ CẢNH BÁO VPN: Phát hiện thiết bị có dùng app ${escapeHtml(vpnAppName)}</div></div>`;
         }
 
         let displayStatus = (t.status || '--').trim();
@@ -1354,6 +1525,10 @@ function renderTicketsTable(force = false) {
             displayStatus = 'KHÓA GPRS';
         } else if (displayStatus.includes('HSS CHƯA CÓ 5G')) {
             displayStatus = 'HSS CHƯA CÓ 5G';
+        } else if (displayStatus.includes('PROFILE LẠ')) {
+            displayStatus = 'PROFILE LẠ';
+        } else if (displayStatus.includes('LỖI ỨNG DỤNG') || displayStatus.includes('ỨNG DỤNG')) {
+            displayStatus = 'LỖI ỨNG DỤNG';
         }
         let statusHtml = '';
         if (t.status && t.status !== '--' && t.status.trim() !== '') {
@@ -1372,6 +1547,22 @@ function renderTicketsTable(force = false) {
             if (mainCode.endsWith('.0') && !isNaN(Number(mainCode))) {
                 mainCode = mainCode.slice(0, -2);
             }
+            let procName = '';
+            let stepName = '';
+            for (let i = 1; i < codeLines.length; i++) {
+                const line = codeLines[i];
+                if (line.startsWith('[') && line.endsWith(']')) {
+                    procName = line;
+                } else if (!stepName) {
+                    stepName = line;
+                } else if (!procName) {
+                    procName = `[${line}]`;
+                }
+            }
+            if (!procName && t.process_name) procName = `[${t.process_name}]`;
+            if (!stepName && t.step_name) stepName = t.step_name;
+            if (procName && !procName.startsWith('[')) procName = `[${procName}]`;
+
             const extraLines = codeLines.slice(1);
             const extraHtml = extraLines.map(l => {
                 if (l.startsWith('[') && l.endsWith(']')) {
@@ -1402,12 +1593,45 @@ function renderTicketsTable(force = false) {
                         </div>
                     `;
 
+            let stepColor = '#475569';
+            let stepBg = '#f1f5f9';
+            let stepBorder = '#cbd5e1';
+            if (stepName) {
+                const sLower = stepName.toLowerCase();
+                if (stepName.includes('2.6') || sLower.includes('đóng')) {
+                    stepColor = '#15803d';
+                    stepBg = '#dcfce7';
+                    stepBorder = '#86efac';
+                } else if (stepName.includes('2.4') || sLower.includes('phối hợp')) {
+                    stepColor = '#b45309';
+                    stepBg = '#fef3c7';
+                    stepBorder = '#fde68a';
+                }
+            }
+
             compactTicketCodeHtml = `
-                        <div style="display:inline-flex; align-items:center; gap:3px; max-width:100%;" class="compact-ellipsis">
-                            <span style="color:#0f172a; font-weight:700; font-size:11px;">
-                                ${escapeHtml(mainCode)}
-                            </span>
-                            ${reopenCount > 0 ? `<span class="badge-status" style="background:#fee2e2; color:#dc2626; border:1px solid #f87171; font-weight:800; font-size:9px; padding:1px 3px; border-radius:3px;" title="Mở lại ${reopenCount} lần">Lại: ${reopenCount}L</span>` : ''}
+                        <div style="display:flex; flex-direction:column; justify-content:center; gap:2px; padding:2px 0; min-width:155px;">
+                            <!-- Dòng 1: Mã phiếu trọn vẹn + Reopen badge -->
+                            <div style="display:flex; align-items:center; gap:5px; line-height:1.2; white-space:nowrap;">
+                                <span style="color:#0f172a; font-weight:700; font-size:11.5px; font-family:'JetBrains Mono', monospace; white-space:nowrap; letter-spacing:-0.2px;" title="Mã phiếu: ${escapeHtml(mainCode)}">
+                                    ${escapeHtml(mainCode)}
+                                </span>
+                                ${reopenCount > 0 ? `<span class="badge-status" style="background:#fee2e2; color:#dc2626; border:1px solid #f87171; font-weight:800; font-size:9px; padding:1px 4px; border-radius:3px; white-space:nowrap;" title="Mở lại ${reopenCount} lần">Lại: ${reopenCount}L</span>` : ''}
+                            </div>
+                            <!-- Dòng 2: Tên Quy trình -->
+                            <div style="line-height:1.2; white-space:nowrap;">
+                                ${procName 
+                                    ? `<span style="font-size:9.5px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:3px; display:inline-block; max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:-apple-system, BlinkMacSystemFont, sans-serif;" title="Quy trình: ${escapeHtml(procName)}">${escapeHtml(procName)}</span>`
+                                    : `<span style="color:#94a3b8; font-size:10px; font-style:italic;">--</span>`
+                                }
+                            </div>
+                            <!-- Dòng 3: Tên bước -->
+                            <div style="line-height:1.2; white-space:nowrap;">
+                                ${stepName 
+                                    ? `<span style="font-size:9.5px; font-weight:600; color:${stepColor}; background:${stepBg}; border:1px solid ${stepBorder}; padding:1px 5px; border-radius:3px; display:inline-block; max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:-apple-system, BlinkMacSystemFont, sans-serif;" title="Bước hiện tại: ${escapeHtml(stepName)}">${escapeHtml(stepName)}</span>`
+                                    : `<span style="color:#94a3b8; font-size:10px; font-style:italic;">--</span>`
+                                }
+                            </div>
                         </div>
                     `;
         }
@@ -1420,7 +1644,7 @@ function renderTicketsTable(force = false) {
             if (t.service_type === 'data') {
                 displayPakhType = 'Mobile Internet';
             } else if (t.service_type === 'voice_sms') {
-                displayPakhType = 'Thoại / SMS';
+                displayPakhType = 'Thoại/SMS/Gói/PA Khác';
             } else {
                 displayPakhType = '--';
             }
@@ -1456,18 +1680,16 @@ function renderTicketsTable(force = false) {
                                 </button>
                             </div>
                         </td>
-                        <td style="${ticketCodeDisplay} font-family:'JetBrains Mono', monospace; vertical-align:middle; padding:2px 4px;">
+                        <td style="${ticketCodeDisplay} font-family:'JetBrains Mono', monospace; vertical-align:middle; padding:2px 8px; white-space:nowrap;">
                             ${compactTicketCodeHtml}
                         </td>
                         <td style="vertical-align:middle; text-align:center; padding:2px 3px;">
                             <span class="badge-status ${badgeClass}" style="white-space:nowrap; font-size:10px; padding:2px 5px; font-weight:700;" title="${escapeHtml(fullStatus)}">${escapeHtml(displayStatus)}</span>
                         </td>
-                        <td style="vertical-align:middle; padding:2px 4px; white-space:nowrap;">
-                            <div class="compact-ellipsis">
-                                <a href="${btoolsUrl}" target="_blank" class="table-phone-link" title="Tra cứu BTools cho số ${t.phone}">
-                                    ${t.phone}
-                                </a>
-                            </div>
+                        <td style="vertical-align:middle; text-align:center; padding:2px 4px; white-space:nowrap;">
+                            <span style="font-family:'JetBrains Mono', monospace; font-weight:700; font-size:11.5px; color:#0f172a; letter-spacing:0.2px;">
+                                ${escapeHtml(t.phone)}
+                            </span>
                         </td>
                         <td style="vertical-align:middle; text-align:center; padding:2px 3px;">
                             ${compactPakhTypeHtml}
@@ -1485,11 +1707,22 @@ function renderTicketsTable(force = false) {
                         </td>
                         <td style="vertical-align:middle; padding:2px 4px;">
                             <div class="compact-ellipsis" style="font-size:10px; color:#475569;" title="${escapeHtml(t.cem_data || '--')}">
-                                ${(!t.cem_data || t.cem_data === '--' || t.cem_data.includes('Không có dữ liệu'))
-                ? `<span style="color:#94a3b8; font-family:'JetBrains Mono', monospace;">--</span>`
-                : (t.cem_data.trim().startsWith('Cell:')
-                    ? `<span style="font-family:'JetBrains Mono', monospace; font-weight:600; color:#0f172a;">${escapeHtml(t.cem_data.replace(/\n/g, ' ').trim())}</span>`
-                    : escapeHtml(t.cem_data.replace(/\n/g, ' ').trim()))}
+                                ${(() => {
+                let cleanCellText = '--';
+                if (t.cem_data && t.cem_data !== '--' && !t.cem_data.startsWith('Không có dữ liệu')) {
+                    const cParts = t.cem_data.split('\n')
+                        .map(l => l.trim())
+                        .filter(l => l.length > 0 && !l.includes('CẢNH BÁO VPN') && !l.toLowerCase().includes('vpn'));
+                    if (cParts.length > 0) cleanCellText = cParts.join(' ');
+                }
+                const cellSpan = cleanCellText !== '--'
+                    ? `<span style="font-family:'JetBrains Mono', monospace; font-weight:600; color:#0f172a;">${escapeHtml(cleanCellText)}</span>`
+                    : `<span style="color:#94a3b8; font-family:'JetBrains Mono', monospace;">--</span>`;
+                const vpnBadge = vpnAppName
+                    ? `<span style="display:inline-block; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:3px; font-weight:700; font-size:9.5px; padding:0 5px; margin-left:3px;" title="Cảnh báo đỏ: Thiết bị có cài đặt/dùng app VPN (${escapeHtml(vpnAppName)})">⚠️ VPN: ${escapeHtml(vpnAppName)}</span>`
+                    : '';
+                return cellSpan + ' ' + vpnBadge;
+            })()}
                             </div>
                         </td>
                         <td style="vertical-align:middle; padding:2px 4px;">
@@ -1527,13 +1760,19 @@ function renderTicketsTable(force = false) {
                                 <div class="detail-card">
                                     <div class="detail-card-title">
                                         <span>PROFILE & DỮ LIỆU CEM</span>
-                                        <a href="${btoolsUrl}" target="_blank" style="font-size:10.5px; color:#005baa; font-weight:700; text-decoration:none;">Xem BTools ↗</a>
+                                        <a href="http://10.155.42.218:8080/" target="_blank" style="font-size:10.5px; color:#005baa; font-weight:700; text-decoration:none;" title="Mở cổng tra cứu SAPC (10.155.42.218:8080)">SAPC ↗</a>
                                     </div>
                                     <div style="flex:1; overflow-y:auto; max-height:230px; font-size:11px; line-height:1.4;">
                                         <div style="margin-bottom:8px;">${pkgHtml}</div>
-                                        ${t.cem_data && t.cem_data !== '--' ? `
+                                        ${(t.cem_data && t.cem_data !== '--') || vpnAppName ? `
                                             <div style="border-top:1px dashed #cbd5e1; padding-top:6px; margin-top:6px;">
-                                                <strong style="color:#0f172a; font-size:11px;">Dữ liệu CEM:</strong>
+                                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                                                    <div style="display:flex; align-items:center; gap:6px;">
+                                                        <strong style="color:#0f172a; font-size:11px;">Dữ liệu CEM:</strong>
+                                                        <a href="https://cem.vnptmedia.vn/" target="_blank" style="font-size:10.5px; color:#0284c7; font-weight:700; text-decoration:none;" title="Mở cổng CEM (cem.vnptmedia.vn)">CEM ↗</a>
+                                                    </div>
+                                                    ${vpnAppName ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; font-weight:700; font-size:9.5px; padding:1px 6px; border-radius:3px;">⚠️ CẢNH BÁO VPN: ${escapeHtml(vpnAppName)}</span>` : ''}
+                                                </div>
                                                 ${cemHtml}
                                             </div>
                                         ` : ''}
@@ -1630,6 +1869,11 @@ function manualCloseTicket(btnElem, phone, incidentTime) {
 async function closeTtsOldApiTicket(phone, incidentTime, btnElem) {
     if (btnElem && btnElem.disabled) return;
 
+    if (currentService === 'voice_sms') {
+        alert("Phiếu thuộc loại PAKH khác (Thoại / SMS / Gói cước / CVQT), tuyệt đối không đóng qua API! Vui lòng bấm 'Đóng thủ công'.");
+        return;
+    }
+
     const session = getTtsAuthSession();
     if (!session || !session.token) {
         alert("Bạn cần đăng nhập tài khoản TTS của mình trước khi thực hiện thao tác đóng phiếu!");
@@ -1670,6 +1914,9 @@ async function closeTtsOldApiTicket(phone, incidentTime, btnElem) {
             })
         });
         const data = await res.json();
+        if (data.token && typeof setTtsAuthSession === 'function') {
+            setTtsAuthSession(data.token, { Id: data.user_id, HoTen: data.closed_by });
+        }
         if (data.success) {
             lastTicketsSignature = "";
             await loadTickets(true);
@@ -1681,7 +1928,11 @@ async function closeTtsOldApiTicket(phone, incidentTime, btnElem) {
                 await loadTickets(true);
                 await fetchStatus();
             } else {
-                alert(data.message || "Thao tác đóng phiếu thất bại.");
+                if (data.message && (data.message.includes('401') || data.message.includes('Authorization has been denied'))) {
+                    alert("⚠️ Phiên đăng nhập TTS Cũ đã hết hạn (401).\nVui lòng mở lại tab https://tts.vnpt.vn để đăng nhập lại, hoặc bấm vào biểu tượng 'TTS CŨ' trên thanh công cụ để đồng bộ token mới.");
+                } else {
+                    alert(data.message || "Thao tác đóng phiếu thất bại.");
+                }
                 if (btnElem) {
                     btnElem.disabled = false;
                     btnElem.innerHTML = originalHtml;
@@ -1843,16 +2094,24 @@ async function startTtsNewScan() {
 async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, reopenCount = 0) {
     if (btnElem && btnElem.disabled) return;
 
+    if (currentService === 'voice_sms') {
+        alert("Phiếu thuộc loại PAKH khác (Thoại / SMS / Gói cước / CVQT), tuyệt đối không đóng qua API! Vui lòng bấm 'Đóng thủ công'.");
+        return;
+    }
+
     const rCount = parseInt(reopenCount || 0, 10);
     if (rCount > 0) {
         const confirmed = confirm(`CẢNH BÁO KTV:\nPhiếu ${ticketCode} (${phone}) có THÔNG TIN MỞ LẠI TTS: Số lần mở lại là ${rCount}!\n\nTheo quy định, phiếu này KHÔNG được phép tự động đóng mà yêu cầu KTV phải kiểm tra kỹ lưỡng.\nBạn có chắc chắn đã kiểm tra đầy đủ và muốn ĐÓNG THỦ CÔNG phiếu này không?`);
         if (!confirmed) return;
     }
 
-    const session = getTtsAuthSession();
-    if (!session || !session.token) {
-        alert("Bạn cần đăng nhập tài khoản TTS của mình trước khi thực hiện thao tác đóng phiếu!");
-        openConnectModal();
+    const session = getTtsAuthSession() || {};
+    const ttsNewToken = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+    const ttsNewUser = (typeof getTtsNewAuthUser === 'function') ? getTtsNewAuthUser() : null;
+
+    if (!ttsNewToken && !isSystemAdmin) {
+        alert("Bạn cần đồng bộ phiên TTS Mới (tts.vnptnet.vn) của mình trước khi thực hiện thao tác đóng phiếu!");
+        openTtsNewModal();
         return;
     }
 
@@ -1885,9 +2144,9 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
                 comment: commentVal,
                 action_plan: actionPlanVal,
                 force: (rCount > 0),
-                token: session.token,
-                user_id: session.userId || 0,
-                user_name: session.displayName || session.username || "Kỹ thuật viên"
+                token: ttsNewToken || "",
+                user_id: (ttsNewUser ? ttsNewUser.userId : null) || 0,
+                user_name: (ttsNewUser ? (ttsNewUser.displayName || ttsNewUser.username) : null) || "Kỹ thuật viên"
             })
         });
         const data = await res.json();
@@ -1916,6 +2175,16 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
 
 async function triggerTtsNewAutoCloseAll(btnElem) {
     if (btnElem && btnElem.disabled) return;
+
+    const ttsNewToken = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+    const ttsNewUser = (typeof getTtsNewAuthUser === 'function') ? getTtsNewAuthUser() : null;
+
+    if (!ttsNewToken && !isSystemAdmin) {
+        alert("Bạn cần đồng bộ phiên TTS Mới (tts.vnptnet.vn) của mình trước khi thực hiện đóng tự động!");
+        openTtsNewModal();
+        return;
+    }
+
     if (!confirm("Xác nhận tự động xử lý đóng tất cả phiếu Mobile Internet đủ điều kiện trên TTS Mới?")) {
         return;
     }
@@ -1927,7 +2196,15 @@ async function triggerTtsNewAutoCloseAll(btnElem) {
     }
 
     try {
-        const res = await fetch('/api/ttsnew/close_all', { method: 'POST' });
+        const res = await fetch('/api/ttsnew/close_all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                token: ttsNewToken || "",
+                user_id: (ttsNewUser ? ttsNewUser.userId : null) || 0,
+                user_name: (ttsNewUser ? (ttsNewUser.displayName || ttsNewUser.username) : null) || "Kỹ thuật viên"
+            })
+        });
         const data = await res.json();
         if (data.success) {
             await fetchStatus();
@@ -2005,6 +2282,38 @@ async function openTtsNewTicketDetail(ticketCode, phone, incidentTime, btnElem) 
     }
 }
 
+async function manualCloseTtsNewTicket(ticketCode, phone, incidentTime, btnElem) {
+    const cleanCode = (ticketCode || '').split('\n')[0].trim();
+    // Copy mã phiếu vào clipboard để KTV tiện tìm kiếm / dán trên TTS Mới
+    if (cleanCode && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(cleanCode).catch(() => {});
+    }
+
+    // Chuyển qua trang chi tiết phiếu PAKH của TTS Mới trong tab mới
+    window.open('https://tts.vnptnet.vn/tts/ticket/quan-ly-phieu/chi-tiet-phieu-pakh', '_blank');
+
+    // Đồng thời gọi API backend để nếu máy chủ đang chạy Chrome CDP thì tự động đưa tab đến phiếu đó
+    try {
+        fetch('/api/ttsnew/open_detail', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticket_code: cleanCode, phone, incident_time: incidentTime })
+        }).catch(() => {});
+    } catch (e) {}
+}
+
+async function manualCloseTtsOldTicket(phone, ticketCode, btnElem) {
+    const cleanCode = (ticketCode || '').split('\n')[0].trim();
+    const textToCopy = phone || cleanCode;
+    // Copy SĐT vào clipboard để KTV tiện tìm kiếm trên TTS Cũ
+    if (textToCopy && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(textToCopy).catch(() => {});
+    }
+
+    // Chuyển qua trang Xử lý sự cố của TTS Cũ trong tab mới
+    window.open('https://tts.vnpt.vn/#/xl-xu-ly-su-co/xu-ly-su-co-new', '_blank');
+}
+
 async function updateTicket(phone, incidentTime, field, value) {
     try {
         const res = await fetch('/api/tickets/update', {
@@ -2054,8 +2363,24 @@ async function startAutomation(engine = 'selenium') {
 }
 
 async function stopAutomation() {
-    await fetch('/api/stop', { method: 'POST' });
-    fetchStatus();
+    window.isToggleInProgress = true;
+    const btnToggle = document.getElementById('btnToggleUnified');
+    const lblToggle = document.getElementById('lblToggleUnified');
+    if (btnToggle) {
+        btnToggle.disabled = true;
+        btnToggle.style.opacity = '0.75';
+        if (lblToggle) lblToggle.innerText = 'Đang dừng...';
+    }
+    try {
+        await fetch('/api/stop', { method: 'POST' });
+    } catch (e) {
+        console.error("Lỗi dừng:", e);
+    } finally {
+        setTimeout(async () => {
+            window.isToggleInProgress = false;
+            await fetchStatus();
+        }, 500);
+    }
 }
 
 async function runNow() {
@@ -2111,9 +2436,9 @@ function updateScopeSummaryLabel(scopes) {
     } else if (len === 1) {
         const nameMap = {
             'tts_old_data': 'TTS Cũ (Data)',
-            'tts_old_voice': 'TTS Cũ (Thoại)',
+            'tts_old_voice': 'TTS Cũ (Thoại/SMS/Gói/PA Khác)',
             'tts_new_data': 'TTS Mới (Data)',
-            'tts_new_voice': 'TTS Mới (Thoại)'
+            'tts_new_voice': 'TTS Mới (Thoại/SMS/Gói/PA Khác)'
         };
         lbl.innerText = `Quét: ${nameMap[scopes[0]] || scopes[0]}`;
     } else {
@@ -2180,37 +2505,97 @@ async function handleAutoCloseModeChange(mode) {
     }
 }
 
+function toggleLoopOption(isChecked) {
+    const inp = document.getElementById('inpIntervalUnified');
+    const lbl = document.getElementById('lblIntervalMinutes');
+    const pillCd = document.getElementById('pillCountdown');
+    if (inp) {
+        inp.disabled = !isChecked;
+        inp.style.opacity = isChecked ? '1' : '0.4';
+    }
+    if (lbl) {
+        lbl.style.opacity = isChecked ? '1' : '0.4';
+    }
+    if (pillCd) {
+        pillCd.style.opacity = isChecked ? '1' : '0.4';
+    }
+}
+
+async function toggleUnifiedAutomation() {
+    if (window.isToggleInProgress) return;
+    const isRunningNow = isRunning || (window.currentServerStatus === 'PROCESSING') || (window.currentServerStatus === 'WAITING');
+    if (isRunningNow) {
+        await stopAutomation();
+    } else {
+        await startUnifiedAutomation();
+    }
+}
+
 async function startUnifiedAutomation() {
+    window.isToggleInProgress = true;
     const scopes = getSelectedScopes();
     const chkAutoClose = document.getElementById('chkAutoCloseUnified');
-    const autoClose = chkAutoClose ? chkAutoClose.checked : true;
+    // Máy Client chỉ được phép quét & tiền kiểm, vô hiệu hóa tự đóng phiếu
+    const autoClose = isSystemAdmin ? (chkAutoClose ? chkAutoClose.checked : false) : false;
     const autoCloseMode = autoClose ? 'all' : 'none';
+    const chkLoop = document.getElementById('chkLoopUnified');
+    const isLoop = chkLoop ? chkLoop.checked : true;
     const inpInterval = document.getElementById('inpIntervalUnified');
     const interval = inpInterval ? (parseInt(inpInterval.value) || 15) : 15;
 
-    await fetch('/api/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            scan_scopes: scopes,
-            auto_close: autoClose,
-            auto_close_mode: autoCloseMode,
-            interval_minutes: interval
-        })
-    });
-    fetchStatus();
+    const btnToggle = document.getElementById('btnToggleUnified');
+    const lblToggle = document.getElementById('lblToggleUnified');
+    if (btnToggle) {
+        btnToggle.disabled = true;
+        btnToggle.style.opacity = '0.75';
+        if (lblToggle) lblToggle.innerText = 'Đang bật...';
+    }
+
+    try {
+        if (isLoop) {
+            // Chạy chu kỳ lặp tự động (Worker lập tức quét ngay chu kỳ 1)
+            const res = await fetch('/api/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    scan_scopes: scopes,
+                    auto_close: autoClose,
+                    auto_close_mode: autoCloseMode,
+                    interval_minutes: interval
+                })
+            });
+            const data = await res.json();
+            if (!data.success && data.error) {
+                alert("⚠️ " + data.error);
+            }
+        } else {
+            // Không lặp: Quét ngay lập tức 1 lần (One-off scan)
+            const res = await fetch('/api/run-now', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    scan_scopes: scopes,
+                    auto_close: autoClose,
+                    auto_close_mode: autoCloseMode
+                })
+            });
+            const data = await res.json();
+            if (!data.success && data.message) {
+                alert("⚠️ " + data.message);
+            }
+        }
+    } catch (e) {
+        alert("Lỗi kết nối khi bắt đầu quét: " + e);
+    } finally {
+        setTimeout(async () => {
+            window.isToggleInProgress = false;
+            await fetchStatus();
+        }, 500);
+    }
 }
 
-async function runNowUnified() {
-    const scopes = getSelectedScopes();
-    await fetch('/api/run-now', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scan_scopes: scopes })
-    });
-    fetchStatus();
-    setTimeout(() => loadTickets(true), 3000);
-}
+// Alias tương thích
+const runNowUnified = startUnifiedAutomation;
 
 function exportExcel() {
     window.location.href = '/api/export_excel';
@@ -2256,6 +2641,13 @@ function setTtsAuthSession(token, userInfo) {
     } else {
         localStorage.setItem('tts_auth_user', String(userInfo || ''));
     }
+    try {
+        fetch('/api/session/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token.trim(), user: (typeof userInfo === 'object' ? userInfo : { TaiKhoan: userInfo, HoTen: userInfo }) })
+        }).catch(() => { });
+    } catch (e) { }
 }
 
 function clearTtsAuthSession() {
@@ -2283,92 +2675,155 @@ function clearTtsAuthSession() {
     }
 }
 
-function switchConnectTab(tab) {
-    const tabBm = document.getElementById('tabContentBm');
-    const tabManual = document.getElementById('tabContentManual');
-    const btnBm = document.getElementById('tabBtnBm');
-    const btnManual = document.getElementById('tabBtnManual');
-
-    if (tab === 'bm') {
-        if (tabBm) tabBm.style.display = 'block';
-        if (tabManual) tabManual.style.display = 'none';
-        if (btnBm) btnBm.className = 'connect-tab-btn active';
-        if (btnManual) btnManual.className = 'connect-tab-btn';
-    } else {
-        if (tabBm) tabBm.style.display = 'none';
-        if (tabManual) tabManual.style.display = 'block';
-        if (btnBm) btnBm.className = 'connect-tab-btn';
-        if (btnManual) btnManual.className = 'connect-tab-btn active';
+// ---------------------------------------------------------------------
+// TTS MỚI (tts.vnptnet.vn) TOKEN & IDENTITY HELPERS
+// ---------------------------------------------------------------------
+function parseJwt(token) {
+    try {
+        if (!token) return null;
+        const clean = token.replace(/^Bearer\s+/i, '').trim();
+        const parts = clean.split('.');
+        if (parts.length < 2) return null;
+        const base64Url = parts[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(function (c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        return JSON.parse(jsonPayload);
+    } catch (e) {
+        return null;
     }
 }
 
-function openConnectModal() {
-    const session = getTtsAuthSession();
-    if (!session || !session.token) {
-        const welcomeModal = document.getElementById('welcomeTtsModal');
-        if (welcomeModal) {
-            welcomeModal.style.display = 'flex';
-            const uInp = document.getElementById('loginTtsUsername');
-            if (uInp) uInp.focus();
-            return;
+function getTtsNewAuthToken() {
+    try {
+        let tok = localStorage.getItem('ttsnew_auth_token') || '';
+        if (!tok) return '';
+        tok = tok.trim();
+        if (tok && !tok.startsWith('Bearer ')) {
+            tok = 'Bearer ' + tok;
         }
+        return tok;
+    } catch (e) {
+        return '';
     }
+}
 
-    const modal = document.getElementById('connectTtsModal');
+function getTtsNewAuthUser() {
+    try {
+        const uRaw = localStorage.getItem('ttsnew_auth_user');
+        if (uRaw) return JSON.parse(uRaw);
+        const tok = localStorage.getItem('ttsnew_auth_token') || '';
+        const parsed = parseJwt(tok);
+        if (parsed) {
+            const uInfo = parsed.userInfo || {};
+            return {
+                username: uInfo.userName || parsed.sub || 'KTV',
+                displayName: uInfo.name || uInfo.userName || parsed.sub || 'KTV',
+                userId: uInfo.userId || 0,
+                email: uInfo.email || ''
+            };
+        }
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function setTtsNewAuthToken(tok) {
+    if (!tok) return;
+    let clean = tok.trim();
+    if (!clean.startsWith('Bearer ') && clean.includes('.')) {
+        clean = 'Bearer ' + clean;
+    }
+    localStorage.setItem('ttsnew_auth_token', clean);
+    const parsed = parseJwt(clean);
+    let uObj = null;
+    if (parsed) {
+        const uInfo = parsed.userInfo || {};
+        uObj = {
+            username: uInfo.userName || parsed.sub || 'KTV',
+            displayName: uInfo.name || uInfo.userName || parsed.sub || 'KTV',
+            userId: uInfo.userId || 0,
+            email: uInfo.email || ''
+        };
+        localStorage.setItem('ttsnew_auth_user', JSON.stringify(uObj));
+    }
+    try {
+        fetch('/api/ttsnew/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: clean, user: uObj })
+        }).catch(() => { });
+    } catch (e) { }
+}
+
+function clearTtsNewAuthToken() {
+    localStorage.removeItem('ttsnew_auth_token');
+    localStorage.removeItem('ttsnew_auth_user');
+}
+
+function toggleWelcomeTtsPopup(event) {
+    if (event) event.stopPropagation();
+    const modal = document.getElementById('welcomeTtsModal');
     if (!modal) return;
-    modal.style.display = 'flex';
-
-    // Cập nhật Bookmarklet link với hostname động
-    const bmLink = document.getElementById('bmLink');
-    const dashOrigin = window.location.origin;
-    const bmCode = `javascript:(function(){try{var t=localStorage.getItem('scnntttoken')||'';var u=localStorage.getItem('userInfo')||'';if(!t){alert('Không tìm thấy phiên TTS! Vui lòng mở tts.vnpt.vn và đăng nhập tài khoản trước.');return;}var target='${dashOrigin}/?sync_token='+encodeURIComponent(t)+'&sync_user='+encodeURIComponent(u);window.location.href=target;}catch(e){alert('Lỗi: '+e.message);}})();`;
-    if (bmLink) {
-        bmLink.href = bmCode;
-    }
-
-    // Hiển thị thông tin phiên hiện tại (nếu có)
-    const curBox = document.getElementById('modalCurrentSessionBox');
-    if (session) {
-        if (curBox) {
-            curBox.style.display = 'block';
-            document.getElementById('curSessionUser').innerText = `${session.displayName} (${session.username})`;
-            document.getElementById('curSessionToken').innerText = session.token.substring(0, 16) + '...';
-        }
+    if (modal.style.display === 'block') {
+        closeWelcomeTtsModal();
     } else {
-        if (curBox) curBox.style.display = 'none';
+        closeTtsNewModal();
+        openWelcomeTtsModal();
     }
 }
 
-function closeConnectModal() {
-    const modal = document.getElementById('connectTtsModal');
-    if (modal) modal.style.display = 'none';
-}
+function openWelcomeTtsModal() {
+    const modal = document.getElementById('welcomeTtsModal');
+    if (!modal) return;
+    modal.style.display = 'block';
 
-function copyBookmarkletCode() {
-    const dashOrigin = window.location.origin;
-    const bmCode = `javascript:(function(){try{var t=localStorage.getItem('scnntttoken')||'';var u=localStorage.getItem('userInfo')||'';if(!t){alert('Không tìm thấy phiên TTS! Vui lòng đăng nhập tts.vnpt.vn trước.');return;}var target='${dashOrigin}/?sync_token='+encodeURIComponent(t)+'&sync_user='+encodeURIComponent(u);window.location.href=target;}catch(e){alert('Lỗi: '+e.message);}})();`;
-    navigator.clipboard.writeText(bmCode).then(() => {
-        alert("Đã sao chép mã Bookmarklet vào bộ nhớ tạm! Bạn có thể dán vào thanh địa chỉ (URL) hoặc Bookmark trên trình duyệt.");
-    }).catch(err => {
-        prompt("Sao chép mã sau:", bmCode);
-    });
-}
+    const session = getTtsAuthSession();
+    const connBox = document.getElementById('ttsOldConnectedBox');
+    const s1 = document.getElementById('boxStep1Login');
+    const s2 = document.getElementById('boxStep2Otp');
 
-function saveManualToken() {
-    const tokenInp = document.getElementById('inpManualToken');
-    const userInp = document.getElementById('inpManualUser');
-    const token = tokenInp ? tokenInp.value.trim() : '';
-    const user = userInp ? userInp.value.trim() : 'Kỹ thuật viên';
-
-    if (!token) {
-        alert("Vui lòng nhập mã Token scnntttoken!");
-        return;
+    if (session && session.token) {
+        // ĐÃ ĐĂNG NHẬP -> CHỈ HIỆN KHUNG THÔNG TIN VÀ NÚT ĐĂNG XUẤT
+        if (connBox) connBox.style.display = 'flex';
+        const title = document.getElementById('ttsOldConnectedTitle');
+        const sub = document.getElementById('ttsOldConnectedSub');
+        const name = session.displayName || session.username || 'Kỹ thuật viên';
+        const uName = session.username || '--';
+        const idPart = session.userId ? ` (ID: ${session.userId})` : '';
+        if (title) title.innerText = `✅ Đã kết nối: ${name}`;
+        if (sub) sub.innerText = `Tài khoản: ${uName}${idPart} — Sẵn sàng ký nhận xử lý/đóng phiếu.`;
+        if (s1) s1.style.display = 'none';
+        if (s2) s2.style.display = 'none';
+    } else {
+        // CHƯA ĐĂNG NHẬP -> HIỆN FORM ĐĂNG NHẬP
+        if (connBox) connBox.style.display = 'none';
+        backToStep1Login();
+        const uInp = document.getElementById('loginTtsUsername');
+        if (uInp && !uInp.value) uInp.focus();
     }
+}
 
-    setTtsAuthSession(token, { TaiKhoan: user, HoTen: user });
-    closeConnectModal();
+function closeWelcomeTtsModal() {
+    const m = document.getElementById('welcomeTtsModal');
+    if (m) m.style.display = 'none';
+}
+
+function logoutTtsSession() {
+    clearTtsAuthSession();
+    openWelcomeTtsModal();
     applyUserSessionState();
-    alert(`Đã kết nối thành công tài khoản: ${user}!`);
+    updateServicesStatus();
+}
+
+// Giữ lại alias để tương thích
+function openConnectModal() {
+    openWelcomeTtsModal();
+}
+function closeConnectModal() {
+    closeWelcomeTtsModal();
 }
 
 async function syncServerTokenQuick() {
@@ -2376,16 +2831,27 @@ async function syncServerTokenQuick() {
         const res = await fetch('/api/current_user');
         if (res.ok) {
             const data = await res.json();
+            let gotAny = false;
             if (data.server_token) {
                 setTtsAuthSession(data.server_token, data.server_user || { TaiKhoan: "admin", HoTen: "Quản trị viên máy chủ" });
+                gotAny = true;
+            }
+            if (data.server_ttsnew_token) {
+                setTtsNewAuthToken(data.server_ttsnew_token);
+                gotAny = true;
+            }
+            if (gotAny) {
+                closeWelcomeTtsModal();
                 closeConnectModal();
+                closeTtsNewModal();
                 applyUserSessionState();
-                alert("Đã đồng bộ thành công Token từ máy chủ!");
+                updateServicesStatus();
+                alert("🎉 Đã kết nối thành công với phiên máy chủ (TTS Cũ & TTS Mới)!");
                 return;
             }
         }
     } catch (e) { }
-    alert("Máy chủ hiện chưa trích xuất được token từ trình duyệt.");
+    alert("Máy chủ hiện chưa trích xuất được phiên đăng nhập.");
 }
 
 let pollTtsInterval = null;
@@ -2409,15 +2875,6 @@ async function checkTtsTokenFromBrowser() {
     // 2. Nếu server không có, kiểm tra session đã lưu trong localStorage của trình duyệt hiện tại
     let session = getTtsAuthSession();
     if (session && session.token) {
-        // Bảo vệ: Nếu là client LAN (không phải Localhost) mà session lại chứa tài khoản admin máy chủ (quangvu)
-        // thì lập tức hủy bỏ để tránh nhận nhầm tài khoản của chủ máy!
-        const isLocal = serverData ? serverData.is_local : false;
-        if (!isLocal && (session.username === 'quangvu' || (session.displayName && session.displayName.includes('Quang Vũ')))) {
-            console.warn("Phát hiện session rò rỉ quangvu trên client LAN, tự động hủy bỏ.");
-            localStorage.removeItem('tts_auth_token');
-            localStorage.removeItem('tts_auth_user');
-            return null;
-        }
         return session;
     }
 
@@ -2481,10 +2938,14 @@ async function handleDirectLoginSubmit(e) {
                 msg.innerText = 'Đăng nhập thành công! Đang vào Dashboard...';
             }
             setTtsAuthSession(data.token, data.user);
+            if (data.ttsnew_token) {
+                setTtsNewAuthToken(data.ttsnew_token);
+            }
             setTimeout(() => {
                 const modal = document.getElementById('welcomeTtsModal');
                 if (modal) modal.style.display = 'none';
                 applyUserSessionState();
+                updateServicesStatus();
                 loadTickets(true);
             }, 500);
         } else if (data.otp_required) {
@@ -2583,11 +3044,15 @@ async function handleDirectOtpSubmit(e) {
                 msg.innerText = 'Xác thực OTP thành công! Đang vào Dashboard...';
             }
             setTtsAuthSession(data.token, data.user);
+            if (data.ttsnew_token) {
+                setTtsNewAuthToken(data.ttsnew_token);
+            }
             setTimeout(() => {
                 const modal = document.getElementById('welcomeTtsModal');
                 if (modal) modal.style.display = 'none';
                 backToStep1Login();
                 applyUserSessionState();
+                updateServicesStatus();
                 loadTickets(true);
             }, 500);
         } else {
@@ -2635,6 +3100,11 @@ function closeWelcomeModalAndEnter() {
     loadTickets(true);
 }
 
+function closeWelcomeTtsModal() {
+    const m = document.getElementById('welcomeTtsModal');
+    if (m) m.style.display = 'none';
+}
+
 function applyUserSessionState() {
     const session = getTtsAuthSession();
     currentAuthUser = session;
@@ -2645,12 +3115,14 @@ function applyUserSessionState() {
     const authRoleTag = document.getElementById('authRoleTag');
     const welcomeModal = document.getElementById('welcomeTtsModal');
 
+    // Không bao giờ khóa mờ màn hình (luôn xóa is-unauthenticated để KTV xem dữ liệu tự do)
+    document.body.classList.remove('is-unauthenticated');
+
     if (!session || !session.token) {
-        // CHƯA ĐĂNG NHẬP: HIỆN POPUP CHÀO MỪNG & KHÓA
+        // CHƯA ĐĂNG NHẬP TTS CŨ: HIỆN NÚT NHẮC TRÊN HEADER, KHÔNG TỰ BẬT POPUP KHÓA
         if (unauthBtn) unauthBtn.style.display = 'inline-flex';
         if (authPill) authPill.style.display = 'none';
-        if (welcomeModal) welcomeModal.style.display = 'flex';
-        document.body.classList.add('is-unauthenticated');
+        if (welcomeModal) welcomeModal.style.display = 'none';
     } else {
         // ĐÃ ĐĂNG NHẬP: VÀO TRANG, HIỂN THỊ XIN CHÀO
         if (unauthBtn) unauthBtn.style.display = 'none';
@@ -2661,14 +3133,32 @@ function applyUserSessionState() {
             authRoleTag.className = isSystemAdmin ? 'auth-role-tag admin' : 'auth-role-tag ktv';
         }
         if (welcomeModal) welcomeModal.style.display = 'none';
-        document.body.classList.remove('is-unauthenticated');
     }
 
     // Áp dụng vai trò (Admin vs KTV)
+    const chkAuto = document.getElementById('chkAutoCloseUnified');
+    const ctrlAuto = document.getElementById('ctrlAutoCloseUnified');
     if (isSystemAdmin) {
         document.body.classList.remove('role-operator');
+        if (chkAuto) chkAuto.disabled = false;
+        if (ctrlAuto) {
+            ctrlAuto.style.opacity = '1';
+            ctrlAuto.style.cursor = 'pointer';
+            ctrlAuto.style.pointerEvents = 'auto';
+            ctrlAuto.title = 'Tick chọn để tự động đóng phiếu khi đủ điều kiện';
+        }
     } else {
         document.body.classList.add('role-operator');
+        if (chkAuto) {
+            chkAuto.checked = false;
+            chkAuto.disabled = true;
+        }
+        if (ctrlAuto) {
+            ctrlAuto.style.opacity = '0.45';
+            ctrlAuto.style.cursor = 'not-allowed';
+            ctrlAuto.style.pointerEvents = 'none';
+            ctrlAuto.title = 'Chức năng Tự đóng đã bị vô hiệu hóa trên máy Client (chỉ Quét & Tiền kiểm)';
+        }
     }
 }
 
@@ -2685,7 +3175,15 @@ async function initUserSession() {
             parsedUser = { TaiKhoan: syncUser, HoTen: syncUser };
         }
         setTtsAuthSession(syncToken, parsedUser);
-        // Làm sạch URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    // 1b. Đọc tham số sync_ttsnew_token từ URL (từ Bookmarklet trên tts.vnptnet.vn)
+    const syncTtsNewToken = urlParams.get('sync_ttsnew_token');
+    if (syncTtsNewToken) {
+        setTtsNewAuthToken(syncTtsNewToken);
+        const u = getTtsNewAuthUser();
+        alert('🎉 Đã đồng bộ thành công phiên đăng nhập TTS Mới' + (u ? `: ${u.displayName}` : '!'));
         window.history.replaceState({}, document.title, window.location.pathname);
     }
 
@@ -2702,26 +3200,27 @@ async function initUserSession() {
 
     isSystemAdmin = serverData.is_local || urlParams.get('role') === 'admin';
 
-    // Cập nhật phiên mới nhất từ Chrome nếu đang ở máy chủ Localhost
-    if (serverData.is_local && serverData.has_server_token && serverData.server_token) {
-        setTtsAuthSession(serverData.server_token, serverData.server_user || { TaiKhoan: "admin", HoTen: "Quản trị viên (Server)" });
-    } else if (!serverData.is_local && !serverData.has_server_token) {
-        // Nếu là client LAN và máy chủ chưa nhận token của IP này,
-        // dọn sạch session 'quangvu' nếu trước đó client này từng vô tình lưu lại
-        const existing = getTtsAuthSession();
-        if (existing && (existing.username === 'quangvu' || (existing.displayName && existing.displayName.includes('Quang Vũ')))) {
-            localStorage.removeItem('tts_auth_token');
-            localStorage.removeItem('tts_auth_user');
+    // Chỉ máy chủ Localhost (Admin) mới tự động kết nối với Chrome đang mở trên máy chủ
+    if (serverData.is_local) {
+        if (serverData.server_token) {
+            setTtsAuthSession(serverData.server_token, serverData.server_user || { TaiKhoan: "admin", HoTen: "Quản trị viên" });
+        }
+        if (serverData.server_ttsnew_token) {
+            setTtsNewAuthToken(serverData.server_ttsnew_token);
+        }
+    } else {
+        // Đối với máy trạm LAN: phục hồi phiên KTV đã lưu trên server nếu có
+        if (serverData.token && !getTtsAuthSession()) {
+            setTtsAuthSession(serverData.token, serverData.user || { TaiKhoan: "KTV", HoTen: "Kỹ thuật viên" });
+        }
+        if (serverData.ttsnew_token && !getTtsNewAuthToken()) {
+            setTtsNewAuthToken(serverData.ttsnew_token);
         }
     }
 
-    // Hiển thị nút dùng nhanh phiên máy chủ nếu là Localhost có sẵn token
-    const serverQuickBox = document.getElementById('loginServerQuickBox');
-    if (serverQuickBox) {
-        serverQuickBox.style.display = (serverData.is_local && serverData.has_server_token) ? 'block' : 'none';
+    if (typeof updateTtsNewBookmarkletLink === 'function') {
+        updateTtsNewBookmarkletLink();
     }
-
-    applyUserSessionState();
 }
 
 // KHỞI CHẠY HỆ THỐNG
@@ -2753,10 +3252,13 @@ function toggleLiveLogDropdown(event, forceClose = false) {
         window.liveLogDismissed = true;
         window.lastSeenErrorCount = window.currentLiveErrCount || 0;
         const pillLog = document.getElementById('pillLiveLog');
-        const logTxt = document.getElementById('liveLogStatusText');
+        const logDot = document.getElementById('liveLogDot');
         const errBadge = document.getElementById('liveLogErrorBadge');
         if (pillLog) pillLog.classList.remove('has-error');
-        if (logTxt) logTxt.innerText = 'Bình thường';
+        if (logDot) {
+            logDot.className = 'svc-status-dot active';
+            logDot.style.backgroundColor = '#16a34a';
+        }
         if (errBadge) errBadge.style.display = 'none';
 
         const term = document.getElementById('logTerminal');
@@ -2769,14 +3271,17 @@ async function clearLocalLogs() {
     window.lastSeenErrorCount = 0;
     try {
         await fetch('/api/logs/clear', { method: 'POST' });
-    } catch (e) {}
+    } catch (e) { }
     const term = document.getElementById('logTerminal');
     if (term) term.innerHTML = '<div class="log-line" style="color:#64748b; font-style:italic;">Đã xóa toàn bộ nhật ký hệ thống...</div>';
     const pillLog = document.getElementById('pillLiveLog');
-    const logTxt = document.getElementById('liveLogStatusText');
+    const logDot = document.getElementById('liveLogDot');
     const errBadge = document.getElementById('liveLogErrorBadge');
     if (pillLog) pillLog.classList.remove('has-error');
-    if (logTxt) logTxt.innerText = 'Bình thường';
+    if (logDot) {
+        logDot.className = 'svc-status-dot active';
+        logDot.style.backgroundColor = '#16a34a';
+    }
     if (errBadge) errBadge.style.display = 'none';
 }
 
@@ -2789,5 +3294,320 @@ document.addEventListener('click', function (e) {
             dd.classList.remove('show');
             isLiveLogOpen = false;
         }
+    }
+});
+
+async function updateServicesStatus() {
+    const dotTtsOld = document.getElementById('dotTtsOld');
+    const dotTtsNew = document.getElementById('dotTtsNew');
+    const dotBtools = document.getElementById('dotBtools');
+    const dotCem = document.getElementById('dotCem');
+    const dotSapc = document.getElementById('dotSapc');
+
+    try {
+        const res = await fetch('/api/services/status');
+        const data = await res.json();
+        const svcs = (data && data.services) ? data.services : {};
+
+        // 1. TTS Cũ (Cá nhân KTV)
+        const session = (typeof getTtsAuthSession === 'function') ? getTtsAuthSession() : null;
+        const isTtsOldActive = !!(session && session.token) || (isSystemAdmin && svcs.tts_old);
+        if (dotTtsOld) {
+            dotTtsOld.className = 'svc-status-dot ' + (isTtsOldActive ? 'active' : 'inactive');
+            dotTtsOld.style.backgroundColor = isTtsOldActive ? '#16a34a' : '#ef4444';
+        }
+
+        // 2. TTS Mới (Cá nhân KTV)
+        const clientTtsNewTok = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+        const isTtsNewActive = !!clientTtsNewTok || (isSystemAdmin && svcs.tts_new);
+        if (dotTtsNew) {
+            dotTtsNew.className = 'svc-status-dot ' + (isTtsNewActive ? 'active' : 'inactive');
+            dotTtsNew.style.backgroundColor = isTtsNewActive ? '#16a34a' : '#ef4444';
+        }
+
+        // 3. BTools (Chỉ cần xanh và đỏ, khi rê chuột hiển thị Connected/Disconnected)
+        const isBtoolsActive = !!svcs.btools;
+        if (dotBtools) {
+            dotBtools.className = 'svc-status-dot ' + (isBtoolsActive ? 'active' : 'inactive');
+            dotBtools.style.backgroundColor = isBtoolsActive ? '#16a34a' : '#ef4444';
+            const pillBtools = document.getElementById('svcBtnBtools');
+            if (pillBtools) pillBtools.title = isBtoolsActive ? 'Connected' : 'Disconnected';
+        }
+
+        // 4. CEM (Chỉ cần xanh và đỏ, khi rê chuột hiển thị Connected/Disconnected)
+        const isCemActive = !!svcs.cem;
+        if (dotCem) {
+            dotCem.className = 'svc-status-dot ' + (isCemActive ? 'active' : 'inactive');
+            dotCem.style.backgroundColor = isCemActive ? '#16a34a' : '#ef4444';
+            const pillCem = document.getElementById('svcPillCem');
+            if (pillCem) pillCem.title = isCemActive ? 'Connected' : 'Disconnected';
+        }
+
+        // 5. SAPC (Chỉ cần xanh và đỏ, khi rê chuột hiển thị Connected/Disconnected)
+        const isSapcActive = !!svcs.sapc;
+        if (dotSapc) {
+            dotSapc.className = 'svc-status-dot ' + (isSapcActive ? 'active' : 'inactive');
+            dotSapc.style.backgroundColor = isSapcActive ? '#16a34a' : '#ef4444';
+            const pillSapc = document.getElementById('svcPillSapc');
+            if (pillSapc) pillSapc.title = isSapcActive ? 'Connected' : 'Disconnected';
+        }
+    } catch (e) {
+        console.warn('Lỗi kiểm tra trạng thái dịch vụ:', e);
+    }
+}
+
+function toggleTtsNewPopup(event) {
+    if (event) event.stopPropagation();
+    const m = document.getElementById('modalTtsNewSync');
+    if (!m) return;
+    if (m.style.display === 'block') {
+        closeTtsNewModal();
+    } else {
+        closeWelcomeTtsModal();
+        openTtsNewModal();
+    }
+}
+
+function openTtsNewModal() {
+    const m = document.getElementById('modalTtsNewSync');
+    if (!m) return;
+    m.style.display = 'block';
+
+    const tok = getTtsNewAuthToken();
+    const user = getTtsNewAuthUser();
+    const connBox = document.getElementById('ttsNewConnectedBox');
+    const s1 = document.getElementById('boxStep1TtsNewLogin');
+    const s2 = document.getElementById('boxStep2TtsNewOtp');
+
+    if (tok) {
+        // ĐÃ ĐĂNG NHẬP -> CHỈ HIỆN KHUNG THÔNG TIN VÀ NÚT ĐĂNG XUẤT
+        if (connBox) connBox.style.display = 'flex';
+        const title = document.getElementById('ttsNewConnectedTitle');
+        const sub = document.getElementById('ttsNewConnectedSub');
+        const name = (user && (user.displayName || user.username)) || 'Kỹ thuật viên';
+        const uName = (user && user.username) || '--';
+        const idPart = (user && user.userId) ? ` (ID: ${user.userId})` : '';
+        if (title) title.innerText = `✅ Đã kết nối: ${name}`;
+        if (sub) sub.innerText = `Tài khoản: ${uName}${idPart} — Sẵn sàng ký nhận xử lý/đóng phiếu.`;
+        if (s1) s1.style.display = 'none';
+        if (s2) s2.style.display = 'none';
+    } else {
+        // CHƯA ĐĂNG NHẬP -> HIỆN FORM ĐĂNG NHẬP
+        if (connBox) connBox.style.display = 'none';
+        backToStep1TtsNewLogin();
+        const uInp = document.getElementById('loginTtsNewUsername');
+        if (uInp && !uInp.value) uInp.focus();
+    }
+}
+
+function closeTtsNewModal() {
+    const m = document.getElementById('modalTtsNewSync');
+    if (m) m.style.display = 'none';
+}
+
+function logoutTtsNewSession() {
+    clearTtsNewAuthToken();
+    openTtsNewModal();
+    updateServicesStatus();
+}
+
+let currentTtsNewOtpSessionId = '';
+
+function toggleTtsNewPasswordVisibility() {
+    const pwd = document.getElementById('loginTtsNewPassword');
+    if (pwd) pwd.type = (pwd.type === 'password') ? 'text' : 'password';
+}
+
+function backToStep1TtsNewLogin() {
+    const s1 = document.getElementById('boxStep1TtsNewLogin');
+    const s2 = document.getElementById('boxStep2TtsNewOtp');
+    if (s1) s1.style.display = 'block';
+    if (s2) s2.style.display = 'none';
+    const btn = document.getElementById('btnDirectTtsNewLoginSubmit');
+    if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>ĐĂNG NHẬP TTS MỚI</span>';
+    }
+    const msg = document.getElementById('loginTtsNewStatusMsg');
+    if (msg) msg.style.display = 'none';
+}
+
+async function handleDirectTtsNewLoginSubmit(event) {
+    if (event) event.preventDefault();
+    const uInp = document.getElementById('loginTtsNewUsername');
+    const pInp = document.getElementById('loginTtsNewPassword');
+    const btn = document.getElementById('btnDirectTtsNewLoginSubmit');
+    const msg = document.getElementById('loginTtsNewStatusMsg');
+
+    const username = uInp ? uInp.value.trim() : '';
+    const password = pInp ? pInp.value.trim() : '';
+    if (!username || !password) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Vui lòng nhập tên đăng nhập và mật khẩu!';
+        }
+        return;
+    }
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = 'ĐANG XỬ LÝ...';
+    }
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0f9ff';
+        msg.style.color = '#0284c7';
+        msg.innerText = 'Đang kết nối xác thực với VNPT CAS (TTS Mới)...';
+    }
+
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, system: 'tts_new' })
+        });
+        const data = await res.json();
+
+        if (data.success && (data.ttsnew_token || data.token)) {
+            const tok = data.ttsnew_token || data.token;
+            setTtsNewAuthToken(tok);
+            if (msg) {
+                msg.style.background = '#f0fdf4';
+                msg.style.color = '#15803d';
+                msg.innerText = 'Đăng nhập TTS Mới thành công!';
+            }
+            setTimeout(() => {
+                closeTtsNewModal();
+                updateServicesStatus();
+            }, 600);
+        } else if (data.otp_required) {
+            currentTtsNewOtpSessionId = data.session_id;
+            const s1 = document.getElementById('boxStep1TtsNewLogin');
+            const s2 = document.getElementById('boxStep2TtsNewOtp');
+            if (s1) s1.style.display = 'none';
+            if (s2) s2.style.display = 'block';
+            const uLabel = document.getElementById('otpTtsNewUserLabel');
+            if (uLabel) uLabel.innerText = data.username || username;
+            const otpInp = document.getElementById('loginTtsNewOtp');
+            if (otpInp) { otpInp.value = ''; otpInp.focus(); }
+        } else {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerText = 'ĐĂNG NHẬP TTS MỚI';
+            }
+            if (msg) {
+                msg.style.background = '#fef2f2';
+                msg.style.color = '#dc2626';
+                msg.innerText = data.error || 'Đăng nhập thất bại. Kiểm tra lại thông tin!';
+            }
+        }
+    } catch (e) {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = 'ĐĂNG NHẬP TTS MỚI';
+        }
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Lỗi kết nối máy chủ: ' + e.message;
+        }
+    }
+}
+
+async function handleDirectTtsNewOtpSubmit(event) {
+    if (event) event.preventDefault();
+    const otpInp = document.getElementById('loginTtsNewOtp');
+    const btn = document.getElementById('btnDirectTtsNewOtpSubmit');
+    const msg = document.getElementById('loginTtsNewOtpStatusMsg');
+
+    const otpVal = otpInp ? otpInp.value.trim() : '';
+    if (!otpVal) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Vui lòng nhập mã OTP!';
+        }
+        return;
+    }
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = 'ĐANG XÁC THỰC OTP...';
+    }
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0f9ff';
+        msg.style.color = '#0284c7';
+        msg.innerText = 'Đang xác thực OTP với CAS, vui lòng chờ...';
+    }
+
+    try {
+        const res = await fetch('/api/login/otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: currentTtsNewOtpSessionId, otp: otpVal })
+        });
+        const data = await res.json();
+
+        if (data.success && (data.ttsnew_token || data.token)) {
+            const tok = data.ttsnew_token || data.token;
+            setTtsNewAuthToken(tok);
+            if (data.token && data.token !== tok && !data.token.startsWith('Bearer ')) {
+                setTtsAuthSession(data.token, data.user);
+                applyUserSessionState();
+                loadTickets(true);
+            }
+            if (msg) {
+                msg.style.background = '#f0fdf4';
+                msg.style.color = '#15803d';
+                msg.innerText = 'Xác thực OTP thành công! Đã kết nối TTS Mới.';
+            }
+            setTimeout(() => {
+                closeTtsNewModal();
+                backToStep1TtsNewLogin();
+                updateServicesStatus();
+            }, 600);
+        } else {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerText = 'XÁC NHẬN OTP';
+            }
+            if (msg) {
+                msg.style.background = '#fef2f2';
+                msg.style.color = '#dc2626';
+                msg.innerText = data.error || 'Mã OTP không chính xác hoặc đã hết hạn!';
+            }
+        }
+    } catch (e) {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = 'XÁC NHẬN OTP';
+        }
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Lỗi kết nối máy chủ: ' + e.message;
+        }
+    }
+}
+
+
+
+// Tự động kiểm tra trạng thái các dịch vụ (TTS Cũ, TTS Mới, BTools, CEM, SAPC)
+setTimeout(updateServicesStatus, 500);
+setInterval(updateServicesStatus, 25000);
+
+// Đóng popup TTS (cũ) và TTS (mới) khi click ra ngoài
+document.addEventListener('click', function (e) {
+    const wrapOld = document.getElementById('wrapperTtsOld');
+    if (wrapOld && !wrapOld.contains(e.target)) {
+        closeWelcomeTtsModal();
+    }
+    const wrapNew = document.getElementById('wrapperTtsNew');
+    if (wrapNew && !wrapNew.contains(e.target)) {
+        closeTtsNewModal();
     }
 });

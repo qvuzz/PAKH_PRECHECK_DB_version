@@ -33,14 +33,38 @@ def save_cached_auth(token: str, user_info: dict = None):
 
 
 def get_cached_auth() -> tuple:
-    """Đọc token và user_info từ file cache nếu còn hiệu lực."""
+    """Đọc token và user_info từ file cache hoặc lan_sessions.json nếu còn hiệu lực."""
+    # 1. Đọc từ file cache chính
     if TOKEN_CACHE_FILE.exists():
         try:
             with open(TOKEN_CACHE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data.get("token", ""), data.get("user_info", {})
+                tok = (data.get("token") or "").strip()
+                if tok:
+                    return tok, data.get("user_info", {})
         except Exception:
             pass
+
+    # 2. Fallback: Đọc từ lan_sessions.json
+    lan_file = BASE_DIR / "lan_sessions.json"
+    if lan_file.exists():
+        try:
+            with open(lan_file, "r", encoding="utf-8") as f:
+                sessions = json.load(f)
+            sorted_sessions = sorted(
+                sessions.values(),
+                key=lambda s: s.get("timestamp", 0),
+                reverse=True
+            )
+            for s in sorted_sessions:
+                tok = (s.get("token") or "").strip()
+                if tok:
+                    usr = s.get("user", {})
+                    save_cached_auth(tok, usr)
+                    return tok, usr
+        except Exception:
+            pass
+
     return "", {}
 
 
@@ -332,8 +356,10 @@ def close_tts_old_ticket_api(
     phan_hoi_ht = ticket.get("phan_hoi_he_thong") or ticket.get("PhanHoiHeThong") or 1
     id_he_thong = ticket.get("id_he_thong") or ticket.get("IdHeThong") or 0
 
-    # Nếu vẫn chưa có ticket_id hoặc id_yeu_cau, tự động tra cứu từ danh sách phiếu trên TTS API
-    if (not ticket_id or not id_yeu_cau) and token:
+    # Luôn tự động tra cứu lại từ TTS API để lấy phan_hoi_he_thong và id_he_thong chính xác
+    # (DB có thể lưu giá trị mặc định nếu phiếu được import từ lần quét cũ trước khi có 2 cột này)
+    need_api_sync = (not ticket_id or not id_yeu_cau or ticket.get("phan_hoi_he_thong") is None)
+    if token and need_api_sync:
         try:
             active_list = fetch_tts_old_tickets_api(token)
             clean_p = phone.replace("+84", "0").replace("84", "0", 1) if phone.startswith("84") else phone
@@ -341,11 +367,11 @@ def close_tts_old_ticket_api(
                 at_p = at.get("phone", "")
                 at_r = at.get("raw_phone", "")
                 if at_p == phone or at_r == phone or at_p == clean_p or at_r == clean_p or phone.endswith(at_r):
-                    ticket_id = at.get("ticket_id")
-                    id_yeu_cau = at.get("id_yeu_cau")
+                    ticket_id = at.get("ticket_id") or ticket_id
+                    id_yeu_cau = at.get("id_yeu_cau") or id_yeu_cau
                     ma_ccos = at.get("ma_ccos") or ma_ccos
-                    phan_hoi_ht = at.get("phan_hoi_he_thong") or phan_hoi_ht
-                    id_he_thong = at.get("id_he_thong") or id_he_thong
+                    phan_hoi_ht = at.get("phan_hoi_he_thong") if at.get("phan_hoi_he_thong") is not None else phan_hoi_ht
+                    id_he_thong = at.get("id_he_thong") if at.get("id_he_thong") is not None else id_he_thong
                     ticket["ticket_id"] = ticket_id
                     ticket["id_yeu_cau"] = id_yeu_cau
                     ticket["flow_id"] = id_yeu_cau
@@ -357,39 +383,65 @@ def close_tts_old_ticket_api(
                         update_ticket_field(phone, "flow_id", str(id_yeu_cau))
                         if ma_ccos:
                             update_ticket_field(phone, "ticket_code", ma_ccos)
+                        update_ticket_field(phone, "phan_hoi_he_thong", phan_hoi_ht)
+                        update_ticket_field(phone, "id_he_thong", id_he_thong)
                     except Exception:
                         pass
                     break
         except Exception as ex_sync:
             print(f"⚠️ Lỗi tự động tra cứu ticket_id cho {phone}: {ex_sync}")
 
-    if not ticket_id or not id_yeu_cau:
-        return False, f"Phiếu {phone} thiếu ticket_id hoặc id_yeu_cau để gọi API đóng."
+    if not token or not str(token).strip():
+        return False, "❌ Không thể đóng phiếu: Thiếu token xác thực 'scnntttoken' của TTS Cũ. Vui lòng đăng nhập trên trình duyệt!"
 
-    if dry_run:
-        return True, f"[DRY-RUN] Giả lập đóng phiếu API thành công cho {phone} (Id={ticket_id}, NguyenNhan={id_nguyen_nhan})."
-
-    headers = get_request_headers(token)
+    # Kiểm tra ticket_id & id_yeu_cau
+    try:
+        t_id = int(ticket_id) if ticket_id else 0
+    except Exception:
+        t_id = 0
 
     try:
-        t_id = int(ticket_id)
+        y_id = int(id_yeu_cau) if id_yeu_cau else 0
     except Exception:
-        t_id = ticket_id
+        y_id = 0
 
-    try:
-        y_id = int(id_yeu_cau)
-    except Exception:
-        y_id = id_yeu_cau
+    if not t_id or not y_id:
+        return False, f"❌ Không thể đóng phiếu {phone}: Thiếu định danh bắt buộc (ticket_id={ticket_id}, id_yeu_cau={id_yeu_cau})."
 
+    # Kiểm tra & lấy user_id (IdNhanVien)
     try:
         u_id = int(user_id) if user_id else 0
     except Exception:
         u_id = 0
 
+    if not u_id:
+        fresh_token, fresh_user = extract_token_from_browser()
+        if fresh_user and (fresh_user.get("Id") or fresh_user.get("id")):
+            u_id = int(fresh_user.get("Id") or fresh_user.get("id"))
+            if fresh_token:
+                token = fresh_token
+
+    if not u_id:
+        return False, f"❌ Không thể đóng phiếu {phone}: Thiếu thông tin người xử lý (IdNhanVien). Vui lòng đăng nhập tài khoản TTS Cũ trên trình duyệt Chrome/Firefox!"
+
+    # Kiểm tra nội dung đóng phiếu
+    clean_noi_dung = str(noi_dung or "").strip()
+    if not clean_noi_dung:
+        return False, f"❌ Không thể đóng phiếu {phone}: Nội dung đóng phiếu (comment/action_plan) đang bị trống!"
+
+    # Kiểm tra nguyên nhân đóng phiếu
     try:
         nn_id = int(id_nguyen_nhan) if id_nguyen_nhan else 1016
     except Exception:
         nn_id = 1016
+
+    if not nn_id:
+        return False, f"❌ Không thể đóng phiếu {phone}: Thiếu mã nguyên nhân đóng sự cố (IdNguyenNhan)."
+
+    if dry_run:
+        return True, f"[DRY-RUN] Giả lập đóng phiếu API thành công cho {phone} (Id={t_id}, NguyenNhan={nn_id}, User={u_id})."
+
+    headers = get_request_headers(token)
 
     # MaCCOS
     raw_ccos = ticket.get("ma_ccos") or ma_ccos or ""
@@ -419,7 +471,7 @@ def close_tts_old_ticket_api(
         "IdNhanVien": u_id,
         "IdYeuCau": y_id,
         "IdNguyenNhan": nn_id,
-        "NoiDung": noi_dung,
+        "NoiDung": clean_noi_dung,
         "Op": 0,
         "MaCCOS": clean_ccos,
         "PhanHoiHeThong": clean_ph,
@@ -428,6 +480,17 @@ def close_tts_old_ticket_api(
 
     try:
         res1 = requests.post(url_step1, headers=headers, json=payload_step1, timeout=15)
+        if res1.status_code == 401:
+            # Token hết hạn hoặc không hợp lệ -> tự động thử lấy token mới từ trình duyệt và retry
+            fresh_token, fresh_user = extract_token_from_browser()
+            if fresh_token and fresh_token != token:
+                token = fresh_token
+                headers = get_request_headers(token)
+                if not u_id and fresh_user and fresh_user.get("Id"):
+                    u_id = int(fresh_user["Id"])
+                    payload_step1["IdNhanVien"] = u_id
+                res1 = requests.post(url_step1, headers=headers, json=payload_step1, timeout=15)
+
         if res1.status_code != 200:
             return False, f"Lỗi gọi luu_CapNhatTrangThaiPhieu (status {res1.status_code}): {res1.text[:200]}"
         data1 = res1.json()

@@ -1,12 +1,14 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VNPT TTS Precheck — Hệ thống tiền kiểm phản ánh khách hàng</title>
     <link rel="icon" type="image/svg+xml" href="/vnpt-logo.svg">
-    <link rel="stylesheet" href="/static/css/dashboard.css?v=1.6">
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=2.1">
 </head>
+
 <body>
 
     <header>
@@ -20,132 +22,281 @@
             <!-- WIDGET XÁC THỰC TÀI KHOẢN TTS -->
             <div id="userSessionWidget" style="display:flex; align-items:center;">
                 <!-- Trạng thái 1: Chưa đăng nhập TTS -->
-                <button id="unauthBtn" class="auth-pill unauth" onclick="openConnectModal()" title="Bấm để đăng nhập / kết nối tài khoản TTS của bạn">
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                <button id="unauthBtn" class="auth-pill unauth" onclick="openWelcomeTtsModal()"
+                    title="Bấm để đăng nhập / kết nối tài khoản TTS của bạn">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"
+                        style="margin-right:2px;">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
                     <span>&lt;Bạn cần đăng nhập TTS trước&gt;</span>
                 </button>
                 <!-- Trạng thái 2: Đã đăng nhập TTS -->
                 <div id="authPill" class="auth-pill auth" style="display:none;">
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="cursor:pointer; color:#005baa;" onclick="openConnectModal()" title="Xem thông tin phiên"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                    <span id="authUserName" style="cursor:pointer; font-size:12px; font-weight:600; color:#0f172a;" onclick="openConnectModal()" title="Xem thông tin phiên">Xin chào, Kỹ thuật viên</span>
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"
+                        style="cursor:pointer; color:#005baa;" onclick="openWelcomeTtsModal()"
+                        title="Xem thông tin phiên">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                    <span id="authUserName" style="cursor:pointer; font-size:12px; font-weight:600; color:#0f172a;"
+                        onclick="openWelcomeTtsModal()" title="Xem thông tin phiên">Xin chào, Kỹ thuật viên</span>
                     <span class="auth-role-tag ktv" id="authRoleTag">KTV</span>
-                    <button class="btn-auth-logout" onclick="event.stopPropagation(); clearTtsAuthSession();" title="Đăng xuất khỏi phiên hiện tại">Thoát</button>
+                    <button class="btn-auth-logout" onclick="event.stopPropagation(); clearTtsAuthSession();"
+                        title="Đăng xuất khỏi phiên hiện tại">Thoát</button>
                 </div>
             </div>
 
-            <div class="system-pill" id="headerSystemPill">
-                <div id="statusDot" class="status-dot"></div>
-                <span id="statusText">Tiến trình: Đã dừng</span>
-                <span class="ctrl-admin-only" style="color:#cbd5e1; margin:0 3px;">•</span>
-                <span id="headerModeTag" class="ctrl-admin-only" style="font-weight:600; font-size:12px; color:#15803d;" title="Chế độ xử lý đóng phiếu khi quét tự động">Chế độ: Tự động đóng</span>
+            <!-- CÁC DỊCH VỤ LIÊN KẾT: TTS (cũ), TTS (mới), BTools, CEM, SAPC -->
+            <div id="servicesStatusGroup" class="services-status-group" style="position:relative;">
+                <!-- NÚT & DROPDOWN POPUP TTS (CŨ) -->
+                <div id="wrapperTtsOld" style="position:relative; display:inline-block;">
+                    <button type="button" id="svcBtnTtsOld" class="svc-status-pill"
+                        onclick="toggleWelcomeTtsPopup(event)" title="TTS (cũ)">
+                        <span id="dotTtsOld" class="svc-status-dot inactive"></span>
+                        <span class="svc-name">TTS (cũ)</span>
+                    </button>
+
+                    <!-- POPUP GỌN NGAY DƯỚI NÚT TTS CŨ -->
+                    <div id="welcomeTtsModal"
+                        style="display:none; position:absolute; top:calc(100% + 8px); right:0; width:330px; background:#ffffff; border-radius:10px; box-shadow:0 10px 30px rgba(0,75,150,0.22), 0 2px 8px rgba(0,0,0,0.08); padding:16px 14px; text-align:left; border:1px solid #bfdbfe; z-index:10000;"
+                        onclick="event.stopPropagation()">
+                        <button type="button" onclick="closeWelcomeTtsModal()"
+                            style="position:absolute; right:8px; top:8px; border:none; background:transparent; font-size:16px; color:#94a3b8; cursor:pointer; padding:2px 6px; line-height:1;"
+                            title="Đóng">✕</button>
+
+                        <div style="text-align:center; margin-bottom:12px;">
+                            <img src="/vnpt-logo-horizontal.svg" alt="VNPT Logo"
+                                style="height:30px; display:inline-block; vertical-align:middle;">
+                            <div
+                                style="font-size:11px; font-weight:700; color:#005baa; margin-top:4px; letter-spacing:0.5px;">
+                                HỆ THỐNG TTS CŨ (tts.vnpt.vn)</div>
+                        </div>
+
+                        <!-- KHUNG THÔNG TIN KHI ĐÃ ĐĂNG NHẬP -->
+                        <div id="ttsOldConnectedBox"
+                            style="display:none; padding:10px 12px; border-radius:8px; background:#dcfce7; border:1px solid #86efac; color:#166534; align-items:center; justify-content:space-between; gap:8px;">
+                            <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+                                <span
+                                    style="width:8px; height:8px; border-radius:50%; background:#16a34a; display:inline-block; flex-shrink:0;"></span>
+                                <div style="min-width:0;">
+                                    <div id="ttsOldConnectedTitle"
+                                        style="font-weight:700; font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                        ✅ Đã kết nối: KTV</div>
+                                    <div id="ttsOldConnectedSub"
+                                        style="font-size:11px; opacity:0.9; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                        Tài khoản: --</div>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-danger" onclick="logoutTtsSession()"
+                                style="background:#dc2626; color:#ffffff; border:none; border-radius:4px; padding:5px 10px; font-size:11.5px; font-weight:700; cursor:pointer; white-space:nowrap; flex-shrink:0;">Đăng
+                                xuất</button>
+                        </div>
+
+                        <!-- BƯỚC 1: FORM ĐĂNG NHẬP (Ẩn khi đã kết nối) -->
+                        <div id="boxStep1Login">
+                            <form id="directLoginForm" onsubmit="handleDirectLoginSubmit(event)"
+                                style="display:flex; flex-direction:column; gap:10px;">
+                                <div style="position:relative;">
+                                    <input type="text" id="loginTtsUsername" class="control-input"
+                                        style="width:100%; box-sizing:border-box; height:38px; padding:6px 12px; font-size:13px; font-weight:600; color:#1e293b; background-color:#ffffcc !important; border:1px solid #b8cde0; border-radius:6px; outline:none;"
+                                        placeholder="Tên truy nhập (ví dụ: nguyenvana.hni)" autocomplete="username"
+                                        required>
+                                </div>
+                                <div style="position:relative;">
+                                    <input type="password" id="loginTtsPassword" class="control-input"
+                                        style="width:100%; box-sizing:border-box; height:38px; padding:6px 36px 6px 12px; font-size:13px; color:#1e293b; background-color:#ffffcc !important; border:1px solid #b8cde0; border-radius:6px; outline:none;"
+                                        placeholder="Mật khẩu" autocomplete="current-password" required>
+                                    <span onclick="togglePasswordVisibility()"
+                                        style="position:absolute; right:10px; top:50%; transform:translateY(-50%); cursor:pointer; color:#64748b; user-select:none; display:flex; align-items:center;"
+                                        title="Hiện/Ẩn mật khẩu">
+                                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                            <circle cx="12" cy="12" r="3"></circle>
+                                        </svg>
+                                    </span>
+                                </div>
+                                <div id="loginTtsStatusMsg"
+                                    style="display:none; padding:6px 10px; border-radius:6px; font-size:11.5px; line-height:1.4;">
+                                </div>
+                                <button type="submit" id="btnDirectLoginSubmit"
+                                    style="width:100%; height:38px; background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; border:none; border-radius:6px; cursor:pointer; box-shadow:0 2px 5px rgba(13, 113, 220, 0.3); display:flex; justify-content:center; align-items:center;">
+                                    <span>ĐĂNG NHẬP</span>
+                                </button>
+                            </form>
+                            <div id="ttsOldHelpInfo"
+                                style="margin-top:12px; font-size:11px; line-height:1.5; color:#475569; border-top:1px solid #eef3f8; padding-top:10px;">
+                                <div>- Hỗ trợ Email: <b style="color:#d90429;">1800 1555 Nhánh 3</b></div>
+                                <div>- Quên MK soạn: <b>MK&lt;khoảng cách&gt;&lt;Tên truy nhập&gt;</b> gửi <b>293</b>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- BƯỚC 2: FORM XÁC THỰC OTP -->
+                        <div id="boxStep2Otp" style="display:none;">
+                            <div style="text-align:center; margin-bottom:10px;">
+                                <div style="font-size:12.5px; color:#334155;">Xin chào: <b id="otpUserLabel"
+                                        style="color:#0f172a;">quangvu</b></div>
+                                <div style="font-size:12px; font-weight:600; color:#1e293b; margin-top:2px;">Nhập mã xác
+                                    thực OTP</div>
+                            </div>
+                            <form id="directOtpForm" onsubmit="handleDirectOtpSubmit(event)"
+                                style="display:flex; flex-direction:column; gap:10px;">
+                                <input type="text" id="loginTtsOtp" class="control-input"
+                                    style="width:100%; box-sizing:border-box; height:38px; padding:6px 12px; font-size:16px; font-weight:700; color:#005baa; text-align:center; letter-spacing:3px; background:#ffffff; border:1px solid #94a3b8; border-radius:6px; outline:none;"
+                                    placeholder="" autocomplete="one-time-code">
+                                <div id="loginOtpStatusMsg"
+                                    style="display:none; padding:6px 10px; border-radius:6px; font-size:11.5px; line-height:1.4;">
+                                </div>
+                                <button type="submit" id="btnDirectOtpSubmit"
+                                    style="width:100%; height:38px; background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; font-size:13px; font-weight:800; text-transform:uppercase; border:none; border-radius:6px; cursor:pointer; box-shadow:0 2px 5px rgba(13, 113, 220, 0.3); display:flex; justify-content:center; align-items:center;">
+                                    <span>XÁC NHẬN OTP</span>
+                                </button>
+                            </form>
+                            <div style="text-align:center; margin-top:10px;">
+                                <a href="javascript:void(0)" onclick="backToStep1Login()"
+                                    style="font-size:11px; color:#64748b; text-decoration:none;">← Quay lại đăng nhập
+                                    tài khoản khác</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NÚT & DROPDOWN POPUP TTS (MỚI) -->
+                <div id="wrapperTtsNew" style="position:relative; display:inline-block;">
+                    <button type="button" id="svcBtnTtsNew" class="svc-status-pill" onclick="toggleTtsNewPopup(event)"
+                        title="TTS (mới)">
+                        <span id="dotTtsNew" class="svc-status-dot inactive"></span>
+                        <span class="svc-name">TTS (mới)</span>
+                    </button>
+
+                    <!-- POPUP GỌN NGAY DƯỚI NÚT TTS MỚI -->
+                    <div id="modalTtsNewSync"
+                        style="display:none; position:absolute; top:calc(100% + 8px); right:0; width:330px; background:#ffffff; border-radius:10px; box-shadow:0 10px 30px rgba(0,75,150,0.22), 0 2px 8px rgba(0,0,0,0.08); padding:16px 14px; text-align:left; border:1px solid #bfdbfe; z-index:10000;"
+                        onclick="event.stopPropagation()">
+                        <button type="button" onclick="closeTtsNewModal()"
+                            style="position:absolute; right:8px; top:8px; border:none; background:transparent; font-size:16px; color:#94a3b8; cursor:pointer; padding:2px 6px; line-height:1;"
+                            title="Đóng">✕</button>
+
+                        <div style="text-align:center; margin-bottom:12px;">
+                            <img src="/vnpt-logo-horizontal.svg" alt="VNPT Logo"
+                                style="height:30px; display:inline-block; vertical-align:middle;">
+                            <div
+                                style="font-size:11px; font-weight:700; color:#005baa; margin-top:4px; letter-spacing:0.5px;">
+                                HỆ THỐNG TTS MỚI (tts.vnptnet.vn)</div>
+                        </div>
+
+                        <!-- KHUNG THÔNG TIN KHI ĐÃ ĐĂNG NHẬP -->
+                        <div id="ttsNewConnectedBox"
+                            style="display:none; padding:10px 12px; border-radius:8px; background:#dcfce7; border:1px solid #86efac; color:#166534; align-items:center; justify-content:space-between; gap:8px;">
+                            <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+                                <span
+                                    style="width:8px; height:8px; border-radius:50%; background:#16a34a; display:inline-block; flex-shrink:0;"></span>
+                                <div style="min-width:0;">
+                                    <div id="ttsNewConnectedTitle"
+                                        style="font-weight:700; font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                        ✅ Đã kết nối: KTV</div>
+                                    <div id="ttsNewConnectedSub"
+                                        style="font-size:11px; opacity:0.9; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                                        Tài khoản: --</div>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-danger" onclick="logoutTtsNewSession()"
+                                style="background:#dc2626; color:#ffffff; border:none; border-radius:4px; padding:5px 10px; font-size:11.5px; font-weight:700; cursor:pointer; white-space:nowrap; flex-shrink:0;">Đăng
+                                xuất</button>
+                        </div>
+
+                        <!-- BƯỚC 1: FORM ĐĂNG NHẬP TTS MỚI (Ẩn khi đã kết nối) -->
+                        <div id="boxStep1TtsNewLogin">
+                            <form id="directTtsNewLoginForm" onsubmit="handleDirectTtsNewLoginSubmit(event)"
+                                style="display:flex; flex-direction:column; gap:10px;">
+                                <div style="position:relative;">
+                                    <input type="text" id="loginTtsNewUsername" class="control-input"
+                                        style="width:100%; box-sizing:border-box; height:38px; padding:6px 12px; font-size:13px; font-weight:600; color:#1e293b; background-color:#ffffcc !important; border:1px solid #b8cde0; border-radius:6px; outline:none;"
+                                        placeholder="Tên truy nhập (ví dụ: nguyenvana.hni)" autocomplete="username"
+                                        required>
+                                </div>
+                                <div style="position:relative;">
+                                    <input type="password" id="loginTtsNewPassword" class="control-input"
+                                        style="width:100%; box-sizing:border-box; height:38px; padding:6px 36px 6px 12px; font-size:13px; color:#1e293b; background-color:#ffffcc !important; border:1px solid #b8cde0; border-radius:6px; outline:none;"
+                                        placeholder="••••••••" autocomplete="current-password" required>
+                                    <span onclick="toggleTtsNewPasswordVisibility()"
+                                        style="position:absolute; right:10px; top:50%; transform:translateY(-50%); cursor:pointer; color:#64748b; user-select:none; display:flex; align-items:center;"
+                                        title="Hiện/Ẩn mật khẩu">
+                                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                            <circle cx="12" cy="12" r="3"></circle>
+                                        </svg>
+                                    </span>
+                                </div>
+                                <div id="loginTtsNewStatusMsg"
+                                    style="display:none; padding:6px 10px; border-radius:6px; font-size:11.5px; line-height:1.4;">
+                                </div>
+                                <button type="submit" id="btnDirectTtsNewLoginSubmit"
+                                    style="width:100%; height:38px; background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; border:none; border-radius:6px; cursor:pointer; box-shadow:0 2px 5px rgba(13, 113, 220, 0.3); display:flex; justify-content:center; align-items:center;">
+                                    <span>ĐĂNG NHẬP TTS MỚI</span>
+                                </button>
+                            </form>
+                            <div id="ttsNewHelpInfo"
+                                style="margin-top:12px; font-size:11px; line-height:1.5; color:#475569; border-top:1px solid #eef3f8; padding-top:10px;">
+                                <div>- Hỗ trợ Email: <b style="color:#d90429;">1800 1555 Nhánh 3</b></div>
+                                <div>- Quên MK soạn: <b>MK&lt;khoảng cách&gt;&lt;Tên truy nhập&gt;</b> gửi <b>293</b>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- BƯỚC 2: FORM XÁC THỰC OTP TTS MỚI -->
+                        <div id="boxStep2TtsNewOtp" style="display:none;">
+                            <div style="text-align:center; margin-bottom:10px;">
+                                <div style="font-size:12.5px; color:#334155;">Xin chào: <b id="otpTtsNewUserLabel"
+                                        style="color:#0f172a;">--</b></div>
+                                <div style="font-size:12px; font-weight:600; color:#1e293b; margin-top:2px;">Nhập mã xác
+                                    thực OTP</div>
+                            </div>
+                            <form id="directTtsNewOtpForm" onsubmit="handleDirectTtsNewOtpSubmit(event)"
+                                style="display:flex; flex-direction:column; gap:10px;">
+                                <input type="text" id="loginTtsNewOtp" class="control-input"
+                                    style="width:100%; box-sizing:border-box; height:38px; padding:6px 12px; font-size:16px; font-weight:700; color:#005baa; text-align:center; letter-spacing:3px; background:#ffffff; border:1px solid #94a3b8; border-radius:6px; outline:none;"
+                                    placeholder="" autocomplete="one-time-code">
+                                <div id="loginTtsNewOtpStatusMsg"
+                                    style="display:none; padding:6px 10px; border-radius:6px; font-size:11.5px; line-height:1.4;">
+                                </div>
+                                <button type="submit" id="btnDirectTtsNewOtpSubmit"
+                                    style="width:100%; height:38px; background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; font-size:13px; font-weight:800; text-transform:uppercase; border:none; border-radius:6px; cursor:pointer; box-shadow:0 2px 5px rgba(13, 113, 220, 0.3); display:flex; justify-content:center; align-items:center;">
+                                    <span>XÁC NHẬN OTP</span>
+                                </button>
+                            </form>
+                            <div style="text-align:center; margin-top:10px;">
+                                <a href="javascript:void(0)" onclick="backToStep1TtsNewLogin()"
+                                    style="font-size:11px; color:#64748b; text-decoration:none;">← Quay lại đăng nhập
+                                    tài khoản khác</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BTOOLS: Chỉ chấm xanh/đỏ và tooltip Connected/Disconnected -->
+                <div id="svcBtnBtools" class="svc-status-pill" title="Disconnected" style="cursor:default;">
+                    <span id="dotBtools" class="svc-status-dot inactive"></span>
+                    <span class="svc-name">BTools</span>
+                </div>
+
+                <!-- CEM: Chỉ chấm xanh/đỏ và tooltip Connected/Disconnected -->
+                <div id="svcPillCem" class="svc-status-pill" title="Disconnected" style="cursor:default;">
+                    <span id="dotCem" class="svc-status-dot inactive"></span>
+                    <span class="svc-name">CEM</span>
+                </div>
+
+                <!-- SAPC: Chỉ chấm xanh/đỏ và tooltip Connected/Disconnected -->
+                <div id="svcPillSapc" class="svc-status-pill" title="Disconnected" style="cursor:default;">
+                    <span id="dotSapc" class="svc-status-dot inactive"></span>
+                    <span class="svc-name">SAPC</span>
+                </div>
             </div>
         </div>
     </header>
-
-    <!-- POPUP ĐĂNG NHẬP CHUẨN GIAO DIỆN VNPT CAS SSO (HỖ TRỢ OTP / 2FA) -->
-    <div id="welcomeTtsModal" class="connect-modal-backdrop" style="display:none; background: radial-gradient(circle at 50% 25%, #eef7fc 0%, #d5eaf7 100%);">
-        <div class="connect-modal-box" style="width:380px; max-width:92vw; background:#ffffff; border-radius:12px; box-shadow:0 10px 35px rgba(0, 75, 150, 0.16); padding:28px 24px; text-align:left; border:1px solid #cbe4f6;">
-            
-            <!-- LOGO VNPT CHUẨN XANH -->
-            <div style="text-align:center; margin-bottom:22px;">
-                <img src="/vnpt-logo-horizontal.svg" alt="VNPT Logo" style="height:50px; display:inline-block; vertical-align:middle;">
-            </div>
-
-            <!-- BƯỚC 1: FORM ĐĂNG NHẬP (Y CHANG ẢNH 1) -->
-            <div id="boxStep1Login">
-                <form id="directLoginForm" onsubmit="handleDirectLoginSubmit(event)" style="display:flex; flex-direction:column; gap:12px;">
-                    <!-- Ô TÀI KHOẢN (NỀN VÀNG NHẠT #ffffcc) -->
-                    <div style="position:relative;">
-                        <input type="text" id="loginTtsUsername" class="control-input" 
-                            style="width:100%; box-sizing:border-box; height:44px; padding:8px 14px; font-size:15px; font-weight:600; color:#1e293b; background-color:#ffffcc !important; border:1px solid #b8cde0; border-radius:6px; outline:none;" 
-                            placeholder="quangvu" autocomplete="username" required>
-                    </div>
-
-                    <!-- Ô MẬT KHẨU (NỀN VÀNG NHẠT #ffffcc CÓ ICON MẮT ẨN/HIỆN) -->
-                    <div style="position:relative;">
-                        <input type="password" id="loginTtsPassword" class="control-input" 
-                            style="width:100%; box-sizing:border-box; height:44px; padding:8px 40px 8px 14px; font-size:15px; color:#1e293b; background-color:#ffffcc !important; border:1px solid #b8cde0; border-radius:6px; outline:none;" 
-                            placeholder="••••••••" autocomplete="current-password" required>
-                        <span onclick="togglePasswordVisibility()" style="position:absolute; right:12px; top:50%; transform:translateY(-50%); cursor:pointer; color:#64748b; user-select:none; display:flex; align-items:center;" title="Hiện/Ẩn mật khẩu">
-                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                        </span>
-                    </div>
-
-                    <!-- THÔNG BÁO TRẠNG THÁI / LỖI -->
-                    <div id="loginTtsStatusMsg" style="display:none; padding:8px 12px; border-radius:6px; font-size:12.5px; line-height:1.4;"></div>
-
-                    <!-- NÚT ĐĂNG NHẬP XANH ĐẬM (Y CHANG ẢNH 1) -->
-                    <button type="submit" id="btnDirectLoginSubmit" 
-                        style="width:100%; height:44px; margin-top:4px; background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; font-size:15px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; border:none; border-radius:6px; cursor:pointer; box-shadow:0 2px 6px rgba(13, 113, 220, 0.35); display:flex; justify-content:center; align-items:center; gap:8px;">
-                        <span>ĐĂNG NHẬP</span>
-                    </button>
-                </form>
-
-                <!-- THÔNG TIN HỖ TRỢ BÊN DƯỚI (Y CHANG ẢNH 1) -->
-                <div style="margin-top:20px; font-size:11.8px; line-height:1.65; color:#334155; border-top:1px solid #eef3f8; padding-top:16px;">
-                    <div>- Số điện thoại Hỗ trợ Email là: <b style="color:#d90429;">1800 1555 Nhánh 3</b></div>
-                    <div>- Địa chỉ Email hỗ trợ: <b style="color:#d90429;">hotro.email@vnpt.vn</b></div>
-                    <div>- Đối với quên mật khẩu, hết hạn mật khẩu soạn tin nhắn: <b>MK&lt;khoảng cách&gt;&lt;Tên truy nhập&gt;</b> gửi <b>293</b></div>
-                    <div>- Ví dụ: <b>MK nguyenvana.lcu</b> gửi <b>293</b></div>
-                    <div>- Để đổi mật khẩu, truy cập vào <a href="https://id.vnpt.com.vn/cas/forgotPassword" target="_blank" style="color:#0284c7; text-decoration:none;">đường dẫn đây</a> để thực hiện</div>
-                </div>
-
-                <!-- NÚT PHỤ DÀNH RIÊNG CHO LOCALHOST (MÁY CHỦ CỦA ANH) -->
-                <div id="loginServerQuickBox" style="display:none; margin-top:14px; padding-top:10px; border-top:1px dashed #cbd5e1; text-align:center;">
-                    <button type="button" class="btn btn-secondary" onclick="syncServerTokenQuick()" style="width:100%; padding:6px 12px; font-size:12px; font-weight:600;">
-                        Dùng ngay phiên máy chủ đang mở (Localhost)
-                    </button>
-                </div>
-            </div>
-
-            <!-- BƯỚC 2: FORM XÁC THỰC MÃ OTP (Y CHANG ẢNH 2) -->
-            <div id="boxStep2Otp" style="display:none;">
-                <div style="text-align:center; margin-bottom:16px;">
-                    <div style="font-size:14.5px; color:#334155;">Xin chào: <b id="otpUserLabel" style="color:#0f172a;">quangvu</b></div>
-                    <div style="font-size:14px; font-weight:600; color:#1e293b; margin-top:6px;">
-                        Xin vui lòng nhập mã xác thực OTP của bạn
-                    </div>
-                </div>
-
-                <form id="directOtpForm" onsubmit="handleDirectOtpSubmit(event)" style="display:flex; flex-direction:column; gap:12px;">
-                    <!-- Ô NHẬP OTP NỀN TRẮNG -->
-                    <div>
-                        <input type="text" id="loginTtsOtp" class="control-input" 
-                            style="width:100%; box-sizing:border-box; height:44px; padding:8px 14px; font-size:18px; font-weight:700; color:#005baa; text-align:center; letter-spacing:3px; background:#ffffff; border:1px solid #94a3b8; border-radius:6px; outline:none;" 
-                            placeholder="" autocomplete="one-time-code">
-                    </div>
-
-                    <!-- THÔNG BÁO LỖI OTP -->
-                    <div id="loginOtpStatusMsg" style="display:none; padding:8px 12px; border-radius:6px; font-size:12.5px; line-height:1.4;"></div>
-
-                    <!-- NÚT ĐĂNG NHẬP XANH -->
-                    <button type="submit" id="btnDirectOtpSubmit" 
-                        style="width:100%; height:44px; margin-top:4px; background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; font-size:15px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; border:none; border-radius:6px; cursor:pointer; box-shadow:0 2px 6px rgba(13, 113, 220, 0.35); display:flex; justify-content:center; align-items:center; gap:8px;">
-                        <span>ĐĂNG NHẬP</span>
-                    </button>
-                </form>
-
-                <!-- THÔNG BÁO SỐ ĐIỆN THOẠI NHẬN OTP (Y CHANG ẢNH 2) -->
-                <div style="margin-top:18px; font-size:12px; line-height:1.6; color:#334155; border-top:1px solid #eef3f8; padding-top:14px;">
-                    <div id="otpPhoneText">
-                        Mã xác thực OTP của bạn hiện đã được gửi đến số điện thoại: <b id="otpPhoneLabel">0917969796</b>
-                    </div>
-                    <div style="margin-top:10px; color:#475569; font-size:11.8px;">
-                        Nếu số trên không phải số điện thoại của bạn thì xin vui lòng liên hệ quản trị (điện thoại 18001555 Nhánh 3 hoặc gửi email hotro.email@vnpt.vn) để đăng ký lại
-                    </div>
-                </div>
-
-                <!-- QUAY LẠI -->
-                <div style="text-align:center; margin-top:16px;">
-                    <a href="javascript:void(0)" onclick="backToStep1Login()" style="font-size:12px; color:#64748b; text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
-                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-                        <span>Quay lại đăng nhập tài khoản khác</span>
-                    </a>
-                </div>
-            </div>
-
-        </div>
-    </div>
 
     <!-- THANH CÔNG CỤ TRÊN CÙNG: CHỈ SỐ RÚT GỌN + BỘ ĐIỀU KHIỂN -->
     <div class="top-toolbar">
@@ -168,89 +319,113 @@
                 <span>Chu kỳ:</span>
                 <strong id="statCycles">0</strong>
             </div>
+            <div class="stat-pill" id="pillCountdown" title="Thời gian đếm ngược đến chu kỳ quét tiếp theo">
+                <span>Đếm ngược:</span>
+                <strong id="countdownBadgeUnified" style="color:var(--primary);">--:--</strong>
+            </div>
         </div>
 
         <div class="top-controls-container">
             <!-- CỤM ĐIỀU KHIỂN TẬP TRUNG (UNIFIED CONTROLS) -->
-            <div id="ctrlUnified" class="ctrl-group-inline" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px;">
+            <div id="ctrlUnified" class="ctrl-group-inline"
+                style="display:flex; flex-wrap:wrap; align-items:center; gap:8px;">
                 <!-- 1. Dropdown chọn phạm vi quét (Multi-select) -->
                 <div class="dropdown-multiselect" id="scopeDropdownContainer">
-                    <button type="button" class="dropdown-multiselect-btn" id="btnScopeDropdown" onclick="toggleScopeDropdown(event)" title="Chọn các nguồn và dịch vụ cần quét tự động">
-                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+                    <button type="button" class="dropdown-multiselect-btn" id="btnScopeDropdown"
+                        onclick="toggleScopeDropdown(event)" title="Chọn các nguồn và dịch vụ cần quét tự động">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
                         <span id="lblScopeSummary">Quét: 2 phạm vi</span>
-                        <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor" style="margin-left:2px;"><path d="M7 10l5 5 5-5z"/></svg>
+                        <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor" style="margin-left:2px;">
+                            <path d="M7 10l5 5 5-5z" />
+                        </svg>
                     </button>
                     <div class="dropdown-multiselect-panel" id="scopeDropdownPanel">
                         <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
-                            <input type="checkbox" id="chkScopeOldData" value="tts_old_data" onchange="handleScopeChange()" checked>
+                            <input type="checkbox" id="chkScopeOldData" value="tts_old_data"
+                                onchange="handleScopeChange()" checked>
                             <span>TTS Cũ — Mobile Internet (Data)</span>
                         </label>
                         <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
-                            <input type="checkbox" id="chkScopeOldVoice" value="tts_old_voice" onchange="handleScopeChange()">
-                            <span>TTS Cũ — Thoại / SMS / Gói cước</span>
+                            <input type="checkbox" id="chkScopeOldVoice" value="tts_old_voice"
+                                onchange="handleScopeChange()">
+                            <span>TTS Cũ — Thoại/SMS/Gói/PA Khác</span>
                         </label>
                         <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
-                            <input type="checkbox" id="chkScopeNewData" value="tts_new_data" onchange="handleScopeChange()" checked>
+                            <input type="checkbox" id="chkScopeNewData" value="tts_new_data"
+                                onchange="handleScopeChange()" checked>
                             <span>TTS Mới — Mobile Internet (Data)</span>
                         </label>
                         <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
-                            <input type="checkbox" id="chkScopeNewVoice" value="tts_new_voice" onchange="handleScopeChange()">
-                            <span>TTS Mới — Thoại / SMS / Gói cước</span>
+                            <input type="checkbox" id="chkScopeNewVoice" value="tts_new_voice"
+                                onchange="handleScopeChange()">
+                            <span>TTS Mới — Thoại/SMS/Gói/PA Khác</span>
                         </label>
                     </div>
                 </div>
 
-                <!-- 2. Cần gạt Tự đóng phiếu (Áp dụng cả TTS Cũ & TTS Mới) -->
-                <div class="ctrl-item ctrl-admin-only" style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#475569; margin:0 2px;">
-                    <span id="autoCloseUnifiedLabel">Tự đóng:</span>
-                    <label class="switch-sm" title="Bật/Tắt tự động đóng phiếu cho cả TTS Cũ & TTS Mới">
-                        <input type="checkbox" id="chkAutoCloseUnified" onchange="toggleAutoCloseUnified(this.checked)" checked>
-                        <span class="slider"></span>
+                <!-- 2. Tick Tự đóng phiếu -->
+                <label id="ctrlAutoCloseUnified" class="ctrl-item"
+                    style="display:flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:#334155; cursor:pointer; user-select:none; margin:0 3px;"
+                    title="Tick chọn để tự động đóng phiếu khi đủ điều kiện">
+                    <input type="checkbox" id="chkAutoCloseUnified" onchange="toggleAutoCloseUnified(this.checked)"
+                        checked style="width:15px; height:15px; accent-color:#005baa; cursor:pointer;">
+                    <span id="autoCloseUnifiedLabel">Tự đóng</span>
+                </label>
+
+                <!-- 3. Tick Lặp & ô nhập thời gian bên cạnh -->
+                <div class="ctrl-item"
+                    style="display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#334155; margin:0 3px;">
+                    <label style="display:flex; align-items:center; gap:5px; cursor:pointer; user-select:none;"
+                        title="Tick chọn để quét lặp lại theo chu kỳ định kỳ. Bỏ tick nếu chỉ muốn quét 1 lần.">
+                        <input type="checkbox" id="chkLoopUnified" checked onchange="toggleLoopOption(this.checked)"
+                            style="width:15px; height:15px; accent-color:#005baa; cursor:pointer;">
+                        <span>Lặp:</span>
                     </label>
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" id="inpIntervalUnified"
+                        class="ctrl-input-sm" value="15" maxlength="3"
+                        oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+                        style="width:38px; text-align:center; padding:3px 4px; font-size:12px; font-weight:600;"
+                        title="Thời gian chờ giữa các chu kỳ quét (phút)">
+                    <span id="lblIntervalMinutes">phút</span>
                 </div>
 
-                <!-- 3. Chu kỳ lặp -->
-                <div class="ctrl-item ctrl-admin-only" style="display:flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:#475569;">
-                    <span>Lặp:</span>
-                    <input type="text" inputmode="numeric" pattern="[0-9]*" id="inpIntervalUnified" class="ctrl-input-sm" value="15" maxlength="3" oninput="this.value = this.value.replace(/[^0-9]/g, '')" title="Thời gian chờ giữa các chu kỳ quét (phút)">
-                    <span>phút</span>
-                </div>
-
-                <!-- 4. Nút Bắt đầu / Dừng / Quét ngay -->
-                <button id="btnStartUnified" class="btn-sm btn-primary ctrl-admin-only" onclick="startUnifiedAutomation()" title="Khởi động tiến trình lặp quét tự động">
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                    Bắt đầu
+                <!-- 4. Nút Bắt đầu / Dừng nhập chung thành 1 nút duy nhất -->
+                <button id="btnToggleUnified" class="btn-sm btn-primary" onclick="toggleUnifiedAutomation()"
+                    title="Bắt đầu quét ngay lập tức (Nếu tick Lặp sẽ tiếp tục chu kỳ tự động)"
+                    style="min-width:92px; justify-content:center;">
+                    <svg id="iconToggleUnified" viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
+                        <polygon points="5 3 19 12 5 21 5 3" />
+                    </svg>
+                    <span id="lblToggleUnified">Bắt đầu</span>
                 </button>
-                <button id="btnStopUnified" class="btn-sm btn-danger ctrl-admin-only" onclick="stopAutomation()" style="display:none;" title="Dừng tiến trình quét tự động">
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-                    Dừng
-                </button>
-                <button id="btnRunNowUnified" class="btn-sm btn-secondary" onclick="runNowUnified()" title="Quét tất cả phạm vi đã chọn ngay lập tức">
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                    Quét ngay
-                </button>
-                <span id="countdownBadgeUnified" class="ctrl-admin-only" style="color:var(--primary); font-family:'JetBrains Mono'; font-weight:700; font-size:12px; margin-left:2px;">--:--</span>
             </div>
 
-            <!-- NÚT LIVE LOG (NẰM BÊN PHẢI CÙNG THANH CÔNG CỤ) -->
+            <!-- NÚT LIVE LOG (TỐI GIẢN CHỈ CÒN CHẤM TRÒN + LIVE LOG) -->
             <div class="live-log-container" style="margin-left: 6px;">
-                <div class="stat-pill live-log-trigger" id="pillLiveLog" onclick="toggleLiveLogDropdown(event)" title="Bấm để xem/ẩn Nhật ký hệ thống (Live Log)">
-                    <span class="dot log-dot" id="liveLogDot"></span>
-                    <span>Live Log:</span>
-                    <strong id="liveLogStatusText">Bình thường</strong>
-                    <span style="font-size:9px; margin-left:2px; opacity:0.7;">▼</span>
+                <div class="svc-status-pill live-log-trigger" id="pillLiveLog" onclick="toggleLiveLogDropdown(event)"
+                    title="Nhật ký hệ thống (Live Log) - Bấm để xem">
+                    <span class="svc-status-dot active" id="liveLogDot"></span>
+                    <span class="svc-name">Live Log</span>
+                    <span style="font-size:8px; opacity:0.6; margin-left:1px;">▼</span>
                 </div>
-                
+
                 <div id="liveLogDropdown" class="live-log-dropdown" onclick="event.stopPropagation()">
                     <div class="live-log-header">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span style="font-size:12.5px; font-weight:700;">Nhật Ký Hệ Thống (Live Log)</span>
-                            <span id="liveLogErrorBadge" class="log-err-badge" style="display:none;">LỖI TIẾN TRÌNH</span>
+                            <span id="liveLogErrorBadge" class="log-err-badge" style="display:none;">LỖI TIẾN
+                                TRÌNH</span>
                         </div>
                         <div style="display:flex; align-items:center; gap:10px;">
-                            <span id="currentStepText" style="font-size:11.5px; color:#38bdf8; font-weight:600;">--</span>
-                            <button class="btn-clear-log" onclick="clearLocalLogs()" title="Xóa toàn bộ nhật ký và tắt cảnh báo lỗi">Xóa nhật ký (Tắt cảnh báo)</button>
-                            <button class="btn-close-log" onclick="toggleLiveLogDropdown(event, true)" title="Đóng">✕</button>
+                            <span id="currentStepText"
+                                style="font-size:11.5px; color:#38bdf8; font-weight:600;">--</span>
+                            <button class="btn-clear-log" onclick="clearLocalLogs()"
+                                title="Xóa toàn bộ nhật ký và tắt cảnh báo lỗi">Xóa nhật ký (Tắt cảnh báo)</button>
+                            <button class="btn-close-log" onclick="toggleLiveLogDropdown(event, true)"
+                                title="Đóng">✕</button>
                         </div>
                     </div>
                     <div id="logTerminal" class="log-terminal"></div>
@@ -274,10 +449,11 @@
                     </div>
                     <span class="nav-badge" id="badgeOldApiData">0</span>
                 </button>
-                <button class="nav-item" id="nav-tts_old_api-voice_sms" onclick="selectModule('tts_old_api', 'voice_sms')">
+                <button class="nav-item" id="nav-tts_old_api-voice_sms"
+                    onclick="selectModule('tts_old_api', 'voice_sms')">
                     <div class="nav-item-left">
                         <div class="nav-item-text">
-                            <span class="nav-item-title">Thoại / SMS / Gói</span>
+                            <span class="nav-item-title">Thoại/SMS/Gói/PA Khác</span>
                             <span class="nav-item-sub">Tiền kiểm On-Demand</span>
                         </div>
                     </div>
@@ -300,7 +476,7 @@
                 <button class="nav-item" id="nav-tts_new-voice_sms" onclick="selectModule('tts_new', 'voice_sms')">
                     <div class="nav-item-left">
                         <div class="nav-item-text">
-                            <span class="nav-item-title">Thoại / SMS / Gói</span>
+                            <span class="nav-item-title">Thoại/SMS/Gói/PA Khác</span>
                             <span class="nav-item-sub">Tiền kiểm On-Demand</span>
                         </div>
                     </div>
@@ -318,8 +494,14 @@
                             <span class="nav-item-sub">Báo cáo phân tích</span>
                         </div>
                     </div>
-                    <span class="nav-badge" id="badgeHistoryStats" style="background:#e0e7ff; color:#3730a3; font-weight:700; display:inline-flex; align-items:center;">
-                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                    <span class="nav-badge" id="badgeHistoryStats"
+                        style="background:#e0e7ff; color:#3730a3; font-weight:700; display:inline-flex; align-items:center;">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+                            stroke-width="2.2">
+                            <line x1="18" y1="20" x2="18" y2="10"></line>
+                            <line x1="12" y1="20" x2="12" y2="4"></line>
+                            <line x1="6" y1="20" x2="6" y2="14"></line>
+                        </svg>
                     </span>
                 </button>
                 <button class="nav-item" id="nav-all-history" onclick="selectHistoryModule('all')">
@@ -332,6 +514,8 @@
                     <span class="nav-badge" id="badgeTotalAll">0</span>
                 </button>
             </div>
+
+
         </div>
 
         <!-- BẢNG TƯƠNG TÁC DỮ LIỆU THỰC TẾ (INTERACTIVE DATA GRID) -->
@@ -356,11 +540,17 @@
                 <div class="ca-header">
                     <div class="ca-title-group">
                         <div class="ca-icon">
-                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <line x1="18" y1="20" x2="18" y2="10"></line>
+                                <line x1="12" y1="20" x2="12" y2="4"></line>
+                                <line x1="6" y1="20" x2="6" y2="14"></line>
+                            </svg>
                         </div>
                         <div>
                             <h4 class="ca-title">Dashboard Thống Kê Phiếu Đã Đóng</h4>
-                            <p class="ca-subtitle">Phân tích chuyên sâu hiệu quả đóng phiếu, tỷ lệ tự động và phân loại sự cố</p>
+                            <p class="ca-subtitle">Phân tích chuyên sâu hiệu quả đóng phiếu, tỷ lệ tự động và phân loại
+                                sự cố</p>
                         </div>
                     </div>
                 </div>
@@ -371,19 +561,23 @@
                     <div class="ca-filter-group">
                         <span class="ca-filter-label">Hệ thống:</span>
                         <div class="ca-filter-pills" id="caSourcePills">
-                            <button class="ca-filter-btn active" data-src="all" onclick="selectClosedSource('all')">Tất cả</button>
-                            <button class="ca-filter-btn" data-src="tts_new" onclick="selectClosedSource('tts_new')">TTS Mới</button>
-                            <button class="ca-filter-btn" data-src="tts_old" onclick="selectClosedSource('tts_old')">TTS Cũ</button>
+                            <button class="ca-filter-btn active" data-src="all" onclick="selectClosedSource('all')">Tất
+                                cả</button>
+                            <button class="ca-filter-btn" data-src="tts_new" onclick="selectClosedSource('tts_new')">TTS
+                                Mới</button>
+                            <button class="ca-filter-btn" data-src="tts_old" onclick="selectClosedSource('tts_old')">TTS
+                                Cũ</button>
                         </div>
                     </div>
 
                     <!-- 2. LOẠI PAKH -->
                     <div class="ca-filter-group">
                         <span class="ca-filter-label">Loại PAKH:</span>
-                        <select id="caServiceSelect" class="ca-filter-select" onchange="selectClosedService(this.value)">
+                        <select id="caServiceSelect" class="ca-filter-select"
+                            onchange="selectClosedService(this.value)">
                             <option value="all">Tất cả loại PAKH</option>
                             <option value="data">Mobile Internet</option>
-                            <option value="voice_sms">Các phiếu còn lại (Thoại/SMS/Gói...)</option>
+                            <option value="voice_sms">Thoại/SMS/Gói/PA Khác</option>
                             <option value="thoai">Thoại / Cuộc gọi</option>
                             <option value="sms">Tin nhắn SMS</option>
                             <option value="goi_cuoc">Gói cước dịch vụ</option>
@@ -394,15 +588,25 @@
                     <div class="ca-filter-group">
                         <span class="ca-filter-label">Thời gian:</span>
                         <div class="ca-filter-pills" id="caPeriodPills">
-                            <button class="ca-filter-btn active" data-period="all" onclick="selectClosedPeriod('all')">Tất cả</button>
-                            <button class="ca-filter-btn" data-period="today" onclick="selectClosedPeriod('today')">Hôm nay</button>
-                            <button class="ca-filter-btn" data-period="7days" onclick="selectClosedPeriod('7days')">7 ngày</button>
-                            <button class="ca-filter-btn" data-period="30days" onclick="selectClosedPeriod('30days')">30 ngày</button>
+                            <button class="ca-filter-btn active" data-period="all"
+                                onclick="selectClosedPeriod('all')">Tất cả</button>
+                            <button class="ca-filter-btn" data-period="today" onclick="selectClosedPeriod('today')">Hôm
+                                nay</button>
+                            <button class="ca-filter-btn" data-period="7days" onclick="selectClosedPeriod('7days')">7
+                                ngày</button>
+                            <button class="ca-filter-btn" data-period="30days" onclick="selectClosedPeriod('30days')">30
+                                ngày</button>
                         </div>
                     </div>
 
-                    <button class="btn btn-sm btn-outline" onclick="loadClosedAnalytics()" title="Làm mới số liệu" style="margin-left:auto; padding:4px 10px; font-size:12px; display:flex; align-items:center; gap:5px;">
-                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    <button class="btn btn-sm btn-outline" onclick="loadClosedAnalytics()" title="Làm mới số liệu"
+                        style="margin-left:auto; padding:4px 10px; font-size:12px; display:flex; align-items:center; gap:5px;">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="23 4 23 10 17 10" />
+                            <polyline points="1 20 1 14 7 14" />
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                        </svg>
                         Làm mới
                     </button>
                 </div>
@@ -416,7 +620,8 @@
                         </div>
                         <div class="ca-card-val" id="caValTotal">--</div>
                         <div class="ca-card-sub" id="caSubTotal">
-                            TTS Mới: <b id="caValTtsNew" style="color:#0284c7;">0</b> &bull; TTS Cũ: <b id="caValTtsOld" style="color:#2563eb;">0</b>
+                            TTS Mới: <b id="caValTtsNew" style="color:#0284c7;">0</b> &bull; TTS Cũ: <b id="caValTtsOld"
+                                style="color:#2563eb;">0</b>
                         </div>
                     </div>
 
@@ -450,7 +655,8 @@
                         </div>
                         <div class="ca-card-val text-purple" id="caValToday">--</div>
                         <div class="ca-card-sub">
-                            Data: <b id="caValData" style="color:#059669;">0</b> &bull; Thoại/SMS: <b id="caValVoice" style="color:#7c3aed;">0</b>
+                            Data: <b id="caValData" style="color:#059669;">0</b> &bull; Thoại/SMS: <b id="caValVoice"
+                                style="color:#7c3aed;">0</b>
                         </div>
                     </div>
                 </div>
@@ -463,7 +669,8 @@
                             <span class="ca-panel-tag" id="caDiagCount">0 nhận định</span>
                         </div>
                         <div class="ca-panel-body" id="caDiagnosisList">
-                            <div style="text-align:center; padding:20px; color:#94a3b8;">Đang tải số liệu phân tích...</div>
+                            <div style="text-align:center; padding:20px; color:#94a3b8;">Đang tải số liệu phân tích...
+                            </div>
                         </div>
                     </div>
 
@@ -493,24 +700,32 @@
             <!-- WRAPPER CHỨA BẢNG DANH SÁCH PHIẾU (TỰ ĐỘNG ẨN KHI XEM THỐNG KÊ) -->
             <div id="tableDataView">
                 <div class="table-toolbar">
-                    <div style="font-size:14px; font-weight:700; color:#0f172a; display:flex; align-items:center; gap:8px;" id="tableTitleText">
+                    <div style="font-size:14px; font-weight:700; color:#0f172a; display:flex; align-items:center; gap:8px;"
+                        id="tableTitleText">
                         Phiếu Mobile Internet
                     </div>
                     <div style="display:flex; gap:8px; align-items:center;">
                         <div class="search-box">
-                            <input type="text" id="searchInput" placeholder="Tìm số thuê bao, nội dung..." oninput="loadTickets(false, true)">
+                            <input type="text" id="searchInput" placeholder="Tìm số thuê bao, nội dung..."
+                                oninput="loadTickets(false, true)">
                         </div>
-                        <select id="filterSourceSelect" class="control-input" style="display:none; width:auto; min-width:130px; padding:6px 10px; font-size:12px; font-weight:600;" onchange="onSourceFilterChange(this.value)" title="Lọc theo Hệ thống TTS">
+                        <select id="filterSourceSelect" class="control-input"
+                            style="display:none; width:auto; min-width:130px; padding:6px 10px; font-size:12px; font-weight:600;"
+                            onchange="onSourceFilterChange(this.value)" title="Lọc theo Hệ thống TTS">
                             <option value="all">Toàn bộ nguồn</option>
                             <option value="tts_new">TTS Mới</option>
                             <option value="tts_old_api">TTS Cũ</option>
                         </select>
-                        <select id="filterCategorySelect" class="control-input" style="display:none; width:auto; min-width:145px; padding:6px 10px; font-size:12px; font-weight:600;" onchange="onCategoryFilterChange(this.value)" title="Lọc theo Loại nghiệp vụ PAKH">
+                        <select id="filterCategorySelect" class="control-input"
+                            style="display:none; width:auto; min-width:145px; padding:6px 10px; font-size:12px; font-weight:600;"
+                            onchange="onCategoryFilterChange(this.value)" title="Lọc theo Loại nghiệp vụ PAKH">
                             <option value="all">Toàn bộ loại PAKH</option>
                             <option value="data">Mobile Internet (Data)</option>
-                            <option value="voice_sms">Thoại / SMS / Khác</option>
+                            <option value="voice_sms">Thoại/SMS/Gói/PA Khác</option>
                         </select>
-                        <select id="filterStatus" class="control-input" style="width:auto; min-width:165px; padding:6px 10px; font-size:12px;" onchange="loadTickets(true, true)">
+                        <select id="filterStatus" class="control-input"
+                            style="width:auto; min-width:165px; padding:6px 10px; font-size:12px;"
+                            onchange="loadTickets(true, true)">
                             <option value="all">Tất cả nhận định</option>
                             <option value="BINH_THUONG">Hoạt động bình thường</option>
                             <option value="SONG_4G">Bắt sóng 4G kém / Không có 4G</option>
@@ -520,12 +735,12 @@
                             <option value="THIET_BI">Lỗi thiết bị / VPN</option>
                             <option value="THEO_DOI">Cần theo dõi thêm</option>
                         </select>
-                        <button class="btn btn-outline-primary" onclick="exportExcel()" title="Tải file Excel báo cáo phân tích 12 cột chuẩn" style="white-space:nowrap; padding:6px 12px; font-size:12.5px;">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                            Xuất Excel
-                        </button>
-                        <button class="btn btn-icon" id="btnRefresh" onclick="manualRefreshDashboard()" title="Làm mới danh sách & trạng thái">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                        <button class="btn btn-icon btn-outline-primary" onclick="exportExcel()" title="Tải file Excel báo cáo phân tích 12 cột chuẩn" style="padding:6px 10px; display:inline-flex; align-items:center; justify-content:center;">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
                         </button>
                     </div>
                 </div>
@@ -534,23 +749,26 @@
                     <table id="ticketsTable">
                         <thead>
                             <tr>
-                                <th style="width:40px; text-align:center;">STT</th>
-                                <th id="thTicketCode" style="width:7.5%;">Mã Phiếu</th>
-                                <th style="width:7%; text-align:center;">Nhận Định</th>
-                                <th style="width:7.5%;">Số Thuê Bao</th>
-                                <th style="width:7.5%; text-align:center;">Loại PAKH</th>
-                                <th style="width:7%; text-align:center;">Tiếp Nhận</th>
-                                <th style="width:8.5%;">Hồ Sơ Core</th>
-                                <th style="width:4.5%; text-align:center;">Hạ Tầng</th>
-                                <th style="width:6.5%;">Dữ Liệu CEM</th>
-                                <th id="thAiSummary" style="width:14%;">Tóm Tắt Nội Dung PAKH</th>
-                                <th style="width:13.5%;">Ý Kiến Phân Tích</th>
-                                <th style="width:13.5%;">Nội Dung Phản Hồi</th>
-                                <th style="width:4.5%; min-width:52px; text-align:center;">Thao Tác</th>
+                                <th style="width:38px; text-align:center;">STT</th>
+                                <th id="thTicketCode" style="width:12%; min-width:165px;">Mã Phiếu</th>
+                                <th style="width:6.5%; min-width:85px; text-align:center;">Nhận Định</th>
+                                <th style="width:7%; min-width:95px; text-align:center;">Số Thuê Bao</th>
+                                <th style="width:7%; min-width:95px; text-align:center;">Loại PAKH</th>
+                                <th style="width:6.5%; min-width:90px; text-align:center;">Tiếp Nhận</th>
+                                <th style="width:8%; min-width:110px;">Hồ Sơ Core</th>
+                                <th style="width:4.5%; min-width:60px; text-align:center;">Hạ Tầng</th>
+                                <th style="width:6.5%; min-width:90px;">Dữ Liệu CEM</th>
+                                <th id="thAiSummary" style="width:12%; min-width:150px;">Tóm Tắt Nội Dung PAKH</th>
+                                <th style="width:12.5%; min-width:150px;">Ý Kiến Phân Tích</th>
+                                <th style="width:12.5%; min-width:150px;">Nội Dung Phản Hồi</th>
+                                <th style="width:5%; min-width:65px; text-align:center;">Thao Tác</th>
                             </tr>
                         </thead>
                         <tbody id="ticketsBody">
-                            <tr><td colspan="13" style="text-align:center; padding:30px; color:var(--text-muted);">Đang tải dữ liệu phiếu...</td></tr>
+                            <tr>
+                                <td colspan="13" style="text-align:center; padding:30px; color:var(--text-muted);">Đang
+                                    tải dữ liệu phiếu...</td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -558,10 +776,12 @@
                 <!-- THANH PHÂN TRANG DANH SÁCH PHIẾU (PAGINATION) -->
                 <div class="pagination-container" id="ticketsPaginationContainer" style="display:none;">
                     <div class="pagination-info">
-                        <span>Hiển thị <b id="pageRangeText">0 - 0</b> trong <b id="pageTotalItemsText">0</b> phiếu</span>
+                        <span>Hiển thị <b id="pageRangeText">0 - 0</b> trong <b id="pageTotalItemsText">0</b>
+                            phiếu</span>
                         <div class="page-size-picker">
                             <span>Mỗi trang:</span>
-                            <select id="pageSizeSelect" class="page-size-select" onchange="changeTicketPageSize(this.value)">
+                            <select id="pageSizeSelect" class="page-size-select"
+                                onchange="changeTicketPageSize(this.value)">
                                 <option value="10" selected>10 phiếu</option>
                                 <option value="20">20 phiếu</option>
                                 <option value="50">50 phiếu</option>
@@ -578,94 +798,22 @@
         </div>
     </div>
 
+    <!-- FOOTER COPYRIGHT & BRANDING (CỐ ĐỊNH DƯỚI ĐÁY) -->
+    <footer id="fixedBottomFooter"
+        style="position:fixed; bottom:0; left:0; right:0; width:100%; z-index:9999; background:rgba(255, 255, 255, 0.95); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); border-top:1px solid #e2e8f0; box-shadow:0 -2px 10px rgba(0, 0, 0, 0.04); text-align:center; padding:7px 16px; font-size:11.5px; color:#64748b; display:flex; align-items:center; justify-content:center; gap:6px;">
+        <span><strong style="color:#005baa; letter-spacing:0.02em;">VNPT TTS PRECHECK</strong> &bull; Copyright by <a
+                href="mailto:quangvu@vnpt.vn" style="color:#005baa; text-decoration:none; font-weight:600;"
+                title="Gửi email cho tác giả">quangvu@vnpt.vn</a> &bull; Sep.2026</span>
+    </footer>
+
     <!-- LOG TERMINAL ĐÃ CHUYỂN THÀNH DROPDOWN TRÊN THANH IDLE BAR -->
 
-    
 
-    <!-- MODAL KẾT NỐI TÀI KHOẢN TTS VNPT -->
-    <div id="connectTtsModal" class="connect-modal-backdrop" style="display:none;" onclick="if(event.target===this) closeConnectModal()">
-        <div class="connect-modal-box">
-            <div class="connect-modal-header">
-                <h3>
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                    <span>Kết Nối Tài Khoản TTS VNPT</span>
-                </h3>
-                <button class="btn btn-icon" onclick="closeConnectModal()" style="border:none; font-size:16px;">✕</button>
-            </div>
 
-            <!-- Khung thông tin phiên hiện tại nếu đã đăng nhập -->
-            <div id="modalCurrentSessionBox" style="display:none; background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:12px 14px; margin-bottom:16px;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <div style="font-size:11px; font-weight:700; color:#166534; text-transform:uppercase;">Phiên đang kết nối</div>
-                        <div id="curSessionUser" style="font-size:14px; font-weight:700; color:#15803d; margin-top:2px;">--</div>
-                        <div style="font-size:11px; color:#16a34a; margin-top:1px; font-family:monospace;">Token: <span id="curSessionToken">--</span></div>
-                    </div>
-                    <button class="btn btn-danger" onclick="clearTtsAuthSession(); closeConnectModal();" style="padding:6px 12px; font-size:12px;">
-                        Đăng Xuất
-                    </button>
-                </div>
-            </div>
 
-            <div class="connect-tab-nav">
-                <button class="connect-tab-btn active" id="tabBtnBm" onclick="switchConnectTab('bm')">Dấu Trang 1-Click (Khuyên Dùng)</button>
-                <button class="connect-tab-btn" id="tabBtnManual" onclick="switchConnectTab('manual')">Nhập Thủ Công</button>
-            </div>
 
-            <!-- Tab 1: Bookmarklet -->
-            <div id="tabContentBm" style="display:block;">
-                <p style="font-size:13px; color:#475569; line-height:1.5; margin-bottom:14px;">
-                    Phương pháp tiện lợi nhất để đồng bộ tài khoản TTS mà không cần nhớ token hay mật khẩu:
-                </p>
 
-                <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:14px; margin-bottom:16px; text-align:center;">
-                    <div style="margin-bottom:10px; font-size:12.5px; font-weight:600; color:#334155;">
-                        Kéo nút bên dưới vào thanh Dấu trang (Bookmarks bar) của trình duyệt:
-                    </div>
-                    <a id="bmLink" href="#" class="bm-drag-btn" title="Kéo nút này thả vào thanh Bookmarks bar của trình duyệt">
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
-                        <span>Đồng Bộ TTS Precheck</span>
-                    </a>
-                </div>
-
-                <div style="font-size:12.5px; color:#475569; display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
-                    <div><strong>Bước 1:</strong> Mở tab <a href="https://tts.vnpt.vn" target="_blank" style="color:var(--primary); font-weight:600;">tts.vnpt.vn</a> (nơi bạn đang đăng nhập tài khoản của mình).</div>
-                    <div><strong>Bước 2:</strong> Bấm vào Dấu trang <strong>"Đồng Bộ TTS Precheck"</strong> vừa lưu trên thanh trình duyệt.</div>
-                    <div><strong>Bước 3:</strong> Trình duyệt sẽ tự động quay trở lại trang này và xác thực danh tính ngay lập tức!</div>
-                </div>
-
-                <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #f1f5f9; padding-top:12px;">
-                    <button class="btn btn-secondary" onclick="copyBookmarkletCode()" style="font-size:12px; padding:6px 12px;">
-                        Sao chép mã Bookmarklet
-                    </button>
-                    <button class="btn btn-outline-primary" id="btnQuickServerSync" onclick="syncServerTokenQuick()" style="font-size:12px; padding:6px 12px;">
-                        Đồng bộ từ máy chủ (Admin)
-                    </button>
-                </div>
-            </div>
-
-            <!-- Tab 2: Manual Input -->
-            <div id="tabContentManual" style="display:none;">
-                <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">
-                    <div>
-                        <label style="font-size:12px; font-weight:700; color:#334155; display:block; margin-bottom:4px;">Tên đăng nhập / Họ tên KTV:</label>
-                        <input type="text" id="inpManualUser" class="control-input" placeholder="Ví dụ: lequangvu hoặc KTV Vũ">
-                    </div>
-                    <div>
-                        <label style="font-size:12px; font-weight:700; color:#334155; display:block; margin-bottom:4px;">Mã Token (scnntttoken):</label>
-                        <textarea id="inpManualToken" class="control-input" rows="3" placeholder="Dán mã scnntttoken từ tts.vnpt.vn tại đây..." style="resize:vertical; font-family:monospace; font-size:11.5px;"></textarea>
-                        <span style="font-size:11px; color:#64748b; margin-top:4px; display:block;">
-                            (Trên tab tts.vnpt.vn: Bấm F12 → Application → Local Storage → https://tts.vnpt.vn → copy giá trị của khóa <code>scnntttoken</code>).
-                        </span>
-                    </div>
-                </div>
-                <div style="display:flex; justify-content:flex-end; gap:8px;">
-                    <button class="btn btn-secondary" onclick="closeConnectModal()">Hủy</button>
-                    <button class="btn btn-primary" onclick="saveManualToken()">Lưu & Kết Nối</button>
-                </div>
-            </div>
-        </div>
-    </div>
-    <script src="/static/js/dashboard.js?v=2.7"></script>
+    <script src="/static/js/dashboard.js?v=3.8"></script>
 </body>
+
 </html>

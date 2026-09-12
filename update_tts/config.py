@@ -17,6 +17,7 @@ STATUS_TO_NGUYEN_NHAN = {
     "LỖI THIẾT BỊ / ĐANG DÙNG VPN": "Do thiết bị đầu cuối",
     "LỖI THIẾT BỊ / ĐI NHIỀU NƠI BỊ LỖI": "Do thiết bị đầu cuối",
     "CHƯA KHAI BÁO PROFILE 4G": "Lỗi Profile thuê bao",
+    "PROFILE LẠ": "Lỗi Profile thuê bao",
     "SÓNG 4G CHẬP CHỜN / YẾU": "Thông tin đầu vào chưa chính xác, trùng lặp",
     "CHƯA ĐĂNG KÝ GÓI": "Lỗi do gói cước",
     "CHỈ CÓ GÓI PAYGO": "Lỗi do gói cước",

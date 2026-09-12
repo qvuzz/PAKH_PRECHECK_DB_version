@@ -93,27 +93,73 @@ def analyze_ticket_offline(package_title, ticket_content):
             package_used = package_title
 
     # ----------------------------------------------------------------
-    # 2. BÓC TÁCH TÌNH TRẠNG TRUY CẬP
-    # Ưu tiên "không được" hoàn toàn trước, chỉ fallback về "chậm" nếu không có "không được"
+    # 2. BÓC TÁCH TÌNH TRẠNG TRUY CẬP (THÔNG MINH: NHẬN DIỆN LỖI APP RIÊNG BIỆT)
     # ----------------------------------------------------------------
-    access_status = "Không đề cập"
-    khong_duoc = any(k in content_lower for k in [
-        "không được", "không đượ", "không truy cập", "không vào được", "mất kết nối",
-        "ko vao duoc", "ko duoc", "chặn", "bị chặn", "không sử dụng được",
-        "không dùng được", "không sd được", "ko sd được", "không kết nối",
-        "không có kết nối", "không có mạng", "không có dịch vụ", "không có internet",
-        "chưa sử dụng được", "chưa truy cập được", "chưa sd được", "chưa dùng được"
-    ])
-    bi_cham = any(k in content_lower for k in [
-        "chậm", "load chậm", "yếu", "chập chờn", "lag"
-    ])
+    truy_cap_bao = ""
+    tc_match = re.search(r'(?:truy cập báo|báo lỗi|báo)[:\s]*([^,\n\r]+)', content_lower)
+    if tc_match:
+        truy_cap_bao = tc_match.group(1).strip()
 
-    if khong_duoc and bi_cham:
-        access_status = "Không được / Load chậm"
-    elif khong_duoc:
-        access_status = "Không được hoàn toàn"
-    elif bi_cham:
-        access_status = "Chỉ bị chậm, chập chờn"
+    app_patterns = [
+        (r'\bzalo\b', 'Zalo'),
+        (r'\btik\s?tok\b', 'TikTok'),
+        (r'\b(?:facebook|fb)\b', 'Facebook'),
+        (r'\b(?:youtube|ytb)\b', 'YouTube'),
+        (r'\bmessenger\b', 'Messenger'),
+        (r'\btelegram\b', 'Telegram'),
+        (r'\bviber\b', 'Viber'),
+        (r'\b(?:liên quân|lien quan)\b', 'Game Liên Quân'),
+        (r'\b(?:free fire|freefire)\b', 'Game Free Fire'),
+        (r'\bpubg\b', 'Game PUBG'),
+        (r'\bgame\b', 'Game'),
+        (r'\b(?:shopee|lazada)\b', 'Shopee/Lazada'),
+        (r'\b(?:web|trình duyệt|website)\b', 'Web'),
+        (r'\bvnedu\b', 'VnEdu'),
+        (r'\bmy\s?vnpt\b', 'My VNPT'),
+        (r'\botp\b', 'Nhận OTP App'),
+    ]
+    detected_apps = []
+    for pattern, name in app_patterns:
+        if re.search(pattern, content_lower):
+            if name not in detected_apps:
+                detected_apps.append(name)
+
+    access_status = "Không đề cập"
+    if detected_apps:
+        app_list_str = ", ".join(detected_apps)
+        if truy_cap_bao and not any(truy_cap_bao == g.lower() for g in ["không được", "chậm", "kém"]):
+            access_status = f"Lỗi ứng dụng cụ thể: {app_list_str} ({truy_cap_bao})"
+        elif "trừ" in content_lower and ("dung lượng" in content_lower or "data" in content_lower):
+            access_status = f"Lỗi ứng dụng cụ thể: {app_list_str} (Bị trừ vào dung lượng gói chính)"
+        elif any(k in content_lower for k in ["chậm", "lag", "xoay", "quay vòng"]):
+            detail = "Chậm / lag khi dùng ứng dụng"
+            if truy_cap_bao: detail = f"{detail} ({truy_cap_bao})"
+            access_status = f"Lỗi ứng dụng cụ thể: {app_list_str} ({detail})"
+        elif any(k in content_lower for k in ["không được", "không vào được", "ko vào", "mất kết nối", "không kết nối"]):
+            detail = "Không truy cập được ứng dụng"
+            if truy_cap_bao: detail = f"{detail} ({truy_cap_bao})"
+            access_status = f"Lỗi ứng dụng cụ thể: {app_list_str} ({detail})"
+        else:
+            access_status = f"Lỗi ứng dụng cụ thể: {app_list_str}"
+    else:
+        khong_duoc = any(k in content_lower for k in [
+            "không được", "không đượ", "không truy cập", "không vào được", "mất kết nối",
+            "ko vao duoc", "ko duoc", "chặn", "bị chặn", "không sử dụng được",
+            "không dùng được", "không sd được", "ko sd được", "không kết nối",
+            "không có kết nối", "không có mạng", "không có dịch vụ", "không có internet",
+            "chưa sử dụng được", "chưa truy cập được", "chưa sd được", "chưa dùng được"
+        ])
+        bi_cham = any(k in content_lower for k in [
+            "chậm", "load chậm", "yếu", "chập chờn", "lag", "xoay", "quay vòng"
+        ])
+        extra_detail = f" ({truy_cap_bao})" if (truy_cap_bao and truy_cap_bao not in ["không được", "chậm", "kém"]) else ""
+
+        if khong_duoc and bi_cham:
+            access_status = f"Không được / Load chậm{extra_detail}"
+        elif khong_duoc:
+            access_status = f"Không được hoàn toàn{extra_detail}"
+        elif bi_cham:
+            access_status = f"Chỉ bị chậm, chập chờn{extra_detail}"
 
     # ----------------------------------------------------------------
     # 3. BÓC TÁCH TÌNH TRẠNG DUNG LƯỢNG
@@ -317,15 +363,32 @@ def analyze_ticket_with_groq_ai(package_title, ticket_content):
     if not groq_client:
         return None
 
-    prompt = f"""Bạn là trợ lý AI phân tích sự cố mạng viễn thông Vinaphone/VNPT.
+    prompt = f"""Bạn là trợ lý AI chuyên gia phân tích sự cố mạng viễn thông di động Vinaphone/VNPT.
 Nhiệm vụ: Phân tích nội dung phản ánh khách hàng và trích xuất đúng 6 mục theo định dạng chính xác sau (mỗi mục 1 dòng):
 
 1. Gói cước sử dụng: [Tên gói cước hoặc "Không đề cập"]
-2. Tình trạng truy cập: [Ví dụ: "Không được hoàn toàn", "Truy cập chậm, chập chờn", "Không đề cập", "Không được", "Rất chậm"]
+2. Tình trạng truy cập: [PHÂN TÍCH CHÍNH XÁC THEO HƯỚNG DẪN DƯỚI ĐÂY]
 3. Tình trạng dung lượng: [Ví dụ: "Đã hết dung lượng", "Còn XX GB", "Không đề cập"]
 4. Thiết bị sử dụng: [Tên dòng máy/hệ điều hành hoặc "null"]
 5. Khu vực xảy ra lỗi: [Ví dụ: "Tại 1 khu vực (Phường X...)", "Đi nhiều nơi bị lỗi", "Tại 1 khu vực (chưa đi KV khác thử)"]
 6. Tóm tắt thông tin khác: [Thông tin hành động KH đã thử như đổi SIM, bật data, reset máy... hoặc "Không có thông tin hành động phụ."]
+
+QUY TẮC BẮT BUỘC CHO MỤC 2 (Tình trạng truy cập):
+- KHÔNG ĐƯỢC chỉ nhìn vào câu mở đầu của mẫu điện thoại viên (như "KH phản ánh truy cập mạng Không được").
+- BẮT BUỘC ĐỌC KỸ trường "Truy cập báo: ..." và các mô tả chi tiết của khách hàng để nhận diện:
+  a) NẾU PHẢN ÁNH LỖI TRÊN ỨNG DỤNG CỤ THỂ (Zalo, TikTok, Facebook, YouTube, Messenger, Game Liên Quân, Web...):
+     Bắt buộc ghi theo định dạng: "Lỗi ứng dụng cụ thể: [Tên các App] - [Chi tiết lỗi thực tế]"
+     Ví dụ: "Lỗi ứng dụng cụ thể: Zalo báo đang kết nối, TikTok xem 1 video xong không lướt được"
+     Ví dụ: "Lỗi ứng dụng cụ thể: TikTok, YouTube - Bị trừ vào data chính dù dùng gói miễn phí App"
+     Ví dụ: "Lỗi ứng dụng cụ thể: Zalo không gửi được tin nhắn/hình ảnh"
+     Ví dụ: "Lỗi ứng dụng cụ thể: Chơi Game Liên Quân bị giật lag, ping cao"
+     Ví dụ: "Lỗi ứng dụng cụ thể: Không vào được trang Web cổng dịch vụ công"
+  b) NẾU BỊ MẤT MẠNG TOÀN BỘ MÁY (tất cả các app/web đều không vào được):
+     Ghi: "Không vào được mạng (toàn bộ)" (kèm chi tiết nếu có, ví dụ: "Không vào được mạng (xoay tròn)")
+  c) NẾU BỊ CHẬM TOÀN MẠNG:
+     Ghi: "Truy cập chậm, chập chờn"
+  d) NẾU KHÔNG CÓ THÔNG TIN RÕ:
+     Ghi: "Không đề cập"
 
 Nội dung phản ánh từ phiếu:
 - Tiêu đề gói cước: {package_title}

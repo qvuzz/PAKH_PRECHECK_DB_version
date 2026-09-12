@@ -66,7 +66,7 @@ def execute_tts_new_data_cycle():
         if not enriched_tickets:
             state.log("WARN", f"Đã quét {total_scanned} phiếu trên TTS Mới nhưng không tìm thấy phiếu Mobile Internet nào đang xử lý.")
             from db_manager import sync_active_tickets_state
-            sync_active_tickets_state([], source="tts_new", key_type="ticket_code")
+            sync_active_tickets_state([], source="tts_new", key_type="ticket_code", service_type="data")
             return
 
         total_tickets = len(enriched_tickets)
@@ -76,7 +76,7 @@ def execute_tts_new_data_cycle():
         active_codes = {str(t.get("ticket_code", "")).strip() for t in enriched_tickets if t.get("ticket_code")}
         if active_codes:
             from db_manager import sync_active_tickets_state
-            sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code")
+            sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data")
 
         now = datetime.now()
         start_d = (now - timedelta(days=4)).strftime("%d%m%Y")
@@ -116,21 +116,33 @@ def execute_tts_new_data_cycle():
             raw_btools_data = extract_btools_single_phone(driver, phone_84, start_d, end_d)
             clean_data = standardize_btools_data(raw_btools_data)
 
-            # Lưu file JSON vào number/
+            # Lưu file JSON vào number/ (hoặc fallback dùng lại dữ liệu BTools chu kỳ trước nếu lần này lỗi)
             output_dir = str(BASE_DIR / "number")
             os.makedirs(output_dir, exist_ok=True)
             json_filename = os.path.join(output_dir, f"{phone_84}.json")
-            with open(json_filename, "w", encoding="utf-8") as jf:
-                json.dump({
-                    "phone": phone_84,
-                    "package_title": title,
-                    "ticket_content": content,
-                    "title": title,
-                    "content": content,
-                    "ticket_code": ticket_code,
-                    "btools_technical_data": clean_data if clean_data is not None else [],
-                    "data": clean_data
-                }, jf, ensure_ascii=False, indent=2)
+            if clean_data is None and os.path.exists(json_filename):
+                try:
+                    with open(json_filename, "r", encoding="utf-8") as jf:
+                        cached = json.load(jf)
+                        cached_data = cached.get("btools_technical_data") or cached.get("data")
+                        if cached_data:
+                            clean_data = cached_data
+                            state.log("INFO", f"   ↳ 🔄 Tạm dùng dữ liệu BTools đã lưu từ chu kỳ trước cho {phone_84}")
+                except Exception:
+                    pass
+
+            if clean_data is not None:
+                with open(json_filename, "w", encoding="utf-8") as jf:
+                    json.dump({
+                        "phone": phone_84,
+                        "package_title": title,
+                        "ticket_content": content,
+                        "title": title,
+                        "content": content,
+                        "ticket_code": ticket_code,
+                        "btools_technical_data": clean_data,
+                        "data": clean_data
+                    }, jf, ensure_ascii=False, indent=2)
 
             # Tra SAPC + HSS Profile
             if sapc_client is not None:
@@ -173,8 +185,8 @@ def execute_tts_new_data_cycle():
                 if cem_client is None:
                     cem_client = CEMClient(driver=driver)
                 cem_records = cem_client.get_subscriber_history_5days(phone_84, days=5)
-                cem_data_str = CEMClient.extract_top_cells_summary(cem_records)
                 app_events = cem_client.get_subscriber_app_events(phone_84, days=5)
+                cem_data_str = CEMClient.extract_top_cells_summary(cem_records, app_events=app_events)
                 app_usage_str = CEMClient.extract_top_apps_summary(app_events)
 
                 save_cem_data_to_file(phone_84, cem_records, app_events, base_dir=BASE_DIR)
@@ -195,33 +207,82 @@ def execute_tts_new_data_cycle():
                 ai_summary = reopen_warn + (ai_summary if ai_summary and ai_summary != "null" else "")
                 state.log("WARN", f"⚠️ Phiếu {ticket_code} ({phone_84}) có THÔNG TIN MỞ LẠI TTS: Số lần mở lại = {reopen_count} -> KHÔNG TỰ ĐỘNG ĐÓNG!")
 
-            # Phân tích kịch bản
-            status, comment, action_plan, color = analyze_subscriber_status(
-                clean_data, title, content, phone_84=phone_84, cem_records=cem_records, app_events=app_events, incident_time_str=incident_time_str, driver=driver
+            # Kiểm tra xem phiếu đã có nhận định / nội dung xử lý trong DB chưa (đặc biệt khi ở bước 2.6)
+            existing_db_row = None
+            try:
+                conn_chk = get_db_connection()
+                existing_db_row = conn_chk.execute("""
+                    SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary
+                    FROM tickets 
+                    WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
+                    ORDER BY updated_at DESC LIMIT 1
+                """, (ticket.get("ticket_id"), f"{ticket_code}%", phone_84)).fetchone()
+                conn_chk.close()
+            except Exception:
+                pass
+
+            step_name_raw = str(ticket.get("step_name") or "")
+            is_step_26 = "2.6" in step_name_raw
+
+            # Kiểm tra xem nhận định cũ trong DB có hợp lệ không (KHÔNG được tái sử dụng lỗi kết nối / chưa đăng nhập)
+            def _is_valid_technical_status(st):
+                if not st:
+                    return False
+                s_u = str(st).strip().upper()
+                if "LỖI KẾT NỐI" in s_u or "CHƯA ĐĂNG NHẬP" in s_u or "LỖI MÁY CHỦ" in s_u or "CHƯA PHÂN LOẠI" in s_u:
+                    return False
+                return True
+
+            can_reuse_db = (
+                is_step_26 
+                and existing_db_row 
+                and existing_db_row["comment"] 
+                and _is_valid_technical_status(existing_db_row["status"])
+                and (clean_data is None or len(clean_data) == 0)
             )
-            state.log("INFO", f"   ↳ Nhận định: [{status}]")
 
-            # Hạ tầng
-            rats = list(set(str(r.get("RAT_TYPE_NAME", "")) for r in (clean_data or []) if r.get("RAT_TYPE_NAME")))
-            rat_types_string = ", ".join(rats) if rats else "Không có dữ liệu"
+            if can_reuse_db:
+                state.log("INFO", f"   ↳ 📋 Phiếu tại bước 2.6 kế thừa nhận định kỹ thuật chuẩn từ vòng 1: [{existing_db_row['status']}]")
+                status = existing_db_row["status"]
+                comment = existing_db_row["comment"]
+                action_plan = existing_db_row["action_plan"] or ""
+                color = existing_db_row["color"] or "#4CAF50"
+                real_pkgs_str = existing_db_row["real_packages"] or ""
+                final_packages_str = real_pkgs_str
+                rat_types_string = existing_db_row["rat_types"] or ""
+                cem_data_str = existing_db_row["cem_data"] or ""
+                app_usage_str = existing_db_row["app_usage"] or ""
+                ai_summary = existing_db_row["ai_summary"] or ""
+                reopen_count = int(ticket.get("reopen_count") or 0)
+                last_reopened_date = str(ticket.get("last_reopened_date") or "").strip()
+            else:
+                # Phân tích kịch bản mới dựa trên Core / BTools / CEM vừa cào
+                status, comment, action_plan, color = analyze_subscriber_status(
+                    clean_data, title, content, phone_84=phone_84, cem_records=cem_records, app_events=app_events, incident_time_str=incident_time_str, driver=driver
+                )
+                state.log("INFO", f"   ↳ Nhận định: [{status}]")
 
-            # Gói cước BTools / SAPC
-            cfg_p = BASE_DIR / "diagnostic_config.json"
-            ex_codes = set()
-            if cfg_p.exists():
-                with open(cfg_p, "r", encoding="utf-8") as cf:
-                    ex_codes = set(json.load(cf).get("EXCLUDED_SYSTEM_CODES", []))
-            real_pkgs = set()
-            for r in (clean_data or []):
-                sc = str(r.get("SERVICE_ID_CODE", "")).strip()
-                sn = str(r.get("SERVICE_NAME", "")).strip()
-                if sc.lower() and sc.lower() not in ex_codes:
-                    if sn and "gói cước lạ" not in sn.lower() and sn.lower() not in ex_codes:
-                        real_pkgs.add(sn)
-                    else:
-                        real_pkgs.add(sc)
-            real_pkgs_str = ", ".join(list(real_pkgs)) if real_pkgs else "Không phát sinh gói TM"
-            final_packages_str = get_formatted_sapc_packages(phone_84, fallback_btools=real_pkgs_str)
+                # Hạ tầng
+                rats = list(set(str(r.get("RAT_TYPE_NAME", "")) for r in (clean_data or []) if r.get("RAT_TYPE_NAME")))
+                rat_types_string = ", ".join(rats) if rats else "Không có dữ liệu"
+
+                # Gói cước BTools / SAPC
+                cfg_p = BASE_DIR / "diagnostic_config.json"
+                ex_codes = set()
+                if cfg_p.exists():
+                    with open(cfg_p, "r", encoding="utf-8") as cf:
+                        ex_codes = set(json.load(cf).get("EXCLUDED_SYSTEM_CODES", []))
+                real_pkgs = set()
+                for r in (clean_data or []):
+                    sc = str(r.get("SERVICE_ID_CODE", "")).strip()
+                    sn = str(r.get("SERVICE_NAME", "")).strip()
+                    if sc.lower() and sc.lower() not in ex_codes:
+                        if sn and "gói cước lạ" not in sn.lower() and sn.lower() not in ex_codes:
+                            real_pkgs.add(sn)
+                        else:
+                            real_pkgs.add(sc)
+                real_pkgs_str = ", ".join(list(real_pkgs)) if real_pkgs else "Không phát sinh gói TM"
+                final_packages_str = get_formatted_sapc_packages(phone_84, fallback_btools=real_pkgs_str)
 
             rec = {
                 "phone": phone_84,
@@ -272,7 +333,7 @@ def execute_tts_new_data_cycle():
                         if close_res.get("success"):
                             state.log("SUCCESS", f"   ↳ {close_res.get('message')}")
                             if close_res.get("round") == 1:
-                                rec["ticket_status"] = "Chờ đóng lần 2"
+                                rec["ticket_status"] = "Chờ đóng lần 2" if "2.6" in close_res.get("step_name", "") else "Chuyển VTT"
                             else:
                                 rec["ticket_status"] = "Đã đóng"
                             save_or_update_ticket(rec)

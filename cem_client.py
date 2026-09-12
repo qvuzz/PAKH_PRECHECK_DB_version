@@ -155,12 +155,22 @@ class CEMClient:
         return all_records
 
     @staticmethod
-    def extract_top_cells_summary(records):
+    def extract_top_cells_summary(records, app_events=None):
         """
         Trích xuất tên Cell và tính Top 3 Cell bắt sóng nhiều nhất kèm phần trăm (%) và ngày có data.
         """
+        vpn_note = ""
+        if app_events:
+            try:
+                from report_bot import detect_vpn_application
+                vpn_name = detect_vpn_application(app_events)
+                if vpn_name:
+                    vpn_note = f"\n⚠️ CẢNH BÁO VPN: Phát hiện thiết bị có app {vpn_name}"
+            except Exception:
+                pass
+
         if not records or not isinstance(records, list):
-            return "Không có dữ liệu CEM (5 ngày)"
+            return f"Không có dữ liệu CEM (5 ngày){vpn_note}"
 
         # Tìm tên trường Cell trong các bản ghi JSON của CEM và gom ngày có data
         cell_identifiers = []
@@ -180,7 +190,7 @@ class CEMClient:
                 or r.get("site_name")
                 or r.get("siteName")
                 or r.get("enodeb_id")
-                or (f"ECI:{r.get('eci')}" if r.get("eci") else None)
+                or (f"ECI:{r.get('eci')}" if r.get('eci') else None)
             )
             if cell_name:
                 cell_identifiers.append(str(cell_name).strip())
@@ -189,7 +199,7 @@ class CEMClient:
                     active_dates.add(str(q_date)[:10])
 
         if not cell_identifiers:
-            return "Không có thông tin Cell"
+            return f"Không có thông tin Cell{vpn_note}"
 
         total_samples = len(cell_identifiers)
         counter = Counter(cell_identifiers)
@@ -203,6 +213,10 @@ class CEMClient:
         for rank, (cell, count) in enumerate(top_3, 1):
             pct = (count / total_samples) * 100
             lines.append(f"• {cell}: {pct:.1f}% ({count}/{total_samples})")
+
+        # 🎯 Bổ sung cảnh báo VPN ngay sau phần Cell
+        if vpn_note:
+            lines.append(vpn_note.strip())
 
         return "\n".join(lines)
 
@@ -341,7 +355,7 @@ def save_cem_data_to_file(phone_84, cell_records, app_events, base_dir=None):
     target_dir.mkdir(parents=True, exist_ok=True)
     file_path = target_dir / f"{clean_phone}.json"
 
-    cell_summary = CEMClient.extract_top_cells_summary(cell_records)
+    cell_summary = CEMClient.extract_top_cells_summary(cell_records, app_events=app_events)
     app_summary = CEMClient.extract_top_apps_summary(app_events)
 
     data_payload = {

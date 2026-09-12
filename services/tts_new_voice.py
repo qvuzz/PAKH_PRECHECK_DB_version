@@ -45,7 +45,7 @@ def execute_ttsnew_voice_cycle():
             code = str(t.get("ticket_code", "")).strip()
             if code:
                 active_codes.add(code)
-            inc_time = str(t.get("incident_time") or t.get("created_time") or "")
+            inc_time = str(t.get("incident_time") or t.get("created_time") or "").strip()
             rec = {
                 "phone": phone_84,
                 "incident_time": inc_time,
@@ -60,17 +60,21 @@ def execute_ttsnew_voice_cycle():
                 "comment": "",
                 "action_plan": "",
                 "ticket_status": "Chưa đóng",
+                "force_update_status": True,
                 "source": "tts_new",
                 "created_time": t.get("created_time", ""),
                 "ticket_code": code,
-                "flow_id": t.get("flow_id", "")
+                "ticket_id": t.get("ticket_id"),
+                "flow_id": t.get("flow_id", ""),
+                "reopen_count": int(t.get("reopen_count") or 0),
+                "last_reopened_date": str(t.get("last_reopened_date") or "").strip()
             }
             save_or_update_ticket(rec)
 
         if active_codes:
-            sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code")
+            sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="voice_sms")
 
-        state.log("INFO", f"✅ Đã nạp xong {len(voice_tickets)} phiếu lên bảng. Bạn có thể bấm [⚡ Tiền kiểm Core] trên từng phiếu để tiền kiểm thủ công hoặc để hệ thống tự động kiểm tra...")
+        state.log("INFO", f"✅ Đã nạp xong {len(voice_tickets)} phiếu lên bảng. Đang tiến hành tra cứu Core...")
 
         SAPCCHECK_DIR = str(BASE_DIR / "sapccheck")
         if SAPCCHECK_DIR not in sys.path:
@@ -85,18 +89,20 @@ def execute_ttsnew_voice_cycle():
         except Exception:
             sapc_client = None
 
-        # Bước 2: Tuần tự tra cứu Core & Profile cho từng phiếu
-        for idx, t in enumerate(voice_tickets, 1):
-            if state.stop_requested:
-                state.log("WARN", "Nhận được yêu cầu dừng.")
-                break
+        # Bước 2: Tra cứu Core & Profile song song để xử lý nhanh toàn bộ danh sách phiếu
+        import concurrent.futures
+        hss_output_dir = str(BASE_DIR / "output")
+        os.makedirs(hss_output_dir, exist_ok=True)
 
+        def _process_single_voice_ticket(item_tuple):
+            idx, t = item_tuple
+            if state.stop_requested:
+                return False
             phone_84 = normalize_phone_vn(t.get("phone", ""))
             code = t.get("ticket_code", "")
+            inc_time = str(t.get("incident_time") or t.get("created_time") or "").strip()
 
-            state.current_step = f"Tiền kiểm tra thuê bao {idx}/{len(voice_tickets)}: {phone_84}"
-            state.log("STEP", f"[{idx}/{len(voice_tickets)}] Đang tra cứu Core cho SĐT: {phone_84} ({code})...")
-
+            state.current_step = f"Tra cứu Core {idx}/{len(voice_tickets)}: {phone_84}"
             try:
                 info_result = {}
                 sapc_result = {"msisdn": phone_84, "packages": []}
@@ -108,8 +114,6 @@ def execute_ttsnew_voice_cycle():
                     except Exception as ex_core:
                         state.log("WARN", f"Lỗi tra Core cho {phone_84}: {ex_core}")
 
-                hss_output_dir = str(BASE_DIR / "output")
-                os.makedirs(hss_output_dir, exist_ok=True)
                 with open(os.path.join(hss_output_dir, f"{phone_84}.json"), "w", encoding="utf-8") as hf:
                     json.dump({
                         **sapc_result,
@@ -119,7 +123,6 @@ def execute_ttsnew_voice_cycle():
 
                 formatted_packages = get_formatted_sapc_packages(phone_84)
 
-                # Đối với Thoại / SMS / Gói: không gọi AI tóm tắt, chỉ dùng trực tiếp nội dung phản ánh
                 ticket_content = t.get("content", "")
                 reopen_count = int(t.get("reopen_count") or 0)
                 last_reopened_date = str(t.get("last_reopened_date") or "").strip()
@@ -136,10 +139,9 @@ def execute_ttsnew_voice_cycle():
                 cell_desc = info_result.get("Cell ID") or info_result.get("ECGI") or "--"
                 rat_type_str = info_result.get("Radio") or "Sóng di động"
 
-                # Đối với case không phải Mobile Internet: Nhận định, Cột 10, Cột 11 để trống
                 rec_update = {
                     "phone": phone_84,
-                    "incident_time": str(t.get("incident_time") or ""),
+                    "incident_time": inc_time,
                     "package_title": t.get("title", "Thoại / SMS"),
                     "ticket_content": ticket_content,
                     "status": "",
@@ -151,17 +153,28 @@ def execute_ttsnew_voice_cycle():
                     "comment": "",
                     "action_plan": "",
                     "ticket_status": "Chưa đóng",
+                    "force_update_status": True,
                     "source": "tts_new",
                     "ticket_code": code,
+                    "ticket_id": t.get("ticket_id"),
                     "flow_id": t.get("flow_id", ""),
                     "reopen_count": reopen_count,
                     "last_reopened_date": last_reopened_date
                 }
                 save_or_update_ticket(rec_update)
-                state.log("SUCCESS", f"[{idx}/{len(voice_tickets)}] Hoàn tất tra cứu Core cho {phone_84} ({code})")
-
+                state.log("SUCCESS", f"[{idx}/{len(voice_tickets)}] Đã tra cứu Core: {phone_84} ({code.split(chr(10))[0]})")
+                return True
             except Exception as e:
                 state.log("ERROR", f"Lỗi xử lý {phone_84}: {e}")
+                return False
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            items = list(enumerate(voice_tickets, 1))
+            futures = [executor.submit(_process_single_voice_ticket, it) for it in items]
+            for future in concurrent.futures.as_completed(futures):
+                if state.stop_requested:
+                    state.log("WARN", "Nhận được yêu cầu dừng.")
+                    break
 
         state.log("SUCCESS", f"🎉 Hoàn tất chu kỳ tiền kiểm Thoại / SMS TTS Mới cho {len(voice_tickets)} phiếu.")
         return len(voice_tickets)

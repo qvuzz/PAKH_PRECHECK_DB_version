@@ -10,7 +10,7 @@ except (ImportError, ValueError):
         BASE_URL = "http://10.155.42.218:8080"
 
 
-CDP_URL = "http://localhost:9222"
+CDP_URL = "http://127.0.0.1:9222"
 COOKIE_FILE = os.path.join(os.path.dirname(__file__), "cookies.json")
 
 
@@ -60,27 +60,42 @@ class SAPCClient:
                 return False
 
     def _load_cookies(self, cdp_url):
+        urls_to_try = [cdp_url]
+        if "localhost" in cdp_url:
+            urls_to_try.append(cdp_url.replace("localhost", "127.0.0.1"))
+        elif "127.0.0.1" in cdp_url:
+            urls_to_try.append(cdp_url.replace("127.0.0.1", "localhost"))
+
         # 1. Try fetching cookies via Chrome Remote Debugging Protocol (CDP port 9222)
-        try:
-            from playwright.sync_api import sync_playwright
-            with sync_playwright() as p:
-                browser = p.chromium.connect_over_cdp(cdp_url)
-                context = browser.contexts[0]
-                cookies = context.cookies()
-                for c in cookies:
-                    self.session.cookies.set(
-                        c['name'],
-                        c['value'],
-                        domain=c.get('domain'),
-                        path=c.get('path', '/')
-                    )
-                browser.close()
-                print("[OK] Loaded Chrome cookies via CDP (port 9222)")
-                return
-        except Exception as e:
-            print(f"[INFO] Cannot connect to Chrome CDP ({cdp_url}): {e}")
+        for u in urls_to_try:
+            try:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as p:
+                    browser = p.chromium.connect_over_cdp(u)
+                    context = browser.contexts[0]
+                    cookies = context.cookies()
+                    for c in cookies:
+                        self.session.cookies.set(
+                            c['name'],
+                            c['value'],
+                            domain=c.get('domain'),
+                            path=c.get('path', '/')
+                        )
+                    sapc_cookies = [c for c in cookies if '10.155' in c.get('domain', '')]
+                    if sapc_cookies:
+                        try:
+                            with open(COOKIE_FILE, 'w', encoding='utf-8') as cf:
+                                json.dump(sapc_cookies, cf, indent=2, ensure_ascii=False)
+                        except Exception:
+                            pass
+                    browser.close()
+                    print(f"[OK] Loaded Chrome cookies via CDP ({u})")
+                    return
+            except Exception:
+                pass
 
         # 1.5 Try loading from Firefox cookies.sqlite
+        has_auth_cookie = False
         try:
             import sys
             from pathlib import Path
@@ -92,8 +107,11 @@ class SAPCClient:
             if ff_cookies:
                 for name, val in ff_cookies.items():
                     self.session.cookies.set(name, val, domain="10.155.42.218", path="/")
+                    if "ApplicationCookie" in name or "SessionId" in name:
+                        has_auth_cookie = True
                 print(f"[OK] Loaded {len(ff_cookies)} SAPC cookies from Firefox.")
-                return
+                if has_auth_cookie:
+                    return
         except Exception:
             pass
 
@@ -120,17 +138,25 @@ class SAPCClient:
         # 3. Try browser_cookie3 as last resort
         try:
             import browser_cookie3
-            cookies = browser_cookie3.chrome()
-            self.session.cookies.update(cookies)
-            print("[OK] Loaded Chrome cookies via browser_cookie3")
-            return
+            for loader in (browser_cookie3.chrome, browser_cookie3.edge, browser_cookie3.firefox):
+                try:
+                    cj = loader(domain_name="10.155.42.218")
+                    count = 0
+                    for c in cj:
+                        self.session.cookies.set(c.name, c.value, domain="10.155.42.218", path="/")
+                        count += 1
+                    if count > 0:
+                        print(f"[OK] Loaded {count} SAPC cookies via browser_cookie3 ({loader.__name__})")
+                        return
+                except Exception:
+                    continue
         except Exception as e:
             print(f"[WARN] browser_cookie3 failed: {e}")
 
         print("[ERROR] Cannot load Chrome cookies via CDP, cookies.json, or browser_cookie3!")
         print("FIX INSTRUCTIONS:")
-        print("   1. Run open_chrome.bat to open Chrome with Remote Debugging (port 9222) and log in.")
-        print("   2. Or create file SAPCCheck/cookies.json with exported login cookies.")
+        print("   1. Run open_chrome.bat to open Chrome with Remote Debugging (port 9222) and log in to http://10.155.42.218.")
+        print("   2. Or create file sapccheck/cookies.json with exported login cookies.")
 
     def query(self, msisdn):
         url = f"{BASE_URL}/{msisdn}"
@@ -144,8 +170,8 @@ class SAPCClient:
             with open("debug_response.html", "w", encoding="utf-8") as f:
                 f.write(response.text)
             raise Exception(
-                "Response is not JSON (Phiên đăng nhập hết hạn hoặc chưa đăng nhập). "
-                "Saved to debug_response.html"
+                "Chưa đăng nhập hệ thống Core/SAPC (http://10.155.42.218) hoặc phiên đăng nhập đã hết hạn. "
+                "Vui lòng mở trình duyệt và đăng nhập vào http://10.155.42.218."
             )
 
         response.raise_for_status()
