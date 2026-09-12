@@ -288,7 +288,7 @@ async def open_detail_ttsnew_api(request: Request):
     client_ip = request.client.host if request.client else "127.0.0.1"
     is_local = client_ip in ("127.0.0.1", "localhost", "::1")
     client_tok = (body.get("token") or "").strip()
-    from ttsnew_api import resolve_ttsnew_token, fetch_active_tickets
+    from ttsnew_api import fetch_active_tickets
     tok, ktv_user = resolve_ttsnew_token(client_ip, is_local, client_tok)
 
     if not flow_id and tok:

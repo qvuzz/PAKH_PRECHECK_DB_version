@@ -743,6 +743,13 @@ function selectModule(sys, srv, updateUrl = true) {
         }
     }
 
+    // Ẩn/hiện cột Nhận Định & bộ lọc nhận định: chỉ hiển thị cho phân hệ Mobile Internet (data)
+    const isDataSrv = (srv === 'data');
+    const thStatus = document.getElementById('thStatus');
+    if (thStatus) thStatus.style.display = isDataSrv ? '' : 'none';
+    const filterStatus = document.getElementById('filterStatus');
+    if (filterStatus) filterStatus.style.display = isDataSrv ? '' : 'none';
+
     // Ẩn bộ lọc nguồn & loại PAKH vì đây là menu chuyên biệt của TTS
     const srcSel = document.getElementById('filterSourceSelect');
     if (srcSel) srcSel.style.display = 'none';
@@ -782,6 +789,11 @@ function selectHistoryModule(tab = 'all', updateUrl = true) {
     if (thAiSummary) {
         thAiSummary.innerText = 'Nội Dung / Tóm Tắt';
     }
+
+    const thStatus = document.getElementById('thStatus');
+    if (thStatus) thStatus.style.display = 'none';
+    const filterStatus = document.getElementById('filterStatus');
+    if (filterStatus) filterStatus.style.display = 'none';
 
     const srcSel = document.getElementById('filterSourceSelect');
     if (srcSel) {
@@ -834,6 +846,11 @@ function onSourceFilterChange(val) {
 
 function onCategoryFilterChange(val) {
     currentService = val;
+    const isData = (val === 'data');
+    const thStatus = document.getElementById('thStatus');
+    if (thStatus) thStatus.style.display = isData ? '' : 'none';
+    const filterStatus = document.getElementById('filterStatus');
+    if (filterStatus) filterStatus.style.display = isData ? '' : 'none';
     loadTickets(true, true);
 }
 
@@ -1187,7 +1204,19 @@ function renderTicketsTable(force = false) {
     const pagContainer = document.getElementById('ticketsPaginationContainer');
     if (!tbody) return;
 
-    // Bảng luôn giữ cố định 12 cột: Cột 10 = Ý Kiến Phân Tích, Cột 11 = Nội Dung Phản Hồi
+    // Cột Nhận Định chỉ hiển thị cho phân hệ Mobile Internet (Data)
+    const isDataService = (currentService === 'data');
+    const totalCols = isDataService ? 13 : 12;
+
+    const thStatus = document.getElementById('thStatus');
+    if (thStatus) {
+        thStatus.style.display = isDataService ? '' : 'none';
+    }
+    const filterStatus = document.getElementById('filterStatus');
+    if (filterStatus) {
+        filterStatus.style.display = isDataService ? '' : 'none';
+    }
+
     const thTicketCode = document.getElementById('thTicketCode');
     if (thTicketCode) {
         thTicketCode.style.display = 'table-cell';
@@ -1202,7 +1231,7 @@ function renderTicketsTable(force = false) {
         } else if (currentTableTab === 'da_dong') {
             emptyMsg = 'Chưa có phiếu nào trong danh sách lịch sử đã đóng của phân hệ này.';
         }
-        tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:40px; color:var(--text-muted); font-size:13px;">${emptyMsg}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${totalCols}" style="text-align:center; padding:40px; color:var(--text-muted); font-size:13px;">${emptyMsg}</td></tr>`;
         if (pagContainer) pagContainer.style.display = 'none';
         lastTicketsSignature = "EMPTY_" + currentTableTab + "_" + currentSystem + "_" + currentService;
         return;
@@ -1227,7 +1256,7 @@ function renderTicketsTable(force = false) {
     if (pagContainer) pagContainer.style.display = 'flex';
     renderPaginationNav(currentTicketPage, totalPages);
 
-    const newSignature = JSON.stringify(pageTickets) + '_' + currentTicketPage + '_' + currentAutoClose + '_' + currentTableTab + '_' + currentSystem + '_' + currentTicketPageSize;
+    const newSignature = JSON.stringify(pageTickets) + '_' + currentTicketPage + '_' + currentAutoClose + '_' + currentTableTab + '_' + currentSystem + '_' + currentService + '_' + currentTicketPageSize;
     if (!force && newSignature === lastTicketsSignature) {
         return;
     }
@@ -2036,9 +2065,11 @@ function renderTicketsTable(force = false) {
                         <td style="${ticketCodeDisplay} font-family:'JetBrains Mono', monospace; vertical-align:middle; padding:2px 8px; white-space:nowrap;">
                             ${compactTicketCodeHtml}
                         </td>
+                        ${isDataService ? `
                         <td style="vertical-align:middle; text-align:center; padding:2px 3px;">
                             <span class="badge-status ${badgeClass}" style="white-space:nowrap; font-size:10px; padding:2px 5px; font-weight:700;" title="${escapeHtml(fullStatus)}">${escapeHtml(displayStatus)}</span>
                         </td>
+                        ` : ''}
                         <td style="vertical-align:middle; text-align:center; padding:2px 4px; white-space:nowrap;">
                             <span style="font-family:'JetBrains Mono', monospace; font-weight:700; font-size:11.5px; color:#0f172a; letter-spacing:0.2px;">
                                 ${escapeHtml(t.phone)}
@@ -2096,7 +2127,7 @@ function renderTicketsTable(force = false) {
 
                     <!-- KHUNG CHI TIẾT MỞ RỘNG (EXPANDED DETAIL ROW) -->
                     <tr id="row-detail-${ticketKey}" class="ticket-detail-row" style="display: ${isExpanded ? 'table-row' : 'none'};">
-                        <td colspan="13" style="background:#f8fafc; padding:12px 16px; border-bottom:2px solid #cbd5e1;">
+                        <td colspan="${totalCols}" style="background:#f8fafc; padding:12px 16px; border-bottom:2px solid #cbd5e1;">
                             <div class="detail-expanded-grid">
                                 <!-- Card 1: Tóm Tắt Nội Dung & Phản ánh gốc -->
                                 <div class="detail-card">
