@@ -1113,6 +1113,7 @@ function toggleTicketRow(ticketKey, event) {
         }
     } else {
         expandedTicketKeys.add(ticketKey);
+        dismissNewBeacon(ticketKey);
         detailRow.style.display = 'table-row';
         if (mainRow) mainRow.classList.add('is-row-expanded');
         if (btn) {
@@ -1125,6 +1126,29 @@ function toggleTicketRow(ticketKey, event) {
                 ta.style.height = Math.max(55, ta.scrollHeight + 4) + 'px';
             });
         }, 15);
+    }
+}
+
+function dismissNewBeacon(ticketKey, event) {
+    if (event) event.stopPropagation();
+    try {
+        let readTickets = JSON.parse(localStorage.getItem('acknowledged_tickets') || '{}');
+        readTickets[ticketKey] = true;
+        const keys = Object.keys(readTickets);
+        if (keys.length > 2000) {
+            delete readTickets[keys[0]];
+        }
+        localStorage.setItem('acknowledged_tickets', JSON.stringify(readTickets));
+    } catch(e) {}
+    
+    const el = document.getElementById(`beacon-${ticketKey}`);
+    if (el) {
+        el.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+        el.style.opacity = '0';
+        el.style.transform = 'scale(0)';
+        setTimeout(() => {
+            if (el && el.parentNode) el.remove();
+        }, 250);
     }
 }
 
@@ -1856,6 +1880,17 @@ function renderTicketsTable(force = false) {
             if (!stepName && t.step_name) stepName = t.step_name;
             if (procName && !procName.startsWith('[')) procName = `[${procName}]`;
 
+            let isAcknowledged = false;
+            try {
+                const readTickets = JSON.parse(localStorage.getItem('acknowledged_tickets') || '{}');
+                if (readTickets[ticketKey]) isAcknowledged = true;
+            } catch(e) {}
+
+            const isNewPending = (t.ticket_status !== 'Đã đóng');
+            const newBeacon = (isNewPending && !isAcknowledged) 
+                ? `<span id="beacon-${ticketKey}" class="pulse-red-dot" onclick="dismissNewBeacon('${ticketKey}', event)" title="Phiếu mới (Bấm để xóa dấu đỏ / đã biết)"></span>` 
+                : '';
+
             let reopenBadgeHtml = '';
             if (reopenCount > 0) {
                 reopenBadgeHtml = `
@@ -1870,9 +1905,12 @@ function renderTicketsTable(force = false) {
 
             ticketCodeHtml = `
                 <div>
-                    <span style="color:#0f172a; font-weight:700; font-size:11.5px;">
-                        ${escapeHtml(mainCode || '--')}
-                    </span>
+                    <div style="display:flex; align-items:center; gap:4px;">
+                        <span style="color:#0f172a; font-weight:700; font-size:11.5px;">
+                            ${escapeHtml(mainCode || '--')}
+                        </span>
+                        ${newBeacon}
+                    </div>
                     ${procName ? `<div style="font-size:10px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:3px; margin-top:3px; display:inline-block;">${escapeHtml(procName)}</div>` : ''}
                     ${stepName ? `<div style="font-size:10.5px; font-weight:500; color:#475569; margin-top:2px; line-height:1.25;">${escapeHtml(stepName)}</div>` : ''}
                     ${reopenBadgeHtml}
@@ -1901,11 +1939,12 @@ function renderTicketsTable(force = false) {
 
             compactTicketCodeHtml = `
                 <div style="display:flex; flex-direction:column; justify-content:center; gap:2px; padding:2px 0; min-width:155px;">
-                    <!-- Dòng 1: Mã phiếu trọn vẹn + Reopen badge -->
-                    <div style="display:flex; align-items:center; gap:5px; line-height:1.2; white-space:nowrap;">
+                    <!-- Dòng 1: Mã phiếu trọn vẹn + Dấu đỏ nhấp nháy ngay sau lưng + Reopen badge -->
+                    <div style="display:flex; align-items:center; gap:4px; line-height:1.2; white-space:nowrap;">
                         <span style="color:#0f172a; font-weight:700; font-size:11.5px; font-family:'JetBrains Mono', monospace; white-space:nowrap; letter-spacing:-0.2px;" title="Mã phiếu: ${escapeHtml(mainCode)}">
                             ${escapeHtml(mainCode || '--')}
                         </span>
+                        ${newBeacon}
                         ${reopenCount > 0 ? `<span class="badge-status" style="background:#fee2e2; color:#dc2626; border:1px solid #f87171; font-weight:800; font-size:9px; padding:1px 4px; border-radius:3px; white-space:nowrap;" title="Mở lại ${reopenCount} lần">Lại: ${reopenCount}L</span>` : ''}
                     </div>
                     <!-- Dòng 2: Tên Quy trình (nếu có) -->
@@ -1951,11 +1990,9 @@ function renderTicketsTable(force = false) {
             pakhBadgeStyle = 'background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;';
         }
 
-        const isNewPending = (t.status === 'CHỜ TIỀN KIỂM' || !t.comment);
-        const newBeacon = (isNewPending && t.ticket_status !== 'Đã đóng') ? '<span class="pulse-red-dot" title="Phiếu mới cần xử lý"></span>' : '';
         let compactPakhTypeHtml = (displayPakhType === '--')
             ? '<span style="color:#94a3b8; font-size:11px;">--</span>'
-            : `<span class="badge-status" style="${pakhBadgeStyle} font-size:9.5px; font-weight:700; padding:2px 6px; border-radius:3px; display:inline-flex; align-items:center; max-width:100%; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${escapeHtml(rawPakhType || displayPakhType)}">${newBeacon}${escapeHtml(displayPakhType)}</span>`;
+            : `<span class="badge-status" style="${pakhBadgeStyle} font-size:9.5px; font-weight:700; padding:2px 6px; border-radius:3px; display:inline-flex; align-items:center; max-width:100%; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${escapeHtml(rawPakhType || displayPakhType)}">${escapeHtml(displayPakhType)}</span>`;
 
         return `
                     <!-- 1 DÒNG GỌN CHÍNH (COMPACT ROW) -->
