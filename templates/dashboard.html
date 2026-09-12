@@ -301,11 +301,6 @@
     <!-- THANH CÔNG CỤ TRÊN CÙNG: CHỈ SỐ RÚT GỌN + BỘ ĐIỀU KHIỂN -->
     <div class="top-toolbar">
         <div class="stats-pills">
-            <div class="stat-pill idle" id="pillStatus">
-                <span class="dot"></span>
-                <span>Trạng thái:</span>
-                <strong id="statStatus">IDLE</strong>
-            </div>
             <div class="stat-pill" title="Tổng số phiếu tiếp nhận / cập nhật trong ngày hôm nay">
                 <span>Hôm nay:</span>
                 <strong id="statTotalTickets">0</strong>
@@ -321,54 +316,7 @@
             <!-- CỤM ĐIỀU KHIỂN TẬP TRUNG (UNIFIED CONTROLS) -->
             <div id="ctrlUnified" class="ctrl-group-inline"
                 style="display:flex; flex-wrap:wrap; align-items:center; gap:8px;">
-                <!-- 1. Dropdown chọn phạm vi quét (Multi-select) -->
-                <div class="dropdown-multiselect" id="scopeDropdownContainer">
-                    <button type="button" class="dropdown-multiselect-btn" id="btnScopeDropdown"
-                        onclick="toggleScopeDropdown(event)" title="Chọn các nguồn và dịch vụ cần quét tự động">
-                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M4 6h16M4 12h16M4 18h16" />
-                        </svg>
-                        <span id="lblScopeSummary">Quét: 2 phạm vi</span>
-                        <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor" style="margin-left:2px;">
-                            <path d="M7 10l5 5 5-5z" />
-                        </svg>
-                    </button>
-                    <div class="dropdown-multiselect-panel" id="scopeDropdownPanel">
-                        <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
-                            <input type="checkbox" id="chkScopeOldData" value="tts_old_data"
-                                onchange="handleScopeChange()" checked>
-                            <span>TTS Cũ — Mobile Internet (Data)</span>
-                        </label>
-                        <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
-                            <input type="checkbox" id="chkScopeOldVoice" value="tts_old_voice"
-                                onchange="handleScopeChange()">
-                            <span>TTS Cũ — Thoại/SMS/Gói/PA Khác</span>
-                        </label>
-                        <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
-                            <input type="checkbox" id="chkScopeNewData" value="tts_new_data"
-                                onchange="handleScopeChange()" checked>
-                            <span>TTS Mới — Mobile Internet (Data)</span>
-                        </label>
-                        <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
-                            <input type="checkbox" id="chkScopeNewCall" value="tts_new_call"
-                                onchange="handleScopeChange()">
-                            <span>TTS Mới — Cuộc gọi</span>
-                        </label>
-                        <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
-                            <input type="checkbox" id="chkScopeNewSms" value="tts_new_sms"
-                                onchange="handleScopeChange()">
-                            <span>TTS Mới — Tin nhắn</span>
-                        </label>
-                        <label class="dropdown-item-checkbox" onclick="event.stopPropagation()">
-                            <input type="checkbox" id="chkScopeNewOther" value="tts_new_other"
-                                onchange="handleScopeChange()">
-                            <span>TTS Mới — Gói cước & PA Khác</span>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- 2. Nút icon Refresh làm mới & quét tiền kiểm ngay lập tức -->
+                <!-- Nút icon Refresh làm mới & quét tiền kiểm ngay lập tức -->
                 <button type="button" id="btnRefreshScan" class="btn-icon-refresh" onclick="triggerManualScan()"
                     title="Làm mới & kích hoạt quét tiền kiểm ngay">
                     <svg id="iconRefreshScan" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -877,7 +825,7 @@
         </div>
     </div>
 
-    <script src="/static/js/dashboard.js?v=4.2"></script>
+    <script src="/static/js/dashboard.js?v=4.3"></script>
 </body>
 
 </html>

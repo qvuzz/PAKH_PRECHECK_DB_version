@@ -2857,6 +2857,9 @@ function getSelectedScopes() {
     if (document.getElementById('chkScopeNewSms')?.checked) scopes.push('tts_new_sms');
     if (document.getElementById('chkScopeNewOther')?.checked) scopes.push('tts_new_other');
     if (document.getElementById('chkScopeNewVoice')?.checked) scopes.push('tts_new_voice');
+    if (scopes.length === 0) {
+        return ['tts_old_data', 'tts_new_data', 'tts_new_call', 'tts_new_sms', 'tts_new_other'];
+    }
     return scopes;
 }
 
