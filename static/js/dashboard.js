@@ -1,5 +1,5 @@
 let isRunning = false;
-let currentAutoClose = true;
+let currentAutoClose = false;
 
 function escapeHtml(str) {
     if (!str) return '';
@@ -38,8 +38,8 @@ function updateModeUI(autoClose) {
             modeLabelBadge.innerText = 'Bật: Tự động đóng (TTS Cũ & Mới)';
         }
         if (headerModeTag) {
-            headerModeTag.style.color = '#15803d';
-            headerModeTag.innerText = 'Chế độ: Tự động đóng (TTS Cũ & Mới)';
+            headerModeTag.style.color = '#dc2626';
+            headerModeTag.innerText = 'Chế độ: ⚠️ Tự động đóng phiếu (Đang bật)';
         }
     } else {
         if (modeLabelBadge) {
@@ -54,14 +54,30 @@ function updateModeUI(autoClose) {
 }
 
 async function toggleAutoCloseUnified(isChecked) {
+    const chkUnified = document.getElementById('chkAutoCloseUnified');
     if (!isSystemAdmin) {
-        const chkUnified = document.getElementById('chkAutoCloseUnified');
         if (chkUnified) {
             chkUnified.checked = false;
             chkUnified.disabled = true;
         }
         return;
     }
+
+    // Nếu người dùng tick chọn bật Tự Đóng -> Yêu cầu xác nhận 2 lần vì tính chất nguy hiểm
+    if (isChecked) {
+        const confirm1 = confirm("⚠️ CẢNH BÁO NGUY HIỂM (XÁC NHẬN 1/2):\n\nBạn đang chuẩn bị kích hoạt chế độ [TỰ ĐỘNG ĐÓNG PHIẾU]!\nKhi bật, hệ thống sẽ tự động hoàn công / đóng phiếu lên CCOS/TTS mà không cần KTV kiểm tra thủ công.\n\nBạn có chắc chắn muốn tiếp tục?");
+        if (!confirm1) {
+            if (chkUnified) chkUnified.checked = false;
+            return;
+        }
+
+        const confirm2 = confirm("🚨 XÁC NHẬN LẦN 2 (BẮT BUỘC - 2/2):\n\nViệc đóng nhầm phiếu có thể ảnh hưởng nghiêm trọng đến khách hàng và chỉ số SLA dịch vụ!\n\nBạn có TUYỆT ĐỐI CHẮC CHẮN muốn kích hoạt TỰ ĐỘNG ĐÓNG không?");
+        if (!confirm2) {
+            if (chkUnified) chkUnified.checked = false;
+            return;
+        }
+    }
+
     try {
         updateModeUI(isChecked);
         await fetch('/api/config', {

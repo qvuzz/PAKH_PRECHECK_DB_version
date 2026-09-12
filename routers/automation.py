@@ -76,7 +76,7 @@ async def update_automation_config(request: Request):
     if "interval_minutes" in body:
         state.interval_minutes = int(body["interval_minutes"])
 
-    return {"success": True, "scan_scopes": getattr(state, "scan_scopes", []), "auto_close_mode": getattr(state, "auto_close_mode", "all"), "auto_close": state.auto_close}
+    return {"success": True, "scan_scopes": getattr(state, "scan_scopes", []), "auto_close_mode": getattr(state, "auto_close_mode", "none"), "auto_close": state.auto_close}
 
 
 @router.post("/stop")

@@ -33,9 +33,9 @@ class AutomationState:
         self.status = "IDLE"  # IDLE, PROCESSING, WAITING, STOPPING
         self.status_message = "Sẵn sàng khởi động"
         self.interval_minutes = 15  # Mặc định chu kỳ 15 phút
-        self.auto_close = True
+        self.auto_close = False  # Mặc định KHÔNG tự đóng để đảm bảo an toàn, KTV phải chủ động bật & xác nhận 2 lần
         self.scan_scopes = ["tts_old_data", "tts_new_data"]  # Danh sách phạm vi quét: 'tts_old_data', 'tts_old_voice', 'tts_new_data', 'tts_new_voice'
-        self.auto_close_mode = "all"  # 'all', 'tts_old', 'tts_new', 'none'
+        self.auto_close_mode = "none"  # 'all', 'tts_old', 'tts_new', 'none'
         self.engine = "api"  # 'api' (TTS Cũ) hoặc 'tts_new' (TTS Mới)
         self.dry_run = False
         self.observe = False
@@ -92,7 +92,7 @@ class AutomationState:
         - 'tts_new': Chỉ đóng TTS Mới
         - 'none': Đóng thủ công (Không tự đóng hệ thống nào)
         """
-        mode = getattr(self, "auto_close_mode", "all")
+        mode = getattr(self, "auto_close_mode", "none")
         if mode == "all":
             return True
         elif mode == "tts_old":
@@ -101,7 +101,7 @@ class AutomationState:
             return source == "tts_new"
         elif mode == "none":
             return False
-        return getattr(self, "auto_close", True)
+        return getattr(self, "auto_close", False)
 
     def get_snapshot(self):
         with self.lock:
@@ -111,7 +111,7 @@ class AutomationState:
                 "status_message": self.status_message,
                 "interval_minutes": self.interval_minutes,
                 "auto_close": self.auto_close,
-                "auto_close_mode": getattr(self, "auto_close_mode", "all"),
+                "auto_close_mode": getattr(self, "auto_close_mode", "none"),
                 "scan_scopes": list(getattr(self, "scan_scopes", ["tts_old_data", "tts_new_data"])),
                 "engine": getattr(self, "engine", "api"),
                 "dry_run": self.dry_run,

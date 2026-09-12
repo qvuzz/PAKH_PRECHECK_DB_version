@@ -378,11 +378,11 @@
 
                 <!-- 2. Tick Tự đóng phiếu -->
                 <label id="ctrlAutoCloseUnified" class="ctrl-item"
-                    style="display:flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:#334155; cursor:pointer; user-select:none; margin:0 3px;"
-                    title="Tick chọn để tự động đóng phiếu khi đủ điều kiện">
+                    style="display:flex; align-items:center; gap:5px; font-size:12px; font-weight:700; color:#dc2626; cursor:pointer; user-select:none; margin:0 3px; padding:2px 8px; border-radius:5px; border:1px solid rgba(220,38,38,0.3); background:#fef2f2;"
+                    title="CẢNH BÁO NGUY HIỂM: Tự động đóng phiếu trên hệ thống (Cần xác nhận 2 lần)">
                     <input type="checkbox" id="chkAutoCloseUnified" onchange="toggleAutoCloseUnified(this.checked)"
-                        checked style="width:15px; height:15px; accent-color:#005baa; cursor:pointer;">
-                    <span id="autoCloseUnifiedLabel">Tự đóng</span>
+                        style="width:15px; height:15px; accent-color:#dc2626; cursor:pointer;">
+                    <span id="autoCloseUnifiedLabel" style="color:#dc2626; font-weight:800; letter-spacing:0.3px;">⚠️ Tự đóng</span>
                 </label>
 
                 <!-- 3. Tick Lặp & ô nhập thời gian bên cạnh -->
