@@ -390,6 +390,7 @@ async def close_one_ttsnew_ticket(request: Request):
     status_val = str(row["status"] or "") if row else ""
     comment_val = comment_custom or (str(row["comment"] or "").strip() if (row and "comment" in row.keys()) else "")
     action_plan_val = action_plan_custom or (str(row["action_plan"] or "").strip() if (row and "action_plan" in row.keys()) else "")
+    target_step = str(body.get("target_step") or "").strip()
 
     if row:
         if not is_mobile_internet_ticket(row["package_title"]):
@@ -446,7 +447,8 @@ async def close_one_ttsnew_ticket(request: Request):
         ticket_code=clean_code,
         status=status_val,
         closing_content=comment_val,
-        assign_content=action_plan_val
+        assign_content=action_plan_val,
+        target_step=target_step
     )
     if not res_close.get("success"):
         err_msg = res_close.get("message", "Lỗi chuyển bước")

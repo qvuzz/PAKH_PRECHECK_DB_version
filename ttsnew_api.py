@@ -543,12 +543,12 @@ def decode_jwt_user(tok_str: str) -> dict:
 def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
                                phone: str = "", ticket_code: str = "",
                                status: str = "", closing_content: str = "", 
-                               assign_content: str = "") -> dict:
+                               assign_content: str = "", target_step: str = "") -> dict:
     """
     Thực hiện xử lý phiếu trên hệ thống TTS Mới qua OneOSS REST API theo đúng quy trình 2 lần xuất hiện:
     - Lần 1 (Bước 2.4):
-      + Nếu hướng xử lý chuyển VTT: Chuyển sang bước "5.1 Xây dựng PA xử lý" (định tuyến đúng VNPT Tỉnh).
-      + Nếu đóng phiếu: Chuyển sang bước "2.6 Đóng phiếu Trên TTS" (kèm clUnitId MSC/418).
+      + Hướng Đóng 5.1: Chuyển sang bước "5.1 Xây dựng PA xử lý" (định tuyến đúng VNPT Tỉnh).
+      + Hướng Đóng 2.6: Chuyển sang bước "2.6 Đóng phiếu Trên TTS" (kèm clUnitId MSC/418).
     - Lần 2 (Bước 2.6 - "2.6 Đóng phiếu Trên TTS"):
       + Đóng phiếu dứt điểm qua API close-ticket.
       + Nguyên nhân đóng phiếu: Mapped từ status trong database theo danh mục ClIncidentCause (giống TTS cũ).
@@ -673,14 +673,19 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
                 "message": f"⚠️ Phiếu đang ở bước '{curr_node_name}', không phải bước 2.4 hoặc 2.6. Hệ thống chỉ cho phép tự động đóng/chuyển bước khi phiếu ở bước 2.4 (chuyển 2.6/5.1) hoặc bước 2.6 (đóng dứt điểm). Vui lòng xử lý thủ công trên web TTS!"
             }
 
-        resp_content = (assign_content or "").strip().lower()
-        is_step_5_1 = (
-            "nhờ tạo phiếu clm chuyển vtt xử lý" in resp_content or 
-            "nhờ tạo phiếu clm chuyển vtt" in resp_content or
-            "chuyển vtt xử lý" in resp_content or
-            "chuyển vtt" in resp_content or
-            "nhờ tạo phiếu clm chuyển kỹ thuật địa bàn" in resp_content
-        )
+        if target_step == "5.1":
+            is_step_5_1 = True
+        elif target_step == "2.6":
+            is_step_5_1 = False
+        else:
+            resp_content = (assign_content or "").strip().lower()
+            is_step_5_1 = (
+                "nhờ tạo phiếu clm chuyển vtt xử lý" in resp_content or 
+                "nhờ tạo phiếu clm chuyển vtt" in resp_content or
+                "chuyển vtt xử lý" in resp_content or
+                "chuyển vtt" in resp_content or
+                "nhờ tạo phiếu clm chuyển kỹ thuật địa bàn" in resp_content
+            )
 
         chosen_node = None
         if is_step_5_1:
