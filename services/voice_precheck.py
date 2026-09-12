@@ -1,6 +1,7 @@
 # services/voice_precheck.py
-# Engine tiền kiểm chuyên biệt cho Module Cuộc gọi (Voice / Calls)
-# Quy tắc: Giữ SAPC, CEM chỉ lấy Cell/Trạm (bỏ lưu lượng MB & App events), bỏ BTools.
+# Engine tiền kiểm chuyên biệt cho các phản ánh NGOÀI Mobile Internet (Cuộc gọi / Thoại / SMS / Gói cước / PA Khác)
+# Quy tắc: BỎ HOÀN TOÀN BTools và CEM. Chỉ tra cứu SAPC (Gói cước/Dịch vụ/NAM) và HLR Cell Profile.
+# Ở bước 2.3: Mặc định điền sẵn Ý kiến phân tích và Nội dung phản hồi là "Chuyển 2.4".
 
 import os
 import re
@@ -10,16 +11,25 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def is_voice_ticket(title: str) -> bool:
+    """Kiểm tra xem phiếu có phải thuộc nhóm Thoại / Cuộc gọi / Sự cố ngoài Mobile Internet hay không."""
+    from db_manager import is_mobile_internet_ticket
+    return not is_mobile_internet_ticket(title)
+
+
 def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, cem_client=None, driver=None) -> dict:
     """
-    Tiền kiểm chuyên biệt 1 phiếu Cuộc gọi:
-    1. Tra cứu SAPC: Lấy trạng thái NAM (0/1), HSS Profile (VoLTE), gói cước, dịch vụ.
-    2. Tra cứu Cell từ SAPC và CEM (chỉ thống kê Top Cell/Trạm, bỏ qua App usage & lưu lượng MB).
-    3. Phân tích kịch bản cuộc gọi và đưa ra nhận định, ý kiến đóng phiếu chuẩn VNPT.
+    Tiền kiểm chuyên biệt cho phản ánh ngoài Mobile Internet (Cuộc gọi / Thoại / SMS / Gói cước):
+    1. Tra cứu SAPC: Lấy trạng thái NAM (0/1), HSS Profile (VoLTE), gói thoại/dịch vụ.
+    2. Lấy Cell trực tiếp từ HLR/SAPC (bỏ hoàn toàn cào BTools và CEM API để tối ưu tốc độ).
+    3. Phân tích kịch bản cuộc gọi và đưa ra nhận định chuẩn.
+    4. Ở bước 2.3: Tự động nhập sẵn Ý kiến phân tích & Nội dung phản hồi là "Chuyển 2.4".
     """
     code = ticket.get("ticket_code", "")
     title = ticket.get("title", "")
     ticket_content = ticket.get("content", "")
+    step_name = str(ticket.get("step_name") or "")
     reopen_count = int(ticket.get("reopen_count") or 0)
     last_reopened_date = str(ticket.get("last_reopened_date") or "").strip()
 
@@ -46,13 +56,6 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
             except Exception:
                 pass
 
-    if cem_client is None:
-        try:
-            from cem_client import CEMClient
-            cem_client = CEMClient(driver=driver)
-        except Exception:
-            pass
-
     info_result = {}
     sapc_result = {"msisdn": phone_84, "packages": []}
     formatted_packages = "--"
@@ -61,7 +64,7 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
     rat_type_str = "2G/3G/4G Thoại"
 
     # =========================================================================
-    # 1. TRA CỨU SAPC (Kiểm tra trạng thái NAM, thuê bao, dịch vụ)
+    # 1. TRA CỨU SAPC (Kiểm tra trạng thái NAM, thuê bao, dịch vụ, trạm Cell HLR)
     # =========================================================================
     if sapc_client:
         try:
@@ -83,7 +86,7 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
                 }, hf, ensure_ascii=False, indent=4)
 
             formatted_packages = get_formatted_sapc_packages(phone_84)
-        except Exception as ex_sapc:
+        except Exception:
             pass
 
     nam_val = str(info_result.get("NAM") or "0").strip()
@@ -99,47 +102,17 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
         if len(hss_digits) >= 3 or "lạ" in hss_profile.lower():
             is_strange_hss = True
 
-    # =========================================================================
-    # 2. TRA CỨU CEM (CHỈ LẤY THỐNG KÊ CELL/TRẠM ĐỂ PHÒNG SỰ CỐ DIỆN RỘNG)
-    # =========================================================================
-    cem_cell_summary = ""
-    top_primary_cell = ""
-    if cem_client:
-        try:
-            from cem_client import CEMClient
-            # Chỉ lấy lịch sử cell 2 ngày gần nhất, không lấy App Events
-            cell_records = cem_client.get_subscriber_cell_history(phone_84, days=2)
-            if cell_records:
-                cem_cell_summary = CEMClient.extract_top_cells_summary(cell_records)
-                # Lấy tên cell xuất hiện đầu tiên
-                for r in cell_records:
-                    c_name = r.get("cell_name") or r.get("cell_id") or r.get("first_cell")
-                    if c_name:
-                        top_primary_cell = str(c_name).strip()
-                        break
-        except Exception:
-            pass
-
-    # Tổng hợp thông tin trạm phát sóng
-    cell_display_parts = []
-    if top_primary_cell:
-        cell_display_parts.append(f"Trạm CEM: {top_primary_cell}")
-    elif sapc_cell and sapc_cell != "--":
-        cell_display_parts.append(f"Cell SAPC: {sapc_cell}")
-
-    if cem_cell_summary and not cem_cell_summary.startswith("Không có"):
-        cell_display_str = cem_cell_summary
-    elif cell_display_parts:
-        cell_display_str = " | ".join(cell_display_parts)
+    # Thông tin trạm Cell (lấy từ SAPC/HLR, không tiền kiểm CEM)
+    if sapc_cell and sapc_cell != "--":
+        cell_display_str = f"Cell SAPC: {sapc_cell}"
     else:
         cell_display_str = "Trạm phát sóng khu vực đảm bảo"
 
     # =========================================================================
-    # 3. BỘ QUY TẮC TIỀN KIỂM CUỘC GỌI (VOICE SCENARIOS & VOLTE)
+    # 2. BỘ QUY TẮC TIỀN KIỂM CUỘC GỌI / NGOÀI DATA
     # =========================================================================
     status = "MẠNG LƯỚI ĐẢM BẢO"
     color = "green"
-    primary_cell_name = top_primary_cell or sapc_cell or "khu vực"
 
     # Kịch bản 1: Cảnh báo phiếu mở lại nhiều lần
     if reopen_count > 0:
@@ -162,10 +135,18 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
         status = "MẠNG LƯỚI ĐẢM BẢO"
         color = "green"
 
-    # Tuyệt đối KHÔNG tự ý điền Ý kiến phân tích (Cột 10) và Nội dung phản hồi (Cột 11) cho Cuộc gọi/Thoại
-    # Để trống hoàn toàn để KTV tự nhập theo ý muốn hoặc để trống.
-    comment = ""
-    action_plan = ""
+    # =========================================================================
+    # 3. ĐIỀN SẴN NỘI DUNG CHO BƯỚC 2.3: "Chuyển 2.4"
+    # =========================================================================
+    raw_step_check = f"{step_name} {code}".lower()
+    is_step_23 = ("2.3" in raw_step_check) or ("xử lý pakh" in raw_step_check)
+
+    if is_step_23:
+        comment = "Chuyển 2.4"
+        action_plan = "Chuyển 2.4"
+    else:
+        comment = ""
+        action_plan = ""
 
     # Tổng hợp trường hiển thị tóm tắt nội dung
     ai_summary_val = ticket_content
@@ -182,10 +163,11 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
         "action_plan": action_plan,
         "comment": comment,
         "real_packages": formatted_packages,
+        "formatted_pkg": formatted_packages,
         "rat_types": rat_type_str,
         "cem_data": cell_display_str,
-        "app_usage": "--",  # Bỏ app usage cho cuộc gọi
+        "app_usage": "--",  # Bỏ qua CEM & App usage
         "ai_summary": ai_summary_val,
         "nam": nam_val,
-        "cell_primary": primary_cell_name
+        "cell_primary": sapc_cell or "khu vực"
     }

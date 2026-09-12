@@ -96,12 +96,6 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
         except Exception:
             sapc_client = None
 
-        from cem_client import CEMClient
-        try:
-            cem_client = CEMClient()
-        except Exception:
-            cem_client = None
-
         from services.voice_precheck import precheck_single_voice_ticket
 
         # Bước 2: Tra cứu Core & Profile song song để xử lý nhanh toàn bộ danh sách phiếu
@@ -118,7 +112,11 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
             state.current_step = f"Tiền kiểm {lbl} {idx}/{len(voice_tickets)}: {phone_84}"
             try:
                 step_name_raw = str(t.get("step_name") or "")
+                is_step_23 = ("2.3" in step_name_raw) or ("2.3" in str(code)) or ("xử lý pakh" in step_name_raw.lower())
                 is_step_26 = ("2.6" in step_name_raw) or (t.get("ticket_status") == "Chờ đóng lần 2")
+
+                default_comment = "Chuyển 2.4" if is_step_23 else ""
+                default_action_plan = "Chuyển 2.4" if is_step_23 else ""
 
                 existing_db_row = None
                 try:
@@ -148,11 +146,13 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
 
                 if can_reuse_db:
                     state.log("INFO", f"   ↳ 📋 Thuê bao {phone_84} đã có kết quả tiền kiểm trong DB: [{existing_db_row['status']}]. Giữ nguyên hiển thị.")
+                    final_comment = existing_db_row["comment"] if existing_db_row["comment"] else default_comment
+                    final_plan = existing_db_row["action_plan"] if existing_db_row["action_plan"] else default_action_plan
                     eval_res = {
                         "status": existing_db_row["status"],
                         "color": existing_db_row["color"] or "green",
-                        "comment": existing_db_row["comment"] or "",
-                        "action_plan": existing_db_row["action_plan"] or "",
+                        "comment": final_comment,
+                        "action_plan": final_plan,
                         "real_packages": existing_db_row["real_packages"] or "--",
                         "rat_types": existing_db_row["rat_types"] or "2G/3G/4G Thoại",
                         "cem_data": existing_db_row["cem_data"] or "--",
@@ -162,9 +162,10 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                     eval_res = precheck_single_voice_ticket(
                         phone_84=phone_84, 
                         ticket=t, 
-                        sapc_client=sapc_client, 
-                        cem_client=cem_client
+                        sapc_client=sapc_client
                     )
+                    final_comment = eval_res.get("comment") or default_comment
+                    final_plan = eval_res.get("action_plan") or default_action_plan
 
                 ticket_content = t.get("content", "")
                 reopen_count = int(t.get("reopen_count") or 0)
@@ -177,8 +178,8 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                     "ticket_content": ticket_content,
                     "status": eval_res.get("status", "MẠNG LƯỚI ĐẢM BẢO"),
                     "color": eval_res.get("color", "green"),
-                    "comment": eval_res.get("comment", ""),
-                    "action_plan": eval_res.get("action_plan", ""),
+                    "comment": final_comment,
+                    "action_plan": final_plan,
                     "real_packages": eval_res.get("real_packages", "--"),
                     "rat_types": eval_res.get("rat_types", "2G/3G/4G Thoại"),
                     "cem_data": eval_res.get("cem_data", "--"),

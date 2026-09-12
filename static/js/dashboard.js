@@ -1253,6 +1253,12 @@ function renderTicketsTable(force = false) {
             }
         }
 
+        // Phân biệt chính xác bước hiện tại: 2.3, 2.4 hay 2.6 cho TẤT CẢ các module
+        const rawStepCheck = ((stepName || '') + ' ' + (t.ticket_code || '') + ' ' + (t.step_name || '')).toLowerCase();
+        const isStep23 = rawStepCheck.includes('2.3');
+        const isStep26 = rawStepCheck.includes('2.6') || (t.ticket_status === 'Chờ đóng lần 2');
+        const isStep24 = !isStep23 && !isStep26;
+
         if (t.ticket_status === 'Đã đóng' || t.ticket_status === 'Da dong') {
             actionHtml = `
                         <div style="display:flex; flex-direction:column; align-items:center; gap:3px;">
@@ -1273,12 +1279,6 @@ function renderTicketsTable(force = false) {
             } else if (currentTableTab === 'all') {
                 stageBadge = `<span class="badge-status badge-yellow" style="font-size:10px; padding:2px 6px; font-weight:700;">CHƯA ĐÓNG</span>`;
             }
-
-            // Phân biệt chính xác bước hiện tại: 2.3, 2.4 hay 2.6 cho TẤT CẢ các module trên TTS Mới
-            const rawStepCheck = ((stepName || '') + ' ' + (t.ticket_code || '') + ' ' + (t.step_name || '')).toLowerCase();
-            const isStep23 = rawStepCheck.includes('2.3');
-            const isStep26 = rawStepCheck.includes('2.6') || (t.ticket_status === 'Chờ đóng lần 2');
-            const isStep24 = !isStep23 && !isStep26;
 
             if (isStep23) {
                 // Bước 2.3 -> Cột Thao tác là "Chuyển 2.4"
@@ -2022,12 +2022,23 @@ function renderTicketsTable(force = false) {
                                 ${compactSummaryHtml}
                             </div>
                         </td>
+                        ${(() => {
+                            let displayComment = (t.comment !== null && t.comment !== undefined) ? t.comment : '';
+                            let displayPlan = (t.action_plan !== null && t.action_plan !== undefined) ? t.action_plan : '';
+                            const isVoiceOrCall = (currentService === 'call' || currentService === 'voice' || currentService === 'voice_sms' || (t.package_title && (t.package_title.toLowerCase().includes('thoại') || t.package_title.toLowerCase().includes('cuộc gọi'))));
+                            if (isStep23 && (isOtherPakh || isVoiceOrCall)) {
+                                if (!displayComment) displayComment = 'Chuyển 2.4';
+                                if (!displayPlan) displayPlan = 'Chuyển 2.4';
+                            }
+                            return `
                         <td style="vertical-align:middle; padding:2px 3px;">
-                            <input type="text" id="input-compact-comment-${ticketKey}" class="compact-input-cell" value="${escapeHtml(t.comment || '')}" placeholder="Ý kiến KTV..." oninput="syncCompactToDetail('${ticketKey}', 'comment', this.value)" onchange="updateTicket('${t.phone}', '${t.incident_time}', 'comment', this.value)">
+                            <input type="text" id="input-compact-comment-${ticketKey}" class="compact-input-cell" value="${escapeHtml(displayComment)}" placeholder="Ý kiến KTV..." oninput="syncCompactToDetail('${ticketKey}', 'comment', this.value)" onchange="updateTicket('${t.phone}', '${t.incident_time}', 'comment', this.value)">
                         </td>
                         <td style="vertical-align:middle; padding:2px 3px;">
-                            <input type="text" id="input-compact-plan-${ticketKey}" class="compact-input-cell" value="${escapeHtml(t.action_plan || '')}" placeholder="Nội dung phản hồi..." oninput="syncCompactToDetail('${ticketKey}', 'action_plan', this.value)" onchange="updateTicket('${t.phone}', '${t.incident_time}', 'action_plan', this.value)">
+                            <input type="text" id="input-compact-plan-${ticketKey}" class="compact-input-cell" value="${escapeHtml(displayPlan)}" placeholder="Nội dung phản hồi..." oninput="syncCompactToDetail('${ticketKey}', 'action_plan', this.value)" onchange="updateTicket('${t.phone}', '${t.incident_time}', 'action_plan', this.value)">
                         </td>
+                            `;
+                        })()}
                         <td style="text-align:center; vertical-align:middle; padding:2px 2px;">
                             ${compactActionHtml}
                         </td>
@@ -2057,17 +2068,17 @@ function renderTicketsTable(force = false) {
                                     <div style="flex:1; overflow-y:auto; max-height:230px; font-size:11px; line-height:1.4;">
                                         <div style="margin-bottom:8px;">${pkgHtml}</div>
                                         ${(t.cem_data && t.cem_data !== '--') || vpnAppName ? `
-                                            <div style="border-top:1px dashed #cbd5e1; padding-top:6px; margin-top:6px;">
-                                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
-                                                    <div style="display:flex; align-items:center; gap:6px;">
-                                                        <strong style="color:#0f172a; font-size:11px;">Dữ liệu CEM:</strong>
-                                                        <a href="https://cem.vnptmedia.vn/" target="_blank" style="font-size:10.5px; color:#0284c7; font-weight:700; text-decoration:none;" title="Mở cổng CEM (cem.vnptmedia.vn)">CEM ↗</a>
-                                                    </div>
-                                                    ${vpnAppName ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; font-weight:700; font-size:9.5px; padding:1px 6px; border-radius:3px;">⚠️ CẢNH BÁO VPN: ${escapeHtml(vpnAppName)}</span>` : ''}
-                                                </div>
-                                                ${cemHtml}
-                                            </div>
-                                        ` : ''}
+                                             <div style="border-top:1px dashed #cbd5e1; padding-top:6px; margin-top:6px;">
+                                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                                                     <div style="display:flex; align-items:center; gap:6px;">
+                                                         <strong style="color:#0f172a; font-size:11px;">Dữ liệu CEM:</strong>
+                                                         <a href="https://cem.vnptmedia.vn/" target="_blank" style="font-size:10.5px; color:#0284c7; font-weight:700; text-decoration:none;" title="Mở cổng CEM (cem.vnptmedia.vn)">CEM ↗</a>
+                                                     </div>
+                                                     ${vpnAppName ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; font-weight:700; font-size:9.5px; padding:1px 6px; border-radius:3px;">⚠️ CẢNH BÁO VPN: ${escapeHtml(vpnAppName)}</span>` : ''}
+                                                 </div>
+                                                 ${cemHtml}
+                                             </div>
+                                         ` : ''}
                                     </div>
                                 </div>
 
@@ -2078,20 +2089,31 @@ function renderTicketsTable(force = false) {
                                         <span style="font-size:10.5px; color:#15803d; font-weight:600;">Tự động lưu</span>
                                     </div>
                                     <div style="display:flex; flex-direction:column; gap:8px;">
+                                        ${(() => {
+                                            let detailComment = (t.comment !== null && t.comment !== undefined) ? t.comment : '';
+                                            let detailPlan = (t.action_plan !== null && t.action_plan !== undefined) ? t.action_plan : '';
+                                            const isVoiceOrCall = (currentService === 'call' || currentService === 'voice' || currentService === 'voice_sms' || (t.package_title && (t.package_title.toLowerCase().includes('thoại') || t.package_title.toLowerCase().includes('cuộc gọi'))));
+                                            if (isStep23 && (isOtherPakh || isVoiceOrCall)) {
+                                                if (!detailComment) detailComment = 'Chuyển 2.4';
+                                                if (!detailPlan) detailPlan = 'Chuyển 2.4';
+                                            }
+                                            return `
                                         <div>
                                             <div style="font-size:11px; font-weight:700; color:#334155; margin-bottom:3px; display:flex; justify-content:space-between;">
                                                 <span>Ý kiến phân tích (Cột 10):</span>
                                                 <div id="save-comment-${ticketKey}" class="save-indicator">Đã lưu tự động</div>
                                             </div>
-                                            <textarea id="textarea-detail-comment-${ticketKey}" class="editable-cell" oninput="syncDetailToCompact('${ticketKey}', 'comment', this.value); this.style.height='auto'; this.style.height=(this.scrollHeight+4)+'px';" onchange="updateTicket('${t.phone}', '${t.incident_time}', 'comment', this.value)">${escapeHtml(t.comment || '')}</textarea>
+                                            <textarea id="textarea-detail-comment-${ticketKey}" class="editable-cell" oninput="syncDetailToCompact('${ticketKey}', 'comment', this.value); this.style.height='auto'; this.style.height=(this.scrollHeight+4)+'px';" onchange="updateTicket('${t.phone}', '${t.incident_time}', 'comment', this.value)">${escapeHtml(detailComment)}</textarea>
                                         </div>
                                         <div>
                                             <div style="font-size:11px; font-weight:700; color:#334155; margin-bottom:3px; display:flex; justify-content:space-between;">
                                                 <span>Nội dung phản hồi (Cột 11):</span>
                                                 <div id="save-plan-${ticketKey}" class="save-indicator">Đã lưu tự động</div>
                                             </div>
-                                            <textarea id="textarea-detail-action_plan-${ticketKey}" class="editable-cell" oninput="syncDetailToCompact('${ticketKey}', 'action_plan', this.value); this.style.height='auto'; this.style.height=(this.scrollHeight+4)+'px';" onchange="updateTicket('${t.phone}', '${t.incident_time}', 'action_plan', this.value)">${escapeHtml(t.action_plan || '')}</textarea>
+                                            <textarea id="textarea-detail-action_plan-${ticketKey}" class="editable-cell" oninput="syncDetailToCompact('${ticketKey}', 'action_plan', this.value); this.style.height='auto'; this.style.height=(this.scrollHeight+4)+'px';" onchange="updateTicket('${t.phone}', '${t.incident_time}', 'action_plan', this.value)">${escapeHtml(detailPlan)}</textarea>
                                         </div>
+                                            `;
+                                        })()}
 
                                         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px; margin-top:4px; padding-top:6px; border-top:1px solid #f1f5f9;">
                                             ${reopenCount > 0 ? `
@@ -2423,6 +2445,10 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
             commentVal = textareas[0].value.trim();
             actionPlanVal = textareas[1].value.trim();
         }
+        const cInput = row.querySelector('.compact-input-cell[id^="input-compact-comment-"]');
+        const pInput = row.querySelector('.compact-input-cell[id^="input-compact-plan-"]');
+        if (cInput && !commentVal) commentVal = cInput.value.trim();
+        if (pInput && !actionPlanVal) actionPlanVal = pInput.value.trim();
     }
 
     const originalHtml = btnElem ? btnElem.innerHTML : '';

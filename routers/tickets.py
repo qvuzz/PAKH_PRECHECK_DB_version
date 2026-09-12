@@ -614,11 +614,12 @@ async def precheck_one_ticket(request: Request):
 
         conn = get_db_connection()
         with conn:
-            cur = conn.execute("SELECT package_title, ticket_content, reopen_count FROM tickets WHERE phone = ?", (phone,))
+            cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code FROM tickets WHERE phone = ?", (phone,))
             row = cur.fetchone()
             pkg_title = (row[0] if row else "Thoại / SMS") or ""
             t_content = row[1] if row else ""
             reopen_cnt = row[2] if row and len(row) > 2 else 0
+            t_code = row[3] if row and len(row) > 3 else ""
 
             from services.voice_precheck import is_voice_ticket, precheck_single_voice_ticket
             if is_voice_ticket(pkg_title):
@@ -626,7 +627,8 @@ async def precheck_one_ticket(request: Request):
                     "package_title": pkg_title,
                     "ticket_content": t_content,
                     "incident_time": incident_time,
-                    "reopen_count": reopen_cnt
+                    "reopen_count": reopen_cnt,
+                    "ticket_code": t_code
                 }
                 v_res = precheck_single_voice_ticket(phone, t_info, driver=driver)
                 conn.execute("""
@@ -648,7 +650,7 @@ async def precheck_one_ticket(request: Request):
                     v_res.get("action_plan", ""),
                     phone
                 ))
-                state.log("SUCCESS", f"✅ Đã tiền kiểm Cuộc gọi xong cho {phone}: {v_res.get('status')}")
+                state.log("SUCCESS", f"✅ Đã tiền kiểm Thoại / SMS / Gói xong cho {phone}: {v_res.get('status')}")
                 return {"success": True, "formatted_pkg": v_res.get("formatted_pkg", ""), "info": info_res}
 
             num_file = BASE_DIR / "number" / f"{phone}.json"
@@ -661,7 +663,7 @@ async def precheck_one_ticket(request: Request):
                 except Exception:
                     pass
 
-            is_mobile_data = "thoại" not in str(pkg_title).lower() and "sms" not in str(pkg_title).lower()
+            is_mobile_data = not is_voice_ticket(pkg_title)
 
             if is_mobile_data:
                 try:
