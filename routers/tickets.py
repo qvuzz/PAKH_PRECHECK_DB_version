@@ -267,9 +267,9 @@ async def open_detail_ttsnew_api(request: Request):
     conn = get_db_connection()
     row = None
     if ticket_code:
-        row = conn.execute("SELECT ticket_code, phone, ticket_id, flow_id, comment, action_plan FROM tickets WHERE ticket_code = ? OR ticket_code LIKE ?", (ticket_code, f"{ticket_code}%")).fetchone()
+        row = conn.execute("SELECT ticket_code, phone, ticket_id, flow_id, comment, action_plan, package_title FROM tickets WHERE ticket_code = ? OR ticket_code LIKE ?", (ticket_code, f"{ticket_code}%")).fetchone()
     if not row and phone:
-        row = conn.execute("SELECT ticket_code, phone, ticket_id, flow_id, comment, action_plan FROM tickets WHERE phone = ? AND source = 'tts_new'", (phone,)).fetchone()
+        row = conn.execute("SELECT ticket_code, phone, ticket_id, flow_id, comment, action_plan, package_title FROM tickets WHERE phone = ? AND source = 'tts_new'", (phone,)).fetchone()
     conn.close()
 
     ticket_id = row["ticket_id"] if (row and row["ticket_id"]) else None
@@ -278,6 +278,8 @@ async def open_detail_ttsnew_api(request: Request):
     clean_code = code.split("\n")[0].strip() if code else ""
     comment_val = str(row["comment"] or "").strip() if (row and "comment" in row.keys()) else ""
     action_plan_val = str(row["action_plan"] or "").strip() if (row and "action_plan" in row.keys()) else ""
+    pkg_title = (row["package_title"] if (row and "package_title" in row.keys()) else "") or ""
+    is_data_ticket = is_mobile_internet_ticket(pkg_title)
 
     if not ticket_id and clean_code and "/" in clean_code:
         try:
@@ -342,30 +344,32 @@ async def open_detail_ttsnew_api(request: Request):
             # Đợi nhẹ cho trang chi tiết hiển thị
             target_page.wait_for_timeout(1500)
 
-            # Thử mở dialog Cập nhật xử lý (nếu có)
-            try:
-                btn_cap_nhat = target_page.query_selector('button.p-button-primary:has-text("Cập nhật xử lý")')
-                if btn_cap_nhat:
-                    btn_cap_nhat.click()
-                    target_page.wait_for_timeout(1000)
+            # TUYỆT ĐỐI KHÔNG TỰ Ý ĐIỀN THÔNG TIN VÀO CÁC PHẢN ÁNH KHÁC NGOÀI MOBILE INTERNET.
+            # Chỉ tự động mở dialog và điền nội dung xử lý khi là phiếu Mobile Internet!
+            if is_data_ticket:
+                try:
+                    btn_cap_nhat = target_page.query_selector('button.p-button-primary:has-text("Cập nhật xử lý")')
+                    if btn_cap_nhat:
+                        btn_cap_nhat.click()
+                        target_page.wait_for_timeout(1000)
 
-                    dialog = target_page.query_selector('.p-dialog:has-text("Cập nhật xử lý")')
-                    if dialog:
-                        b0_true = dialog.query_selector('p-radiobutton:has-text("True") .p-radiobutton-box')
-                        if b0_true:
-                            b0_true.click()
+                        dialog = target_page.query_selector('.p-dialog:has-text("Cập nhật xử lý")')
+                        if dialog:
+                            b0_true = dialog.query_selector('p-radiobutton:has-text("True") .p-radiobutton-box')
+                            if b0_true:
+                                b0_true.click()
 
-                        combined_text = f"{comment_val}\n{action_plan_val}".strip() if (comment_val and action_plan_val) else (comment_val or action_plan_val or "")
-                        if combined_text:
-                            txt_closing = dialog.query_selector('textarea[name="closingContent"], textarea[formcontrolname="closingContent"]')
-                            if txt_closing:
-                                txt_closing.fill(combined_text)
+                            combined_text = f"{comment_val}\n{action_plan_val}".strip() if (comment_val and action_plan_val) else (comment_val or action_plan_val or "")
+                            if combined_text:
+                                txt_closing = dialog.query_selector('textarea[name="closingContent"], textarea[formcontrolname="closingContent"]')
+                                if txt_closing:
+                                    txt_closing.fill(combined_text)
 
-                            txt_assign = dialog.query_selector('textarea[name="assignContent"], textarea[formcontrolname="assignContent"]')
-                            if txt_assign:
-                                txt_assign.fill(combined_text)
-            except Exception as ex_modal:
-                pass
+                                txt_assign = dialog.query_selector('textarea[name="assignContent"], textarea[formcontrolname="assignContent"]')
+                                if txt_assign:
+                                    txt_assign.fill(combined_text)
+                except Exception as ex_modal:
+                    pass
 
         state.log("SUCCESS", f"✅ Đã mở chi tiết phiếu {clean_code or code} trên tab TTS Mới thành công!")
         return {
