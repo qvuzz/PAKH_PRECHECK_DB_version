@@ -529,11 +529,15 @@ async function loadClosedAnalytics() {
     }
 }
 
-function selectHistoryStats() {
+function selectHistoryStats(updateUrl = true) {
     isHistoryStatsView = true;
     currentSystem = currentClosedSource;
     currentService = currentClosedService;
     currentTableTab = 'da_dong';
+
+    if (updateUrl && window.location.pathname !== '/thong-ke') {
+        history.pushState({ tab: 'thong-ke' }, '', '/thong-ke');
+    }
 
     // Highlight nav item
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.remove('active'));
@@ -558,10 +562,22 @@ function selectHistoryStats() {
     loadClosedAnalytics();
 }
 
-function selectModule(sys, srv) {
+function selectModule(sys, srv, updateUrl = true) {
     isHistoryStatsView = false;
     currentSystem = sys;
     currentService = srv;
+
+    if (updateUrl) {
+        let routePath = '/ttscu/data';
+        if (sys === 'tts_new') {
+            routePath = (srv === 'data') ? '/ttsmoi/data' : '/ttsmoi/voice';
+        } else {
+            routePath = (srv === 'data') ? '/ttscu/data' : '/ttscu/voice';
+        }
+        if (window.location.pathname !== routePath) {
+            history.pushState({ sys, srv }, '', routePath);
+        }
+    }
 
     const mainTabs = document.getElementById('mainTabsHeader');
     if (mainTabs) mainTabs.style.display = 'flex';
@@ -596,10 +612,14 @@ function selectModule(sys, srv) {
     switchTableTab(currentTableTab);
 }
 
-function selectHistoryModule(tab = 'all') {
+function selectHistoryModule(tab = 'all', updateUrl = true) {
     isHistoryStatsView = false;
     currentSystem = 'all';
     currentService = 'all';
+
+    if (updateUrl && window.location.pathname !== '/lich-su') {
+        history.pushState({ tab: 'lich-su' }, '', '/lich-su');
+    }
 
     const mainTabs = document.getElementById('mainTabsHeader');
     if (mainTabs) mainTabs.style.display = 'flex';
@@ -636,6 +656,30 @@ function selectHistoryModule(tab = 'all') {
 
     switchTableTab(tab);
 }
+
+// SPA ROUTER: Điều hướng trang theo URL trên thanh địa chỉ trình duyệt
+function handleSpaRoute(pathname) {
+    const p = (pathname || window.location.pathname).toLowerCase().replace(/\/$/, '') || '/';
+    if (p === '/ttsmoi/data' || p === '/ttsmoi/mobileinternet') {
+        selectModule('tts_new', 'data', false);
+    } else if (p === '/ttsmoi/voice' || p === '/ttsmoi/voice_sms') {
+        selectModule('tts_new', 'voice_sms', false);
+    } else if (p === '/ttscu/voice' || p === '/ttscu/voice_sms') {
+        selectModule('tts_old_api', 'voice_sms', false);
+    } else if (p === '/thong-ke' || p === '/analytics') {
+        selectHistoryStats(false);
+    } else if (p === '/lich-su' || p === '/history') {
+        selectHistoryModule('all', false);
+    } else {
+        // Mặc định: / hoặc /ttscu/data
+        selectModule('tts_old_api', 'data', false);
+    }
+}
+
+// Bắt sự kiện người dùng bấm nút Back / Forward của trình duyệt
+window.addEventListener('popstate', function (event) {
+    handleSpaRoute(window.location.pathname);
+});
 
 function onSourceFilterChange(val) {
     currentSystem = val;
@@ -3228,7 +3272,9 @@ initUserSession();
 setInterval(fetchStatus, 1500);
 setInterval(() => loadTickets(false), 8000);
 fetchStatus();
-loadTickets(true);
+
+// Kích hoạt đúng tab theo URL hiện tại trên thanh địa chỉ trình duyệt
+handleSpaRoute(window.location.pathname);
 
 // ==============================================================================
 // ĐIỀU KHIỂN DROPDOWN LIVE LOG TRÊN THANH IDLE BAR
