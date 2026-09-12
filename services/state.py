@@ -34,7 +34,7 @@ class AutomationState:
         self.status_message = "Hệ thống tự động tiền kiểm đang hoạt động"
         self.interval_minutes = 2.5  # Chu kỳ quét chuyên sâu nền tự động (BTools + SAPC)
         self.auto_close = False  # Mặc định KHÔNG tự đóng để đảm bảo an toàn, KTV phải chủ động bật & xác nhận 2 lần
-        self.scan_scopes = ["tts_old_data", "tts_new_data"]  # Danh sách phạm vi quét: 'tts_old_data', 'tts_old_voice', 'tts_new_data', 'tts_new_voice'
+        self.scan_scopes = ["tts_old_data", "tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"]  # Quét tự động toàn bộ phân hệ nghiệp vụ
         self.auto_close_mode = "none"  # 'all', 'tts_old', 'tts_new', 'none'
         self.engine = "api"  # 'api' (TTS Cũ) hoặc 'tts_new' (TTS Mới)
         self.dry_run = False
