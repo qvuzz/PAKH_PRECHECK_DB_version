@@ -260,6 +260,7 @@ except Exception:
         "LỖI GÓI CƯỚC - SAI SERVICE ID": "Lỗi do gói cước",
         "LỖI GÓI HOME / NGHẼN BĂNG THÔNG": "Lỗi do gói cước",
         "NGHI NGỜ LỖI GÓI CƯỚC": "Lỗi do gói cước",
+        "ĐẶC THÙ ĐỊA HÌNH BIỂN ĐẢO": "Khách hàng theo dõi thêm",
     }
 
 # Mapping từ tên nguyên nhân chuẩn hóa sang ID của ClIncidentCause trên TTS Mới (clTicketTypeId=2)

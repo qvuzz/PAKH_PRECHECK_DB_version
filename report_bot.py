@@ -945,6 +945,44 @@ def detect_device_category(ticket_content="", ai_summary=""):
     return "unknown", extracted_dev or "thiết bị"
 
 
+def extract_island_special_zone(ticket_content="", package_title="", address=""):
+    """
+    Nhận diện xem thuê bao có thuộc khu vực Đặc khu / Biển đảo đặc thù khó cải thiện không.
+    Trả về tên địa danh biển đảo nếu khớp, ngược lại trả về None.
+    """
+    raw_text = f"{ticket_content} {package_title} {address}".lower()
+    ISLAND_ZONES = [
+        ("đặc khu phú quốc", "Đặc khu Phú Quốc"),
+        ("phú quốc", "Đặc khu Phú Quốc"),
+        ("phu quoc", "Đặc khu Phú Quốc"),
+        ("hòn thơm", "Hòn Thơm (Phú Quốc)"),
+        ("hon thom", "Hòn Thơm (Phú Quốc)"),
+        ("an thới", "An Thới (Phú Quốc)"),
+        ("dương tơ", "Dương Tơ (Phú Quốc)"),
+        ("dương đông", "Dương Đông (Phú Quốc)"),
+        ("bãi thơm", "Bãi Thơm (Phú Quốc)"),
+        ("côn đảo", "Đặc khu Côn Đảo"),
+        ("con dao", "Đặc khu Côn Đảo"),
+        ("phú quý", "Đặc khu Phú Quý"),
+        ("phu quy", "Đặc khu Phú Quý"),
+        ("lý sơn", "Đảo Lý Sơn"),
+        ("ly son", "Đảo Lý Sơn"),
+        ("cù lao chàm", "Cù Lao Chàm"),
+        ("cát bà", "Quần đảo Cát Bà"),
+        ("bạch long vĩ", "Đảo Bạch Long Vĩ"),
+        ("cô tô", "Đảo Cô Tô"),
+        ("vân đồn", "Đặc khu Vân Đồn"),
+        ("kiên hải", "Huyện đảo Kiên Hải"),
+        ("nam du", "Quần đảo Nam Du"),
+        ("hòn sơn", "Đảo Hòn Sơn"),
+        ("hòn tre", "Đảo Hòn Tre"),
+    ]
+    for kw, label in ISLAND_ZONES:
+        if kw in raw_text:
+            return label
+    return None
+
+
 def evaluate_vpn_status(
     clean_data,
     cem_records,
@@ -1111,6 +1149,9 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     ALERT_ACTION = "\nCần kiểm tra tình trạng thuê bao, thiết bị, sim và gói cước"
     comment_suffix = ""
     action_suffix = ""
+
+    # 🏝️ Nhận diện khu vực Đặc khu / Biển đảo đặc thù
+    island_zone = extract_island_special_zone(ticket_content=ticket_content, package_title=package_title)
 
     # 🎯 KỊCH BẢN ĐẶC THÙ: BTOOLS BỊ LỖI HOẶC CHƯA ĐĂNG NHẬP (KHÔNG ĐƯỢC TỰ ĐỘNG ĐÓNG PHIẾU)
     if clean_data is None:
@@ -1405,6 +1446,13 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     )
                 else:
                     # Trước đó có data, 5 ngày gần đây hoàn toàn không có phiên nào
+                    if island_zone:
+                        return (
+                            "ĐẶC THÙ ĐỊA HÌNH BIỂN ĐẢO",
+                            f"Thuê bao có gói cước {act_names} phản ánh sự cố kết nối/mất sóng tại khu vực đặc thù biển đảo ({island_zone}). Do đặc thù địa hình đồi núi ven biển, khoảng cách xa trạm BTS và suy hao truyền dẫn qua môi trường biển, khu vực này thường xuyên bị suy hao hoặc lõm sóng (5 ngày gần đây không phát sinh dữ liệu BTools).",
+                            f"Khu vực biển đảo địa hình phức tạp, trạm phát sóng bị giới hạn vùng phủ và khó khả thi nâng cấp hạ tầng ngay. Kính nhờ ĐTV/VNP liên hệ giải thích đặc thù địa bàn {island_zone}, mong khách hàng thông cảm, theo dõi sử dụng và di chuyển về phía khu vực trung tâm/gần trạm để có kết nối tốt hơn.",
+                            "FFF2CC"
+                        )
                     return (
                         "KHÔNG CÓ DỮ LIỆU",
                         f"Thuê bao có gói cước {act_names} đã từng phát sinh dữ liệu trước đó ({prior_mb:.1f}MB), tuy nhiên 5 ngày gần đây hoàn toàn không phát sinh phiên kết nối nào trên BTools." + ALERT_COMMENT,
@@ -1417,6 +1465,14 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 "LỖI DO GÓI CƯỚC",
                 f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
                 f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                "FFF2CC"
+            )
+
+        if island_zone:
+            return (
+                "ĐẶC THÙ ĐỊA HÌNH BIỂN ĐẢO",
+                f"Thuê bao phản ánh sự cố sóng/kết nối tại khu vực đặc thù biển đảo ({island_zone}). Do đặc thù địa hình đồi núi ven biển và khoảng cách xa trạm BTS/hạn chế truyền dẫn qua biển, khu vực này thường xuyên bị suy hao hoặc lõm sóng (5 ngày qua không phát sinh dữ liệu BTools).",
+                f"Khu vực biển đảo địa hình phức tạp, trạm phát sóng bị giới hạn vùng phủ và khó khả thi nâng cấp hạ tầng ngay. Kính nhờ ĐTV/VNP liên hệ giải thích đặc thù địa bàn {island_zone}, mong khách hàng thông cảm, theo dõi sử dụng và di chuyển về phía khu vực trung tâm/gần trạm để có kết nối tốt hơn.",
                 "FFF2CC"
             )
 
@@ -1769,6 +1825,31 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     has_continuous_data_after = (total_mb_after >= 30.0 and count_sessions_after >= 3)
     has_real_usage_after = has_session_over_10mb_after or has_continuous_data_after
 
+    def check_island_trouble_scenario():
+        if not island_zone:
+            return None
+        # Nếu sau sự cố đã phục hồi dùng data lớn (>= 300MB) thì không coi là lỗi biển đảo
+        if dt_incident and has_real_usage_after and total_mb_after >= 300.0:
+            return None
+        # Khách có phản ánh sự cố mạng/sóng
+        is_trouble = (
+            is_network_failure_reported 
+            or is_reported_slow 
+            or is_network_slow 
+            or any(w in ticket_content_lower for w in [
+                "sóng", "mất sóng", "chập chờn", "không vào mạng", "quay vòng", 
+                "xoay tròn", "không được", "sóng kém", "1 vạch", "2 vạch", "rớt", "đặc khu", "phú quốc"
+            ])
+        )
+        if is_trouble and not is_app_specific_issue and not is_data_depletion_reported:
+            return (
+                "ĐẶC THÙ ĐỊA HÌNH BIỂN ĐẢO",
+                f"Thuê bao phản ánh sự cố kết nối/chất lượng sóng tại khu vực đặc thù biển đảo ({island_zone}). Do đặc thù địa hình đồi núi ven biển, khoảng cách xa trạm BTS và suy hao truyền dẫn qua môi trường biển, vùng phủ sóng tại khu vực này chưa ổn định.",
+                f"Khu vực biển đảo địa hình phức tạp, trạm phát sóng bị giới hạn vùng phủ và khó khả thi nâng cấp hạ tầng ngay. Kính nhờ ĐTV/VNP liên hệ giải thích đặc thù địa bàn {island_zone}, mong khách hàng thông cảm, theo dõi sử dụng và di chuyển về phía khu vực trung tâm/gần trạm để có chất lượng sóng tốt hơn." + action_suffix,
+                "FFF2CC"
+            )
+        return None
+
     # 🎯 KỊCH BẢN ĐÁNH GIÁ KHI CÓ MỐC THỜI GIAN TIẾP NHẬN
     if dt_incident:
         # Trường hợp 1: Có lưu lượng thực tế (phiên >10MB hoặc tích lũy >=30MB) SAU thời điểm tiếp nhận -> Khách hàng đã dùng được
@@ -1781,6 +1862,9 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     "FFF2CC"
                 )
             elif dominant_cell and is_reported_slow and total_mb_after < 300.0:
+                island_res = check_island_trouble_scenario()
+                if island_res:
+                    return island_res
                 return (
                     "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
                     f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng).",
@@ -1796,6 +1880,10 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                         "Dịch vụ đã khôi phục hoạt động bình thường sau thời điểm phản ánh. Hướng dẫn khách hàng theo dõi sử dụng, nếu cần hỗ trợ thêm vui lòng liên hệ lại tổng đài." + action_suffix,
                         "E2EFDA"
                     )
+
+                island_res = check_island_trouble_scenario()
+                if island_res:
+                    return island_res
 
                 vpn_res = check_tail_vpn()
                 if vpn_res:
@@ -1853,6 +1941,9 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     "FFF2CC"
                 )
             elif dominant_cell and (is_reported_slow or is_reported_multiple_places):
+                island_res = check_island_trouble_scenario()
+                if island_res:
+                    return island_res
                 return (
                     "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
                     f"Khách hàng phản ánh mạng chậm / sự cố. Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% kết nối). Mặc dù trước đó có sử dụng data, nhưng sau mốc tiếp nhận ({incident_time_str}) chưa ghi nhận phiên kết nối mới.",
@@ -1860,6 +1951,9 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     "FFF2CC"
                 )
             elif is_reported_slow:
+                island_res = check_island_trouble_scenario()
+                if island_res:
+                    return island_res
                 vpn_res = check_tail_vpn()
                 if vpn_res:
                     return vpn_res
@@ -1877,6 +1971,9 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     "FFF2CC"
                 )
             else:
+                island_res = check_island_trouble_scenario()
+                if island_res:
+                    return island_res
                 return (
                     "THEO DÕI THÊM",
                     f"Thuê bao có sử dụng data trước thời điểm phản ánh, tuy nhiên sau mốc tiếp nhận ({incident_time_str}) chưa ghi nhận phiên phát sinh lưu lượng mới. Cần theo dõi thêm.",
@@ -1886,6 +1983,9 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
 
         # Trường hợp 3: Sau tiếp nhận chỉ có lưu lượng yếu (1MB - 10MB)
         elif is_weak_traffic_after:
+            island_res = check_island_trouble_scenario()
+            if island_res:
+                return island_res
             if dominant_cell:
                 return (
                     "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
@@ -1921,6 +2021,9 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 "FFFFFF"
             )
         elif dominant_cell and (is_reported_slow or is_reported_multiple_places):
+            island_res = check_island_trouble_scenario()
+            if island_res:
+                return island_res
             return (
                 "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
                 f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng).",
@@ -1935,6 +2038,9 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 "E2EFDA"
             )
         elif is_reported_slow or is_reported_multiple_places:
+            island_res = check_island_trouble_scenario()
+            if island_res:
+                return island_res
             vpn_res = check_tail_vpn()
             if vpn_res:
                 return vpn_res
@@ -1968,6 +2074,9 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
 
     # 🎯 KỊCH BẢN LƯU LƯỢNG YẾU (1MB - 10MB)
     if is_weak_traffic:
+        island_res = check_island_trouble_scenario()
+        if island_res:
+            return island_res
         if dominant_cell:
             return (
                 "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
