@@ -488,9 +488,9 @@ def check_data_used_since_registration(clean_data, reg_dt):
 
 
 VPN_KEYWORDS = [
-    "1.1.1.1", "cloudflare", "warp", "vpn", "expressvpn", "nordvpn", "openvpn",
+    "1.1.1.1", "warp", "vpn", "expressvpn", "nordvpn", "openvpn",
     "wireguard", "betternet", "turbo vpn", "supervpn", "surfshark", "psiphon",
-    "adguard", "v2ray", "shadowsocks", "outline", "speedify", "tunnelbear",
+    "adguard vpn", "adguard", "v2ray", "shadowsocks", "outline", "speedify", "tunnelbear",
     "hotspot shield", "windscribe", "protonvpn", "hide.me", "cyberghost"
 ]
 
@@ -979,6 +979,16 @@ def evaluate_vpn_status(
         for r in (clean_data or [])
     )
     if is_throttled_present:
+        return None
+
+    # Điểm mù 4: Kiểm tra trần lưu lượng tổng - Nếu thuê bao phát sinh lưu lượng lớn (>= 300MB tổng)
+    # thì không thể là lỗi treo VPN/nghẽn data, mà là khách hàng đang dùng data bình thường (OTT/streaming)
+    total_all_bytes = sum(
+        (float(r.get("DATA_VOLUME_DOWNLINK") or 0) + float(r.get("DATA_VOLUME_UPLINK") or 0))
+        for r in (clean_data or [])
+    )
+    total_all_mb = total_all_bytes / (1024 * 1024)
+    if total_all_mb >= 300.0:
         return None
 
     # 2. Điểm mù 2: Khách hàng phải phản ánh sự cố kết nối (chậm, yếu, mất mạng, không vào được...)
@@ -1749,18 +1759,28 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     has_session_over_10mb_after = max_downlink_after >= TRAFFIC_MAX_WEAK
     is_weak_traffic_after = TRAFFIC_MIN_WEAK <= max_downlink_after < TRAFFIC_MAX_WEAK
 
+    total_bytes_after = sum(
+        (float(r.get("DATA_VOLUME_DOWNLINK", 0) or 0) + float(r.get("DATA_VOLUME_UPLINK", 0) or 0))
+        for _, r in sessions_after_incident
+    )
+    total_mb_after = total_bytes_after / (1024 * 1024)
+    count_sessions_after = len(sessions_after_incident)
+    # Thuê bao có phát sinh dữ liệu đáng kể sau mốc tiếp nhận: Có phiên >= 10MB HOẶC tích lũy >= 30MB (với >= 3 phiên OTT/Web/Streaming)
+    has_continuous_data_after = (total_mb_after >= 30.0 and count_sessions_after >= 3)
+    has_real_usage_after = has_session_over_10mb_after or has_continuous_data_after
+
     # 🎯 KỊCH BẢN ĐÁNH GIÁ KHI CÓ MỐC THỜI GIAN TIẾP NHẬN
     if dt_incident:
-        # Trường hợp 1: Có phiên >10MB SAU thời điểm tiếp nhận -> Khách hàng đã dùng được (trừ lỗi ứng dụng cụ thể)
-        if has_session_over_10mb_after:
+        # Trường hợp 1: Có lưu lượng thực tế (phiên >10MB hoặc tích lũy >=30MB) SAU thời điểm tiếp nhận -> Khách hàng đã dùng được
+        if has_real_usage_after:
             if is_app_specific_issue:
                 return (
                     "LỖI ỨNG DỤNG (KTV XỬ LÝ)",
-                    f"Khách hàng phản ánh sự cố đối với ứng dụng cụ thể ({app_names_str}). Mặc dù sau thời điểm tiếp nhận ({incident_time_str}) BTools có ghi nhận phiên data ({max_downlink_after/1024/1024:.1f}MB), nhưng sự cố trên ứng dụng chưa được xác minh. Cần Kỹ thuật viên kiểm tra xử lý riêng đối với ứng dụng này, không đóng tự động.",
+                    f"Khách hàng phản ánh sự cố đối với ứng dụng cụ thể ({app_names_str}). Mặc dù sau thời điểm tiếp nhận ({incident_time_str}) BTools có ghi nhận dữ liệu ({total_mb_after:.1f}MB, phiên lớn nhất {max_downlink_after/1024/1024:.1f}MB), nhưng sự cố trên ứng dụng chưa được xác minh. Cần Kỹ thuật viên kiểm tra xử lý riêng đối với ứng dụng này, không đóng tự động.",
                     f"Chuyển Kỹ thuật viên kiểm tra lỗi ứng dụng ({app_names_str}) và liên hệ hỗ trợ trực tiếp khách hàng." + action_suffix,
                     "FFF2CC"
                 )
-            elif dominant_cell and is_reported_slow:
+            elif dominant_cell and is_reported_slow and total_mb_after < 300.0:
                 return (
                     "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
                     f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng).",
@@ -1768,6 +1788,15 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     "FFF2CC"
                 )
             elif is_reported_slow:
+                # Nếu sau phản ánh khách vẫn cày dung lượng lớn (>= 300MB) -> Mạng đang đáp ứng bình thường
+                if total_mb_after >= 300.0:
+                    return (
+                        "HOẠT ĐỘNG BÌNH THƯỜNG",
+                        f"Khách hàng phản ánh mạng chậm lúc {incident_time_str}. Tuy nhiên dữ liệu BTools sau thời điểm tiếp nhận ghi nhận thuê bao tiếp tục truy cập Internet ổn định với lưu lượng lớn (đạt {total_mb_after:.1f}MB qua {count_sessions_after} phiên kết nối). Khách hàng đã sử dụng được dịch vụ.",
+                        "Dịch vụ đã khôi phục hoạt động bình thường sau thời điểm phản ánh. Hướng dẫn khách hàng theo dõi sử dụng, nếu cần hỗ trợ thêm vui lòng liên hệ lại tổng đài." + action_suffix,
+                        "E2EFDA"
+                    )
+
                 vpn_res = check_tail_vpn()
                 if vpn_res:
                     return vpn_res
@@ -1796,9 +1825,13 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     "FFFFFF"
                 )
             elif is_network_failure_reported:
+                if has_session_over_10mb_after:
+                    detail_traffic_str = f"phiên lớn nhất đạt {max_downlink_after/1024/1024:.1f}MB"
+                else:
+                    detail_traffic_str = f"tổng lưu lượng đạt {total_mb_after:.1f}MB qua {count_sessions_after} phiên kết nối"
                 return (
                     "HOẠT ĐỘNG BÌNH THƯỜNG",
-                    f"Kiểm tra lịch sử kết nối sau thời điểm tiếp nhận phản ánh ({incident_time_str}), thuê bao đã phát sinh lưu lượng data bình thường (phiên lớn nhất đạt {max_downlink_after/1024/1024:.1f}MB, mạng 4G ổn định). Khách hàng đã sử dụng được dịch vụ.",
+                    f"Kiểm tra lịch sử kết nối sau thời điểm tiếp nhận phản ánh ({incident_time_str}), thuê bao đã phát sinh lưu lượng data bình thường ({detail_traffic_str}, mạng 4G/5G ổn định). Khách hàng đã sử dụng được dịch vụ.",
                     "Dịch vụ đã khôi phục hoạt động bình thường sau thời điểm phản ánh. Hướng dẫn khách hàng theo dõi sử dụng, nếu cần hỗ trợ thêm vui lòng liên hệ lại tổng đài." + action_suffix,
                     "E2EFDA"
                 )
