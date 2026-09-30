@@ -25,6 +25,10 @@ Tài liệu này là chỉ dẫn bắt buộc cho mọi trợ lý AI (Antigravit
    * **CẤM TUYỆT ĐỐI THÊM EMOJI / ICON VÔ NGHĨA VÀO WEBAPP** (như 🤖, ⚡, 🚀, 🎉, 🔥, ⭐... vào nhãn, nút bấm, ô chọn select, tiêu đề, bảng hay modal thông báo).
    * Giao diện phục vụ khối Kỹ thuật Viễn thông VNPT, yêu cầu tính chuyên nghiệp, trang trọng, chỉn chu và tối giản chuẩn doanh nghiệp. Chỉ dùng chữ tiếng Việt rõ nghĩa hoặc icon SVG chức năng chuyên dụng.
 
+6. **Quy chuẩn địa giới hành chính (Sáp nhập tỉnh/thành & Đặc khu - BẮT BUỘC)**:
+   * **Lưu ý nghiệp vụ**: Tất cả các tỉnh/thành của Việt Nam đều đã được sáp nhập / điều chỉnh theo địa giới hành chính mới (bao gồm các mô hình Đặc khu, sáp nhập tỉnh/thành như Đặc khu Phú Quốc thuộc tỉnh An Giang, v.v.).
+   * AI/Agents tuyệt đối **KHÔNG được nhầm lẫn, KHÔNG coi việc ghi nhận địa danh/tỉnh thành mới là lỗi nhập liệu hay nhầm lẫn của điện thoại viên**, mà phải công nhận và tuân thủ tuyệt đối cấu trúc địa bàn hành chính hiện hành trong hệ thống dữ liệu.
+
 ---
 
 ## 🗺️ 2. BẢN ĐỒ CHỈ MỤC CÁC FILE LÕI (CORE REPOSITORY MAP)
