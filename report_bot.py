@@ -1153,6 +1153,14 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     # 🏝️ Nhận diện khu vực Đặc khu / Biển đảo đặc thù
     island_zone = extract_island_special_zone(ticket_content=ticket_content, package_title=package_title)
 
+    def format_normal_plan(base_plan: str) -> str:
+        plan = (base_plan or "").strip()
+        if island_zone:
+            island_msg = "Khu vực đặc khu biển đảo đồi núi phức tạp nên chất lượng mạng chưa ổn định, nhờ khách hàng thông cảm giúp."
+            if island_msg not in plan:
+                plan = f"{plan} {island_msg}" if plan else island_msg
+        return plan + action_suffix
+
     # 🎯 KỊCH BẢN ĐẶC THÙ: BTOOLS BỊ LỖI HOẶC CHƯA ĐĂNG NHẬP (KHÔNG ĐƯỢC TỰ ĐỘNG ĐÓNG PHIẾU)
     if clean_data is None:
         return (
@@ -1877,7 +1885,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     return (
                         "HOẠT ĐỘNG BÌNH THƯỜNG",
                         f"Khách hàng phản ánh mạng chậm lúc {incident_time_str}. Tuy nhiên dữ liệu BTools sau thời điểm tiếp nhận ghi nhận thuê bao tiếp tục truy cập Internet ổn định với lưu lượng lớn (đạt {total_mb_after:.1f}MB qua {count_sessions_after} phiên kết nối). Khách hàng đã sử dụng được dịch vụ.",
-                        "Dịch vụ đã khôi phục hoạt động bình thường sau thời điểm phản ánh. Hướng dẫn khách hàng theo dõi sử dụng, nếu cần hỗ trợ thêm vui lòng liên hệ lại tổng đài." + action_suffix,
+                        format_normal_plan("Dịch vụ đã khôi phục hoạt động bình thường sau thời điểm phản ánh. Hướng dẫn khách hàng theo dõi sử dụng, nếu cần hỗ trợ thêm vui lòng liên hệ lại tổng đài."),
                         "E2EFDA"
                     )
 
@@ -1920,7 +1928,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 return (
                     "HOẠT ĐỘNG BÌNH THƯỜNG",
                     f"Kiểm tra lịch sử kết nối sau thời điểm tiếp nhận phản ánh ({incident_time_str}), thuê bao đã phát sinh lưu lượng data bình thường ({detail_traffic_str}, mạng 4G/5G ổn định). Khách hàng đã sử dụng được dịch vụ.",
-                    "Dịch vụ đã khôi phục hoạt động bình thường sau thời điểm phản ánh. Hướng dẫn khách hàng theo dõi sử dụng, nếu cần hỗ trợ thêm vui lòng liên hệ lại tổng đài." + action_suffix,
+                    format_normal_plan("Dịch vụ đã khôi phục hoạt động bình thường sau thời điểm phản ánh. Hướng dẫn khách hàng theo dõi sử dụng, nếu cần hỗ trợ thêm vui lòng liên hệ lại tổng đài."),
                     "E2EFDA"
                 )
             else:
@@ -2034,7 +2042,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             return (
                 "HOẠT ĐỘNG BÌNH THƯỜNG",
                 f"Khách hàng phản ánh không truy cập được hoàn toàn, nhưng dữ liệu BTools thực tế ngày gần nhất ({recent_day_str}) vẫn ghi nhận phiên kết nối dung lượng lớn ({max_downlink/1024/1024:.1f}MB). Dịch vụ đã tự phục hồi sau thời điểm phản ánh.",
-                "Dịch vụ đã khôi phục hoạt động bình thường. Hướng dẫn khách hàng tiếp tục theo dõi sử dụng." + action_suffix,
+                format_normal_plan("Dịch vụ đã khôi phục hoạt động bình thường. Hướng dẫn khách hàng tiếp tục theo dõi sử dụng."),
                 "E2EFDA"
             )
         elif is_reported_slow or is_reported_multiple_places:
@@ -2061,7 +2069,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             return (
                 "HOẠT ĐỘNG BÌNH THƯỜNG",
                 f"Kiểm tra lịch sử kết nối ngày gần nhất ({recent_day_str}), thuê bao phát sinh lưu lượng data bình thường (phiên lớn nhất đạt {max_downlink/1024/1024:.1f}MB, mạng 4G ổn định).",
-                "Dịch vụ đã hoạt động bình thường. Hướng dẫn khách hàng tiếp tục theo dõi sử dụng." + action_suffix,
+                format_normal_plan("Dịch vụ đã hoạt động bình thường. Hướng dẫn khách hàng tiếp tục theo dõi sử dụng."),
                 "E2EFDA"
             )
         else:
