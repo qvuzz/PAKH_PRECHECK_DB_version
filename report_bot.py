@@ -1961,6 +1961,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     # 1. Phân tích lưu lượng data BTools theo từng ngày
     start_scan_date = (datetime.now() - timedelta(days=4)).date()
     daily_traffic = {}  # date -> total_mb
+    daily_max_session = {} # date -> max session mb
     all_btools_services = set()
     btools_service_codes = set()
     btools_service_volumes = {}       # code -> total MB (chỉ trong 5 ngày quét chuẩn)
@@ -1983,6 +1984,8 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         except Exception:
             mb = 0.0
         daily_traffic[d_obj] = daily_traffic.get(d_obj, 0.0) + mb
+        if mb > daily_max_session.get(d_obj, 0.0):
+            daily_max_session[d_obj] = mb
         
         # Chỉ đưa vào các chỉ số phân tích kịch bản nếu thuộc phạm vi 5 ngày chuẩn
         if d_obj >= start_scan_date:
@@ -2008,8 +2011,29 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     sorted_dates = sorted(daily_traffic.keys())
     latest_traffic_date = sorted_dates[-1] if sorted_dates else latest_date_in_log
     recent_traffic_mb = daily_traffic.get(latest_traffic_date, 0.0) if latest_traffic_date else 0.0
-    prior_traffic_dates = [d for d in sorted_dates if d < latest_traffic_date] if latest_traffic_date else []
+
+    # Xác định chuỗi ngày liên tiếp tính từ ngày gần nhất trở về trước không phát sinh data thực tế
+    # (Một ngày coi là không có data thực tế nếu tổng < 1.0MB hoặc (tổng < 3.0MB và session lớn nhất < 0.8MB))
+    no_data_dates = []
+    for d in reversed(sorted_dates):
+        d_mb = daily_traffic.get(d, 0.0)
+        d_max = daily_max_session.get(d, 0.0)
+        if d_mb < 1.0 or (d_mb < 3.0 and d_max < 0.8):
+            no_data_dates.append(d)
+        else:
+            break
+    no_data_dates.reverse()
+
+    start_no_data_date = no_data_dates[0] if no_data_dates else None
+    start_no_data_str = start_no_data_date.strftime('%d/%m/%Y') if start_no_data_date else ""
+    count_no_data_days = len(no_data_dates)
+
+    # Các ngày trước chuỗi lỗi (hoặc trước ngày gần nhất)
+    split_date = start_no_data_date if start_no_data_date else latest_traffic_date
+    prior_traffic_dates = [d for d in sorted_dates if (split_date and d < split_date)]
     prior_traffic_mb = sum(daily_traffic[d] for d in prior_traffic_dates)
+    last_good_date = prior_traffic_dates[-1] if prior_traffic_dates else None
+    last_good_str = last_good_date.strftime('%d/%m/%Y') if last_good_date else ""
 
     # 2. Bóc tách danh sách gói cước & dung lượng từ Tóm tắt AI / Nội dung phản ánh
     vol_ai = None
@@ -2098,9 +2122,14 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         or "LTE" in str(r.get("RAT_TYPE_NAME") or "").upper() 
         for r in recent_5d_rows
     )
+    has_real_session_5d = any(
+        (float(r.get("DATA_VOLUME_DOWNLINK") or 0) + float(r.get("DATA_VOLUME_UPLINK") or 0)) / (1024 * 1024) >= 1.0
+        for r in recent_5d_rows
+    )
+    is_no_real_traffic_5d = (recent_5d_mb < 1.0) or (not has_real_session_5d and recent_5d_mb < 5.0)
 
-    if commercial_pkgs and recent_5d_mb < 1.0:
-        all_act_names = ", ".join([p["name"] for p in active_pkgs])
+    if commercial_pkgs and (recent_5d_mb < 1.0 or is_no_real_traffic_5d):
+        all_act_names = ", ".join([p["name"] for p in commercial_pkgs])
         extra_ai_note = f", khách hàng phản ánh gói [{pkg_ai}]" if (pkg_ai and pkg_ai not in act_names) else ""
         rec_codes = [c for c in sorted(list(btools_service_codes)) if len(c) <= 5 and c not in ["0", "00"]]
         rec_codes_str = f" (BTools chỉ ghi nhận mã {', '.join(rec_codes[:3])})" if rec_codes else " (BTools không ghi nhận mã cước data hợp lệ)"
@@ -2133,6 +2162,12 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                             pass
                 prior_mb = sum((float(r.get("DATA_VOLUME_DOWNLINK") or 0) + float(r.get("DATA_VOLUME_UPLINK") or 0))/(1024*1024) for r in prior_rows)
 
+            # Mô tả khoảng thời gian không có data thực tế
+            if count_no_data_days >= 2 and start_no_data_str:
+                time_no_data_desc = f"từ ngày {start_no_data_str} đến nay ({count_no_data_days} ngày) không phát sinh data thực tế"
+            else:
+                time_no_data_desc = "gần đây không phát sinh data thực tế (dưới 1MB)"
+
             # Nhánh 2A: Sau khi tra bổ sung, từ lúc đăng ký đến nay cũng KHÔNG CÓ PHÁT SINH DATA (<1MB) -> Giống Case 1, ĐÓNG PHIẾU LUÔN
             if prior_mb < 1.0:
                 return (
@@ -2141,18 +2176,19 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {all_act_names}{f' và gói {pkg_ai}' if (pkg_ai and pkg_ai not in act_names) else ''} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                     "FFF2CC"
                 )
-            # Nhánh 2B: Có phát sinh data trước đó, chỉ 5 ngày gần đây không phát sinh dù bắt RAT TYPE = 6 (4G) bình thường -> ĐÓNG PHIẾU LUÔN
+            # Nhánh 2B: Có phát sinh data trước đó, chỉ gần đây không phát sinh dù bắt RAT TYPE = 6 (4G) bình thường -> ĐÓNG PHIẾU LUÔN
             elif has_4g_recent:
                 return (
                     "LỖI THIẾT BỊ / SIM TREO DATA",
-                    f"Thuê bao có gói cước {act_names} đã từng phát sinh dữ liệu bình thường từ khi đăng ký ({act_reg_dates}), tuy nhiên 5 ngày gần đây không phát sinh data dù thiết bị vẫn bắt sóng 4G bình thường (RAT TYPE = 6). Có thể do thiết bị hoặc SIM của khách hàng bị treo data.",
+                    f"Thuê bao có gói cước {act_names} đã từng phát sinh dữ liệu bình thường từ khi đăng ký ({act_reg_dates}), tuy nhiên {time_no_data_desc} dù thiết bị vẫn bắt sóng 4G bình thường (RAT TYPE = 6). Có thể do thiết bị hoặc SIM của khách hàng bị treo data.",
                     "Có thể do thiết bị hoặc SIM, nhờ kiểm tra SIM và thiết bị giúp (thử khởi động lại máy, bật/tắt dữ liệu di động hoặc tháo lắp SIM sang máy khác kiểm tra).",
                     "FFF2CC"
                 )
             else:
+                good_note = f", ngày dùng tốt gần nhất {last_good_str}" if last_good_str else ""
                 return (
                     "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ",
-                    f"Lịch sử BTools các ngày trước phát sinh data bình thường ({prior_mb:.1f}MB), nhưng 5 ngày gần đây không phát sinh lưu lượng data (dưới 1MB).",
+                    f"Lịch sử BTools các ngày trước phát sinh data bình thường ({prior_mb:.1f}MB{good_note}), nhưng {time_no_data_desc}.",
                     "Nghi ngờ do thiết bị của khách hàng bị treo data. Nhờ khách hàng thử tắt/bật thiết bị và data, speedtest lại giúp." + action_suffix,
                     "FFF2CC"
                 )
@@ -2300,29 +2336,44 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     if vpn_res:
         return vpn_res
 
-    # F: ĐÁNH GIÁ LƯU LƯỢNG NGÀY GẦN NHẤT < 1MB (CĂN CỨ MULTI-DAY BTOOLS)
-    if recent_traffic_mb < 1.0:
+    # F: ĐÁNH GIÁ LƯU LƯỢNG NGÀY GẦN ĐÂY KHÔNG CÓ DATA THỰC TẾ (CĂN CỨ MULTI-DAY BTOOLS)
+    if count_no_data_days > 0 or recent_traffic_mb < 1.0:
         recent_day_str = latest_traffic_date.strftime('%d/%m/%Y') if latest_traffic_date else "gần nhất"
         
         # Nếu các ngày trước đó BTools KHÔNG CÓ DATA hoặc TỔNG DATA < 1MB -> Khó khẳng định do gói hay thiết bị -> KHÔNG ĐÓNG TỰ ĐỘNG
         if prior_traffic_mb < 1.0:
+            if count_no_data_days >= 2 and start_no_data_str:
+                time_range_txt = f"từ ngày {start_no_data_str} đến nay ({count_no_data_days} ngày)"
+            else:
+                time_range_txt = f"ngày gần nhất ({recent_day_str})"
             return (
                 "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ - CHƯA RÕ NGUYÊN NHÂN",
-                f"Lịch sử BTools ngày gần nhất ({recent_day_str}) và các ngày trước đó đều không phát sinh lưu lượng đáng kể (<1MB). "
+                f"Lịch sử BTools {time_range_txt} và các ngày trước đó đều không phát sinh lưu lượng đáng kể (<1MB). "
                 f"Chưa đủ cơ sở để khẳng định nguyên nhân do thiết bị của khách hàng bị treo data hay do gói cước/dịch vụ mạng.",
                 "Yêu cầu KTV liên hệ khách hàng kiểm tra thực tế thiết bị và tình trạng gói cước. Không đóng phiếu tự động.",
                 "FFF2CC"
             )
         else:
-            # Các ngày trước đó có data >= 1MB (đã từng dùng bình thường), chỉ ngày gần nhất sụt giảm < 1MB -> Nghi ngờ treo data
-            return (
-                "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ",
-                f"Lịch sử BTools các ngày trước phát sinh data bình thường ({prior_traffic_mb:.1f}MB), "
-                f"nhưng ngày gần nhất ({recent_day_str}) gần như không phát sinh lưu lượng sử dụng thực tế (dưới 1MB).",
-                "Nghi ngờ do thiết bị của khách hàng bị treo data. Nhờ khách hàng thử tắt/bật thiết bị và data, speedtest lại giúp." + action_suffix,
-                "FFF2CC"
-            )
+            # Các ngày trước đó có data >= 1MB (đã từng dùng bình thường), chỉ các ngày gần đây không có data thực tế
+            if count_no_data_days >= 2 and start_no_data_str:
+                good_note = f", ngày dùng tốt gần nhất {last_good_str}" if last_good_str else ""
+                return (
+                    "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ",
+                    f"Lịch sử BTools trước đó phát sinh data bình thường ({prior_traffic_mb:.1f}MB{good_note}), "
+                    f"tuy nhiên từ ngày {start_no_data_str} đến nay ({count_no_data_days} ngày) gần như không phát sinh lưu lượng sử dụng thực tế (chỉ có các phiên duy trì lắt nhắt dưới 1MB).",
+                    "Nghi ngờ do thiết bị của khách hàng bị treo data. Nhờ khách hàng thử tắt/bật thiết bị và data, speedtest lại giúp." + action_suffix,
+                    "FFF2CC"
+                )
+            else:
+                return (
+                    "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ",
+                    f"Lịch sử BTools các ngày trước phát sinh data bình thường ({prior_traffic_mb:.1f}MB), "
+                    f"nhưng ngày gần nhất ({recent_day_str}) gần như không phát sinh lưu lượng sử dụng thực tế (dưới 1MB).",
+                    "Nghi ngờ do thiết bị của khách hàng bị treo data. Nhờ khách hàng thử tắt/bật thiết bị và data, speedtest lại giúp." + action_suffix,
+                    "FFF2CC"
+                )
 
+    recent_day_str = latest_traffic_date.strftime('%d/%m/%Y') if latest_traffic_date else "gần nhất"
     return (
         "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ",
         f"Lịch sử truy cập ngày gần nhất ({recent_day_str}) gần như không phát sinh lưu lượng sử dụng thực tế (dưới 1MB).",
