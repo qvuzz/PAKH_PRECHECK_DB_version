@@ -22,14 +22,14 @@
             "conclusion": "BẮT SÓNG 4G KÉM",
             "color": "FFF2CC",
             "technical_analysis": "Thiết bị có kết nối 4G nhưng tần suất rớt về sóng 2G/3G chiếm đa số trong các ngày gần đây. Biểu hiện thuê bao ở khu vực sóng 4G yếu hoặc mép vùng phủ sóng.",
-            "action_plan": "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh."
+            "action_plan": "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng tại khu vực khách hàng phản ánh."
         },
         {
             "id": "KC_03_THROTTLED",
             "name": "Thuê bao bị bóp băng thông",
             "conclusion": "THUÊ BAO BỊ BÓP BĂNG THÔNG",
             "color": "F8CBAD",
-            "technical_analysis": "Hệ thống ghi nhận mã dịch vụ giới hạn băng thông (0000010002), thuê bao đã sử dụng hết dung lượng tốc độ cao và đang bị hạ băng thông.",
+            "technical_analysis": "Hệ thống ghi nhận mã dịch vụ giới hạn băng thông (10002, 10003), thuê bao đã sử dụng hết dung lượng tốc độ cao và đang bị hạ băng thông.",
             "action_plan": "Thông báo khách hàng đã sử dụng hết dung lượng tốc độ cao của gói cước. Tư vấn khách hàng mua thêm dung lượng data tốc độ cao để tiếp tục sử dụng."
         },
         {

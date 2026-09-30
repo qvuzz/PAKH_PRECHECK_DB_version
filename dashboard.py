@@ -37,7 +37,7 @@ from services.state import state
 from services.automation_worker import automation_worker_loop
 
 # Modular Routers
-from routers import web, auth, automation, tickets, integrations
+from routers import web, auth, automation, tickets, integrations, cdr
 
 
 # ==============================================================================
@@ -163,6 +163,7 @@ app.include_router(auth.router)
 app.include_router(automation.router)
 app.include_router(tickets.router)
 app.include_router(integrations.router)
+app.include_router(cdr.router)
 app.include_router(web.router)
 
 

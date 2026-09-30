@@ -34,6 +34,7 @@ STATUS_TO_NGUYEN_NHAN = {
     "TẮT THIẾT BỊ NHIỀU NGÀY": "Do thiết bị đầu cuối",
     "LỖI THIẾT BỊ / SIM TREO DATA": "Do thiết bị đầu cuối",
     "LỖI DO GÓI CƯỚC": "Lỗi do gói cước",
+    "LỖI GÓI CƯỚC": "Lỗi do gói cước",
     "LỖI GÓI CƯỚC - SAI SERVICE ID": "Lỗi do gói cước",
     "LỖI GÓI HOME / NGHẼN BĂNG THÔNG": "Lỗi do gói cước",
     "NGHI NGỜ LỖI GÓI CƯỚC": "Lỗi do gói cước",

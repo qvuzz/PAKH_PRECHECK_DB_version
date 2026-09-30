@@ -44,7 +44,15 @@ SPA_ROUTES = [
 for route_path in SPA_ROUTES:
     @router.get(route_path, response_class=HTMLResponse, include_in_schema=(route_path == "/"))
     def serve_spa_page(request: Request):
-        return HTMLResponse(content=get_dashboard_html(), status_code=200)
+        return HTMLResponse(
+            content=get_dashboard_html(),
+            status_code=200,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
 
 
 @router.get("/vnpt-logo.svg", include_in_schema=False)
@@ -70,3 +78,14 @@ def get_logo_horizontal_svg():
 @router.get("/favicon.ico", include_in_schema=False)
 def get_favicon():
     return get_logo_svg()
+
+
+@router.get("/flowchart", response_class=HTMLResponse, include_in_schema=True)
+@router.get("/so-do", response_class=HTMLResponse, include_in_schema=False)
+def get_diagnostic_flowchart():
+    flowchart_path = BASE_DIR / "docs" / "diagnostic_flowchart.html"
+    if flowchart_path.exists():
+        with open(flowchart_path, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read(), status_code=200)
+    return HTMLResponse(content="<h1>Không tìm thấy sơ đồ quy trình!</h1>", status_code=404)
+

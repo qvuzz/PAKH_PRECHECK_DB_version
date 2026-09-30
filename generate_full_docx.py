@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Generate complete, professional VNPT PRECHECK document based on official template,
+Generate complete, professional VNPT TTS PRECHECK document based on official template,
 incorporating:
 - CORE FOCUS: Full end-to-end automation of MOBILE INTERNET tickets (accounting for >80% data traffic & 75%-80% ticket volume).
 - SUPPORT & PRECHECK ROLE: Centralized collection, rapid precheck, and 1-click decision support for Other Ticket Categories (Thoại, SMS, Gói cước...).
@@ -136,7 +136,7 @@ def build_full_docx():
     footer = section.footer
     p_ft = footer.paragraphs[0]
     format_para(p_ft, align=WD_ALIGN_PARAGRAPH.RIGHT, space_before=0, space_after=0, line_spacing=1.0, first_line_indent=0)
-    r_ft = p_ft.add_run("VNPT PRECHECK • Copyright by quangvu@vnpt.vn (Sep.2026)")
+    r_ft = p_ft.add_run("VNPT TTS PRECHECK • Copyright by quangvu@vnpt.vn (Sep.2026)")
     set_run_font(r_ft, font_name="Times New Roman", size_pt=9.5, italic=True, color_rgb=RGBColor(128, 128, 128))
 
     # 1. Header
@@ -244,7 +244,7 @@ def build_full_docx():
     format_para(p_sk, align=WD_ALIGN_PARAGRAPH.JUSTIFY, space_before=4, space_after=3, line_spacing=1.2, first_line_indent=0)
     r_sk1 = p_sk.add_run("Yêu cầu xét công nhận sáng kiến: ")
     set_run_font(r_sk1, font_name="Times New Roman", size_pt=13, bold=True)
-    r_sk2 = p_sk.add_run("“Xây dựng phần mềm VNPT PRECHECK tự động hóa toàn trình quy trình phân tích, chẩn đoán và đóng phiếu phản ánh khách hàng Mobile Internet, kết hợp nền tảng tiền kiểm tra tập trung đa dịch vụ trên mạng di động VNPT”")
+    r_sk2 = p_sk.add_run("“Xây dựng phần mềm VNPT TTS PRECHECK tự động hóa toàn trình quy trình phân tích, chẩn đoán và đóng phiếu phản ánh khách hàng Mobile Internet, kết hợp nền tảng tiền kiểm tra tập trung đa dịch vụ trên mạng di động VNPT”")
     set_run_font(r_sk2, font_name="Times New Roman", size_pt=13, bold=True)
 
     p_date = doc.add_paragraph()
@@ -313,34 +313,35 @@ def build_full_docx():
 
     # ==================== PHẦN III ====================
     add_heading_section(doc, "III. Nội dung sáng kiến:")
-    add_p(doc, "Phần mềm VNPT PRECHECK được thiết kế bài bản theo mô hình hiện đại, phân định rõ ràng giữa phân hệ Tự động hóa toàn trình Mobile Internet và phân hệ Tiền kiểm tra hỗ trợ các loại phản ánh khác:")
+    add_p(doc, "Phần mềm VNPT TTS PRECHECK được thiết kế bài bản theo mô hình hiện đại, phân định rõ ràng giữa phân hệ Tự động hóa toàn trình Mobile Internet và phân hệ Tiền kiểm tra hỗ trợ các loại phản ánh khác:")
 
-    add_subheading(doc, "1. Kiến trúc tổng thể và tích hợp REST API đa hệ thống (TTS Cũ & Mới):")
+    add_subheading(doc, "1. Kiến trúc tổng thể và tích hợp REST API đa hệ thống (TTS Cũ, TTS Mới, CCOS, PMS, FMS):")
     add_p(doc, "Hệ thống được phát triển theo mô hình kiến trúc phân tầng độc lập (Modular Layered Architecture), đảm bảo khả năng mở rộng không giới hạn:")
-    add_p(doc, "• Tầng Giao diện người dùng (Presentation Layer): Web Dashboard trực quan, hiển thị Live Log thời gian thực, tách biệt rành mạch giữa nhóm Mobile Internet (Data) và Thoại/SMS/Gói/PA Khác (Voice), bộ lọc đa tiêu chí, hỗ trợ chế độ Dark Mode / Light Mode;", bullet=True)
-    add_p(doc, "• Tầng Dịch vụ & Điều phối luồng (Service & Orchestration Layer): Sử dụng máy chủ đa luồng ThreadingHTTPServer trên nền Python kết hợp mô hình Singleton AutomationState quản lý an toàn đa luồng. Luồng worker chạy ngầm định kỳ kích hoạt chu kỳ quét tự động và hỗ trợ can thiệp tức thời (Run Now / Stop);", bullet=True)
+    add_p(doc, "• Tầng Giao diện người dùng (Presentation Layer): Web Dashboard trực quan, thiết kế khoa học theo tỷ lệ vàng 3/3/4 (Khối 1: Thông tin phiếu; Khối 2: Thông số kỹ thuật Core HSS & Trạm sóng CEM; Khối 3: Phân tích phiên dữ liệu BTools & Đề xuất kịch bản chẩn đoán), hiển thị Live Log thời gian thực qua WebSocket, tách biệt rành mạch giữa nhóm Mobile Internet (Data) và Thoại/SMS/Gói/PA Khác (Voice), bộ lọc đa tiêu chí; tích hợp chuyển đổi Chế độ Ban ngày & Ban đêm (Light Mode / Dark Mode) chuẩn màu Deep Navy kết hợp Soft Neon công nghệ cao chống mỏi mắt cho KTV trực ca đêm 24/7; chuẩn hóa hệ thống nút thao tác đa sắc phân cấp luồng xử lý (Chuyển 2.4 màu tím Indigo, Chuyển 2.6 màu xanh Cyan viễn thông, Đóng 2.6 màu xanh lá hoàn tất);", bullet=True)
+    add_p(doc, "• Tầng Dịch vụ & Điều phối luồng (Service & Orchestration Layer): Sử dụng máy chủ đa luồng FastAPI / Uvicorn trên nền Python kết hợp mô hình Singleton AutomationState quản lý an toàn đa luồng. Luồng worker chạy ngầm định kỳ kích hoạt chu kỳ quét tự động và hỗ trợ can thiệp tức thời (Run Now / Stop);", bullet=True)
     add_p(doc, "• Tầng Kết nối & Thu thập dữ liệu đa nguồn (Integration & Extraction Layer):", bullet=True)
-    add_p(doc, "  - Giao tiếp trực tiếp với hệ thống TTS Mới (tts.vnptnet.vn) và TTS Cũ (tts.vnpt.vn) thông qua giao thức REST API chuẩn;", bullet=True)
-    add_p(doc, "  - Tích hợp module sapccheck tra cứu Trang Hồ sơ thuê bao (công nghệ Radio, IP WAN, cờ NAM, HSS Profile) và đối soát chính sách gói cước, quota dung lượng từ hệ thống SAPC;", bullet=True)
+    add_p(doc, "  - Giao tiếp trực tiếp 100% qua REST API với cả hệ thống TTS Mới (tts.vnptnet.vn) và TTS Cũ (tts.vnpt.vn), loại bỏ hoàn toàn sự phụ thuộc vào giao diện web hay công nghệ cào màn hình (scraping) chậm chạp;", bullet=True)
+    add_p(doc, "  - Tích hợp cổng liên thông chuyển khiếu nại CCOS (/APICOSS/ChuyenKhieuNai), cổng phản hồi PMS (/APIPMS/PhanHoiPMS), FMS (/APIFMS/PhanHoiFMS), tự động nhận diện và tuân thủ chuẩn xác phân quyền OneOSS giữa Đơn vị chủ trì (ĐHDV) và Đơn vị phối hợp hỗ trợ nâng cao (SOC2);", bullet=True)
+    add_p(doc, "  - Tích hợp module sapccheck tra cứu Trang Hồ sơ thuê bao (công nghệ Radio, IP WAN, cờ NAM, HSS Profile, cờ MS PURGED) và đối soát chính sách gói cước, quota dung lượng từ hệ thống SAPC;", bullet=True)
     add_p(doc, "  - Tích hợp module cem_client.py kết nối máy chủ CEM phân tích định danh trạm phát sóng (Cell ID / ECGI) và phân tích ứng dụng App Usage (phát hiện app VPN);", bullet=True)
-    add_p(doc, "  - Tích hợp module crawler_btools.py truy xuất lịch sử phiên dữ liệu, throughput và QoS.", bullet=True)
+    add_p(doc, "  - Tích hợp module crawler_btools.py / BTools Manager truy xuất lịch sử phiên dữ liệu, throughput và QoS.", bullet=True)
     add_p(doc, "• Tầng Cơ sở dữ liệu (Data Persistence Layer): Quản lý cơ sở dữ liệu SQLite (tickets.db) với cơ chế Write-Ahead Logging (WAL) cho phép đọc/ghi đồng thời tốc độ cao, ngăn ngừa xung đột dữ liệu.", bullet=True)
 
     # Chèn Hình 1: Sơ đồ luồng quy trình
-    add_p(doc, "Để trực quan hóa toàn diện chu trình tự động hóa và sự phối hợp nhịp nhàng giữa các phân hệ kỹ thuật, sơ đồ luồng quy trình vận hành tổng thể của hệ thống VNPT PRECHECK được thể hiện chi tiết tại Hình 1 dưới đây:")
+    add_p(doc, "Để trực quan hóa toàn diện chu trình tự động hóa và sự phối hợp nhịp nhàng giữa các phân hệ kỹ thuật, sơ đồ luồng quy trình vận hành tổng thể của hệ thống VNPT TTS PRECHECK được thể hiện chi tiết tại Hình 1 dưới đây:")
     add_picture_with_caption(doc, "diagram_process_flow.png", 
-                             "Hình 1: Sơ đồ luồng quy trình tự động hóa tiền kiểm tra hạ tầng, phân loại kịch bản và xử lý đóng phiếu của hệ thống VNPT PRECHECK", width_inches=6.3)
+                             "Hình 1: Sơ đồ luồng quy trình tự động hóa tiền kiểm tra hạ tầng, phân loại kịch bản và xử lý đóng phiếu của hệ thống VNPT TTS PRECHECK", width_inches=6.3)
 
     # Chèn Hình 2: Giao diện Dashboard
     add_picture_with_caption(doc, "screenshot_production_ready.png", 
-                             "Hình 2: Giao diện Web Dashboard điều hành trung tâm VNPT PRECHECK với bảng điều khiển, bộ lọc đa tiêu chí và Live Log thời gian thực")
+                             "Hình 2: Giao diện Web Dashboard điều hành trung tâm VNPT TTS PRECHECK với bảng điều khiển, bộ lọc đa tiêu chí và Live Log thời gian thực")
 
     add_subheading(doc, "2. Phân hệ TỰ ĐỘNG HÓA TOÀN TRÌNH Mobile Internet (Nội dung cốt lõi và trọng tâm của sáng kiến):")
     add_p(doc, "Đây là phân hệ mang tính đột phá và chiếm tỷ trọng năng lực xử lý lớn nhất của sáng kiến, bao gồm các mắt xích tự động hóa hoàn chỉnh:")
 
     add_p(doc, "a) Thu thập và liên thông dữ liệu đa nguồn chuyên sâu cho Data:", bold=True)
     add_p(doc, "Ngay khi tiếp nhận phiếu phản ánh Mobile Internet, hệ thống tự động kích hoạt truy vấn đồng thời dữ liệu từ 4 hệ sinh thái kỹ thuật:")
-    add_p(doc, "• Trang Hồ sơ thuê bao & SAPC: Trích xuất công nghệ mạng Radio thực tế (4G/3G/2G), trạng thái dịch vụ (cờ NAM = 0 là mở, NAM = 1 là khóa GPRS), mã HSS Profile (xác thực quyền truy cập 4G/5G), địa chỉ IP WAN cấp phát, gói cước data đang sử dụng, hạn dùng, dung lượng tốc độ cao còn lại, trạng thái bóp băng thông;", bullet=True)
+    add_p(doc, "• Trang Hồ sơ thuê bao & SAPC: Trích xuất công nghệ mạng Radio thực tế (4G/3G/2G), trạng thái dịch vụ (cờ NAM = 0 là mở, NAM = 1 là khóa GPRS), cờ trạng thái thuê bao Core (phát hiện thuê bao tắt máy dài ngày MS PURGED), mã HSS Profile (xác thực quyền truy cập 4G/5G), địa chỉ IP WAN cấp phát, gói cước data đang sử dụng, hạn dùng, dung lượng tốc độ cao còn lại, trạng thái bóp băng thông;", bullet=True)
     add_p(doc, "• Hệ thống CEM (Customer Experience Management): Phân tích lịch sử bắt sóng 5 ngày gần nhất để xác định Top 3 Cell phát sóng phục vụ, tỷ lệ kết nối trạm ưu thế (Dominant Cell), lưu lượng App Usage; đặc biệt tự động phát hiện các ứng dụng mạng riêng ảo (VPN / 1.1.1.1 / Cloudflare WARP) can thiệp bóp băng thông quốc tế và hiển thị cảnh báo đỏ nổi bật ngay sau danh sách Cell;", bullet=True)
     add_p(doc, "• Hệ thống BTools: Quét lịch sử các phiên kết nối dữ liệu (data sessions), dung lượng tải lên/tải xuống, throughput và đối chiếu chính xác với mốc thời gian khách hàng phản ánh sự cố.", bullet=True)
 
@@ -348,7 +349,7 @@ def build_full_docx():
     add_p(doc, "Hệ sinh thái chẩn đoán sự cố Mobile Internet được xây dựng từ thực tiễn chuyên sâu, phân thành 5 nhóm module nghiệp vụ chặt chẽ:")
     
     add_p(doc, "• Nhóm 1: Kiểm tra Hồ sơ thuê bao & Hạ tầng Core (HLR/HSS/NAM/5G):", bold=True)
-    add_p(doc, "  (1) Khóa chặn GPRS (NAM = 1); (2) Chưa khai báo Profile 4G trên HSS (HSS Profile = 0); (3) Phản ánh dịch vụ 5G nhưng Profile/Trạm chưa hỗ trợ 5G; (4) Thuê bao tắt máy dài ngày (MS PURGED).", bullet=True)
+    add_p(doc, "  (1) Khóa chặn GPRS (NAM = 1); (2) Chưa khai báo Profile 4G trên HSS (HSS Profile = 0); (3) Phản ánh dịch vụ 5G nhưng Profile/Trạm chưa hỗ trợ 5G; (4) Thuê bao tắt máy dài ngày hoặc hủy tạm thời (MS PURGED).", bullet=True)
 
     add_p(doc, "• Nhóm 2: Đối soát Chính sách cước & Quota dữ liệu (SAPC):", bold=True)
     add_p(doc, "  (5) Hết dung lượng data tốc độ cao bị hạ băng thông (KC_03); (6) Gói cước data đã hết hạn sử dụng; (7) Chỉ sử dụng gói mặc định PAYGO; (8) Gói cước tích hợp HOME/Gia đình; (9) Thuê bao mới gia hạn gói thành công trong ngày; (10) Đăng ký gói ngày nhưng thiếu gói nền dữ liệu.", bullet=True)
@@ -369,8 +370,8 @@ def build_full_docx():
     add_p(doc, "c) Cơ chế tự động đóng phiếu trực tiếp qua REST API đạt tỷ lệ 85% - 90%:", bold=True)
     add_p(doc, "Căn cứ vào 25 kịch bản trên, hệ thống xác định tập hợp 20 kịch bản hoàn toàn đủ điều kiện đóng chuẩn (Level-1 Auto-Close Candidate: hết dung lượng hạ băng thông, gói hết hạn, chưa có profile 4G, cờ khóa GPRS NAM=1, khách hàng đã dùng bình thường có phiên lớn sau tiếp nhận, lỗi ứng dụng VPN...). Thực tế vận hành ghi nhận các kịch bản này chiếm từ 85% đến 90% tổng số phiếu Mobile Internet phát sinh hàng ngày. Khi bật chế độ Auto Close, hệ thống tự động hoàn tất khâu tiền kiểm tra và đóng trực tiếp lên TTS qua REST API cho 85% - 90% số phiếu này chỉ trong 1-2 giây/phiếu mà không cần con người can thiệp thủ công.")
 
-    add_p(doc, "d) Chế độ đóng thủ công an toàn 1-Click cho các phiếu đặc thù:", bold=True)
-    add_p(doc, "Đối với các phiếu Data phức tạp cần rà soát lại (nghi ngờ suy hao sóng trạm BTS, cần đo kiểm địa bàn), KTV chỉ cần bấm nút “Đóng thủ công”. Hệ thống tự động mở form “Cập nhật xử lý” trên TTS và tự động điền sẵn toàn bộ trường quy chuẩn: B0 = True, Cột 10 (Nguyên nhân kỹ thuật), Cột 11 (Nội dung xử lý và kiến nghị Kỹ thuật địa bàn). KTV chỉ mất 1 giây lướt qua và bấm Lưu.")
+    add_p(doc, "d) Chuẩn hóa phân cấp nút tác nghiệp và chế độ đóng an toàn 1-Click:", bold=True)
+    add_p(doc, "Hệ thống thiết kế phân cấp màu sắc khoa học giữa các thao tác điều chuyển bước nghiệp vụ và đóng dứt điểm: nút 'Chuyển 2.4' (màu tím Indigo) chuyển phối hợp SOC, nút 'Chuyển 2.6' (màu xanh Cyan viễn thông) chuyển bước chốt mạng lưới, và nút 'Đóng phiếu' / 'Đóng 2.6' (màu xanh lá cây) hoàn tất đóng phiếu dứt điểm, kết hợp nút 'Đóng 5.1' (màu xanh thẫm) chuyển địa bàn. Khi KTV kích hoạt, hệ thống tự động điền đầy đủ các trường quy chuẩn (nguyên nhân kỹ thuật theo danh mục chuẩn OneOSS, nội dung xử lý giải trình, mã kết luận đóng phiếu) và gửi trực tiếp qua API tới TTS và liên thông CCOS/PMS/FMS chỉ trong 1-2 giây, bảo đảm KTV không phải nhập liệu biểu mẫu phức tạp bằng tay và loại trừ hoàn toàn nguy cơ thao tác nhầm lẫn.")
 
     # Chèn Hình 4: Đóng phiếu thành công
     add_picture_with_caption(doc, "screenshot_closed_nam.png", 
@@ -393,10 +394,11 @@ def build_full_docx():
     add_p(doc, "• Tự động hóa khiếu nại Cước và Gói cước: Kết nối sâu với hệ thống Billing/OCS để tự động đối soát lịch sử trừ cước và chu kỳ gia hạn gói;", bullet=True)
     add_p(doc, "• Mục tiêu dài hạn: Từng bước nâng cấp các loại phản ánh khác từ mức độ 'Hỗ trợ tiền kiểm tra' lên mức độ 'Tự động hóa toàn trình', hướng tới tự động hóa 100% toàn bộ công tác xử lý PAKH di động của Tập đoàn.", bullet=True)
 
-    add_subheading(doc, "5. Giải pháp an toàn thông tin và cô lập tài khoản trong mạng LAN (LAN Token Isolation):")
+    add_subheading(doc, "5. Tiện ích đồng bộ phiên tự động và giải pháp an toàn thông tin cô lập tài khoản mạng LAN (LAN Token Isolation):")
     add_p(doc, "Hệ thống đáp ứng nghiêm ngặt các tiêu chuẩn an toàn thông tin của Tập đoàn VNPT:")
-    add_p(doc, "• Tuyệt đối không lưu trữ mật khẩu: Phiên làm việc (Bearer Token / Cookie) được trích xuất an toàn từ chính trình duyệt Chrome đang đăng nhập của nhân viên thông qua Chrome DevTools Protocol (CDP), không lưu trữ mật khẩu dạng rõ;", bullet=True)
-    add_p(doc, "• Cơ chế cô lập Token mạng LAN (auth_tts.py): Khi triển khai dùng chung trong mạng nội bộ, mỗi máy trạm khi gửi lệnh đóng phiếu bắt buộc phải cung cấp token xác thực của chính tài khoản người đó. Máy chủ tuyệt đối không dùng token của mình để đóng thay cho máy khách. Cơ chế này đảm bảo tính minh bạch, đúng thẩm quyền cá nhân và tuân thủ chặt chẽ quy chế an toàn thông tin của Tập đoàn.", bullet=True)
+    add_p(doc, "• Tiện ích mở rộng Chrome Extension chuyên dụng (VNPT TTS Precheck Helper): Tự động trích xuất và đồng bộ an toàn 1-click Cookie/Token từ các cổng tác nghiệp (BTools, CEM, SAPC, TTS Cũ/Mới) về máy chủ Dashboard, giải quyết triệt để rào cản đăng nhập và xác thực đa yếu tố (OTP/CAS) mà không cần can thiệp hay lưu trữ mật khẩu người dùng;", bullet=True)
+    add_p(doc, "• Tuyệt đối không lưu trữ mật khẩu: Phiên làm việc (Bearer Token / Cookie) được đồng bộ an toàn từ chính trình duyệt đang đăng nhập của nhân viên thông qua giao thức an toàn nội bộ, không lưu trữ mật khẩu dạng rõ bên ngoài;", bullet=True)
+    add_p(doc, "• Cơ chế cô lập Token mạng LAN (auth_extractor.py): Khi triển khai dùng chung trong mạng nội bộ, mỗi máy trạm khi gửi lệnh đóng phiếu bắt buộc phải cung cấp token xác thực của chính tài khoản người đó. Máy chủ tuyệt đối không dùng token của mình để đóng thay cho máy khách. Cơ chế này đảm bảo tính minh bạch, đúng thẩm quyền cá nhân và tuân thủ chặt chẽ quy chế an toàn thông tin của Tập đoàn.", bullet=True)
 
     # ==================== PHẦN IV ====================
     add_heading_section(doc, "IV. Kết quả áp dụng/ Lợi ích thu được của sáng kiến:")
@@ -413,7 +415,7 @@ def build_full_docx():
     set_table_borders(table_comp, color="7F7F7F", sz="4")
 
     widths_t1 = [Inches(0.6), Inches(3.2), Inches(3.2)]
-    headers_t1 = ['TT', 'Mô tả đối tượng trước khi áp dụng sáng kiến\n(Quy trình thủ công truyền thống)', 'Mô tả đối tượng sau khi áp dụng sáng kiến\n(Hệ thống tự động hóa VNPT PRECHECK)']
+    headers_t1 = ['TT', 'Mô tả đối tượng trước khi áp dụng sáng kiến\n(Quy trình thủ công truyền thống)', 'Mô tả đối tượng sau khi áp dụng sáng kiến\n(Hệ thống tự động hóa VNPT TTS PRECHECK)']
 
     for col_idx, text in enumerate(headers_t1):
         cell = table_comp.cell(0, col_idx)
@@ -515,7 +517,7 @@ def build_full_docx():
         ('1.1', 'Giải pháp có nội dung mới tại đơn vị', '', 'x'),
         ('1.2', 'Giải pháp có nội dung mới tại Tập đoàn', '', ''),
         ('2', 'Tính sáng tạo, đột phá:', 'Mô tả tính sáng tạo, sự khác biệt so với các giải pháp trước đây', 
-         '- Tự động hóa toàn trình dịch vụ Mobile Internet (chiếm >80% lưu lượng và 75%-80% phiếu phản ánh), tự động đóng phiếu trực tiếp 85% - 90% qua REST API.\n- Xây dựng nền tảng tiền kiểm tra tập trung cho các loại phiếu khác (Thoại, SMS, Gói cước) và hỗ trợ xử lý 1-click trên Dashboard.\n- Tích hợp 25 kịch bản chẩn đoán kỹ thuật, phát hiện app VPN và cảnh báo đỏ ngay sau Cell.\n- Kết nối trực tiếp REST API cả TTS Cũ và Mới, cơ chế cô lập Token LAN tuyệt đối an toàn.'),
+         '- Tự động hóa toàn trình dịch vụ Mobile Internet (chiếm >80% lưu lượng và 75%-80% phiếu phản ánh), tự động đóng phiếu trực tiếp 85% - 90% qua REST API.\n- Nền tảng tiền kiểm tra tập trung đa dịch vụ (Data, Thoại, SMS, Gói cước) với 25 kịch bản chẩn đoán chuyên sâu, cảnh báo trực quan trạm lỗi và ứng dụng VPN.\n- Giao diện Dashboard công thái học (Ergonomic UI) hỗ trợ Chế độ Ngày/Đêm (Dark/Light Mode) chống mỏi mắt cho ca trực kỹ thuật 24/7; phân cấp màu sắc nút tác nghiệp chuẩn xác (Chuyển 2.4 / Chuyển 2.6 / Đóng 2.6 / Đóng 5.1) loại trừ hoàn toàn nguy cơ nhầm lẫn.\n- Tiện ích Chrome Extension đồng bộ Token/Cookie 1-click an toàn, cơ chế cô lập Token trong mạng LAN bảo đảm tuyệt đối ATTT.'),
         ('3', 'Phạm vi đã triển khai áp dụng: Chọn 1 trong 4 mục sau', 'Đánh dấu vào 1 trong 4 mục', ''),
         ('3.1', 'Áp dụng trong nội bộ một bộ phận / tổ / phòng của đơn vị', '', ''),
         ('3.2', 'Áp dụng trên toàn đơn vị (VNPT Tỉnh/Thành phố hoặc Tổng công ty thành viên)', '', 'x'),
@@ -544,7 +546,7 @@ def build_full_docx():
 
     # ==================== PHẦN VI ====================
     add_heading_section(doc, "VI. Tài liệu chứng minh: quy định ban hành, kết quả sáng kiến…. (nếu có)")
-    add_p(doc, "1. Toàn bộ mã nguồn hoàn chỉnh của phần mềm VNPT PRECHECK và tài liệu đặc tả kiến trúc kỹ thuật của hệ thống;", bullet=True)
+    add_p(doc, "1. Toàn bộ mã nguồn hoàn chỉnh của phần mềm VNPT TTS PRECHECK và tài liệu đặc tả kiến trúc kỹ thuật của hệ thống;", bullet=True)
     add_p(doc, "2. Nhật ký hệ thống (Live Log) và cơ sở dữ liệu SQLite (tickets.db) ghi nhận thực tế hàng nghìn phiếu phản ánh khách hàng Mobile Internet đã được tiền kiểm tra và đóng thành công qua phần mềm;", bullet=True)
     add_p(doc, "3. Mẫu báo cáo kết quả tiền kiểm tra định dạng Excel 12 cột chuẩn hóa quy chuẩn VNPT được xuất tự động từ phần mềm;", bullet=True)
     add_p(doc, "4. Video clip và ảnh chụp màn hình ghi lại quy trình vận hành thực tế: quét phiếu tự động, tiền kiểm tra đa nguồn Core/CEM/BTools/SAPC và đóng phiếu tự động ngầm qua REST API trên hệ thống TTS.", bullet=True)
@@ -578,17 +580,17 @@ def build_full_docx():
     r_sign_name = cp_r.add_run("[Họ và tên tác giả chủ trì]")
     set_run_font(r_sign_name, font_name="Times New Roman", size_pt=13, bold=True)
 
-    # Save to docs/VNPT PRECHECK.docx or fallback if open in Word
+    # Save strictly to docs/VNPT TTS PRECHECK.docx as primary, and fallback copy if open
     docs_dir = os.path.join(os.path.dirname(__file__), "docs")
     os.makedirs(docs_dir, exist_ok=True)
-    output_filename = os.path.join(docs_dir, "VNPT PRECHECK.docx")
+    primary_file = os.path.join(docs_dir, "VNPT TTS PRECHECK.docx")
     try:
-        doc.save(output_filename)
-        print(f"Document successfully generated and saved to {output_filename}!")
+        doc.save(primary_file)
+        print(f"[SUCCESS] Document successfully generated and saved to: {primary_file}")
     except PermissionError:
-        output_filename = os.path.join(docs_dir, "VNPT PRECHECK_HoanThien.docx")
-        doc.save(output_filename)
-        print(f"VNPT PRECHECK.docx is open in Word, saved to: {output_filename}!")
+        fallback_file = os.path.join(docs_dir, "VNPT TTS PRECHECK_HoanThien.docx")
+        doc.save(fallback_file)
+        print(f"[NOTE] Primary file open in Word, saved to fallback: {fallback_file}")
 
 if __name__ == "__main__":
     build_full_docx()

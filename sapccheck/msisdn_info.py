@@ -88,18 +88,38 @@ def _parse_loc_response(data):
     result["NAM"] = str(nam_val).strip() if nam_val is not None else ""
 
     # Sub State: MS PURGED, LOCATED, v.v.
-    sub_state_val = (
-        hlr_sub.get('subState')
-        or hlr_sub.get('sub_state')
-        or hlr_sub.get('subscriberState')
-        or location_data.get('subState')
-        or location_data.get('subscriberState')
-        or hss_sub.get('epsLocationState')
-        or hlr_sub.get('state')
-        or data.get('subState')
-        or data.get('Sub State')
-        or ''
-    )
+    # 🎯 ƯU TIÊN KIỂM TRA MS PURGED / PURGED TỪ TẤT CẢ CÁC NGUỒN CỦA API
+    is_purged = False
+    hlr_sslo_sub = data.get('hlrSslo', {}).get('hlrSsloSub', {}) if isinstance(data.get('hlrSslo'), dict) else {}
+    if "PURGED" in str(loc.get('subState', '')).upper():
+        is_purged = True
+    elif "PURGED" in str(hlr_sslo_sub.get('substate', '')).upper():
+        is_purged = True
+    elif str(location_data.get('msPurgedInVlr', '')).lower() == 'true':
+        is_purged = True
+    elif "PURGED" in str(hlr_sub.get('subState', '')).upper() or "PURGED" in str(hlr_sub.get('sub_state', '')).upper():
+        is_purged = True
+
+    if is_purged:
+        sub_state_val = "MS PURGED"
+    else:
+        candidates = [
+            loc.get('subState'),
+            hlr_sslo_sub.get('substate'),
+            hlr_sub.get('subState'),
+            hlr_sub.get('sub_state'),
+            hlr_sub.get('subscriberState'),
+            location_data.get('subState'),
+            location_data.get('subscriberState'),
+            hss_sub.get('epsLocationState'),
+            hlr_sub.get('state'),
+            data.get('subState'),
+            data.get('Sub State')
+        ]
+        sub_state_val = next(
+            (str(c).strip() for c in candidates if c and str(c).strip().upper() not in ['', 'UNKNOWN', 'NONE', 'NULL']),
+            hss_sub.get('epsLocationState') or hlr_sub.get('state') or 'UNKNOWN'
+        )
     result["Sub State"] = str(sub_state_val).strip()
 
     # ==========================================================
@@ -107,6 +127,25 @@ def _parse_loc_response(data):
     # ==========================================================
     result["CellID"] = result.get("CI", "")
     result["Cell ID"] = result.get("CI", "")
+
+    # Bổ sung tên Cell từ hệ thống CustomerPosition (port 1708)
+    phone_clean = str(result.get("MSISDN") or "").strip()
+    if phone_clean:
+        p84 = "84" + phone_clean[1:] if phone_clean.startswith("0") else phone_clean
+        try:
+            cp_resp = requests.get(
+                f"http://127.0.0.1:1708/msisdn/{p84}",
+                headers={"Accept": "application/json"},
+                timeout=2.5
+            )
+            if cp_resp.status_code == 200:
+                cp_data = cp_resp.json()
+                c_name = (cp_data.get("summary") or {}).get("current_cell") or (cp_data.get("location") or {}).get("cell_name")
+                if c_name:
+                    result["CellName"] = c_name
+                    result["cell_name"] = c_name
+        except Exception:
+            pass
 
     return result
 
@@ -141,7 +180,6 @@ def tra_cell_tu_so_dien_thoai(sdt, session=None):
     Nếu có lỗi:
         {'error': 'Nội dung lỗi'}
     """
-
     sdt = str(sdt).strip()
 
     if not sdt:
@@ -168,10 +206,35 @@ def tra_cell_tu_so_dien_thoai(sdt, session=None):
         except Exception as e:
             print(f"⚠️ Lỗi khi thử session Chrome cho API HSS/Cell: {e}. Chuyển sang dùng cookie Firefox...")
 
+    # ==========================================================
+    # ĐỌC COOKIE TỪ CHROME EXTENSION (sapc_cookies.json / cookies.json)
+    # ==========================================================
+    cj = {}
     try:
-        # ==========================================================
-        # ĐỌC COOKIE FIREFOX
-        # ==========================================================
+        import os, json
+        from pathlib import Path
+        sapc_dir = Path(__file__).resolve().parent
+        for fname in ["sapc_cookies.json", "cookies.json"]:
+            cpath = sapc_dir / fname
+            if cpath.exists():
+                try:
+                    with open(cpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            for item in data:
+                                if item.get("name") and item.get("value"):
+                                    cj[item["name"]] = item["value"]
+                        elif isinstance(data, dict):
+                            cj.update(data)
+                    if cj:
+                        break
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # Nếu chưa có cookie từ Chrome, thử Firefox fallback
+    if not cj:
         try:
             import sys
             from pathlib import Path
@@ -185,76 +248,71 @@ def tra_cell_tu_so_dien_thoai(sdt, session=None):
                     cj = browser_cookie3.firefox(domain_name='10.155.42.218')
                 except Exception:
                     cj = {}
-        except Exception as e:
-            return {'error': f'Không đọc được cookie Firefox: {e}'}
+        except Exception:
+            pass
 
-        # ==========================================================
-        # GỌI API
-        # ==========================================================
-        try:
-            res = requests.get(
-                url,
-                cookies=cj,
-                timeout=10
-            )
-        except requests.exceptions.Timeout:
-            return {
-                'error': 'Kết nối API quá thời gian chờ.'
-            }
-
-        except requests.exceptions.ConnectionError:
-            return {
-                'error': 'Không thể kết nối tới API.\n'
-                         'Vui lòng kiểm tra mạng hoặc VPN.'
-            }
-
-        except requests.exceptions.RequestException as e:
-            return {
-                'error': f'Lỗi khi gọi API:\n{str(e)}'
-            }
-
-        # ==========================================================
-        # KIỂM TRA HTTP STATUS
-        # ==========================================================
-        if not res.ok:
-            return {
-                'error': (
-                    f'Lỗi server: {res.status_code}\n'
-                    f'{res.text[:500]}'
-                )
-            }
-
-        # ==========================================================
-        # KIỂM TRA JSON
-        # ==========================================================
-        try:
-            data = res.json()
-
-        except ValueError:
-            return {
-                'error': (
-                    'Phản hồi không phải JSON hợp lệ.\n\n'
-                    + res.text[:1000]
-                )
-            }
-
-        # ==========================================================
-        # KIỂM TRA DATA
-        # ==========================================================
-        if not isinstance(data, dict):
-            return {
-                'error': 'Dữ liệu API trả về không đúng định dạng.'
-            }
-
-        # ==========================================================
-        # PARSE KẾT QUẢ (dùng hàm chung)
-        # ==========================================================
-        return _parse_loc_response(data)
-
-    except Exception as e:
+    # ==========================================================
+    # GỌI API
+    # ==========================================================
+    try:
+        res = requests.get(
+            url,
+            cookies=cj,
+            timeout=10
+        )
+    except requests.exceptions.Timeout:
         return {
-            'error': f'Lỗi không xác định:\n{str(e)}'
+            'error': 'Kết nối API quá thời gian chờ.'
         }
+
+    except requests.exceptions.ConnectionError:
+        return {
+            'error': 'Không thể kết nối tới API.\n'
+                     'Vui lòng kiểm tra mạng hoặc VPN.'
+        }
+
+    except requests.exceptions.RequestException as e:
+        return {
+            'error': f'Lỗi khi gọi API:\n{str(e)}'
+        }
+
+    # ==========================================================
+    # KIỂM TRA HTTP STATUS
+    # ==========================================================
+    if not res.ok:
+        return {
+            'error': (
+                f'Lỗi server: {res.status_code}\n'
+                f'{res.text[:500]}'
+            )
+        }
+
+    # ==========================================================
+    # KIỂM TRA JSON
+    # ==========================================================
+    try:
+        data = res.json()
+
+    except ValueError:
+        return {
+            'error': (
+                'Phản hồi không phải JSON hợp lệ.\n\n'
+                + res.text[:1000]
+            )
+        }
+
+    # ==========================================================
+    # KIỂM TRA DATA
+    # ==========================================================
+    if not isinstance(data, dict):
+        return {
+            'error': 'Dữ liệu API trả về không đúng định dạng.'
+        }
+
+    # ==========================================================
+    # PARSE KẾT QUẢ (dùng hàm chung)
+    # ==========================================================
+    return _parse_loc_response(data)
 
 
 # ==============================================================

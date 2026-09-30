@@ -19,6 +19,29 @@ DATA_SERVICE_KEYWORDS = [
 ]
 
 
+def get_request_headers(token: str) -> dict:
+    """Tạo headers chuẩn cho các lệnh gọi REST API TTS Cũ."""
+    auth_header = token if token.startswith("Bearer ") else ("Bearer " + token)
+    return {
+        "Authorization": auth_header,
+        "Content-Type": "application/json;charset=utf-8",
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+
+
+def is_tts_old_token_valid(token: str) -> bool:
+    """Kiểm tra nhanh xem token TTS Cũ có còn sống và dùng được không."""
+    if not token or not isinstance(token, str) or len(token) < 20:
+        return False
+    try:
+        url = f"{API_BASE_URL}/DM_NguyenNhanSuCo/PaginationDMNguyenNhanSuCo?offset=0&pagesize=1&keyword="
+        resp = requests.get(url, headers=get_request_headers(token), timeout=4)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
 def save_cached_auth(token: str, user_info: dict = None):
     """Lưu token và user_info vào file cache để tái sử dụng."""
     try:
@@ -33,6 +56,23 @@ def save_cached_auth(token: str, user_info: dict = None):
         pass
 
 
+def fetch_tts_old_user_info(token: str) -> dict:
+    """Gọi API TTS Cũ (/general/getuserrolesinfo) để lấy thông tin nhân viên (IdNhanVien, HoTen, TaiKhoan)."""
+    if not token:
+        return {}
+    url = f"{API_BASE_URL}/general/getuserrolesinfo"
+    headers = get_request_headers(token)
+    try:
+        r = requests.post(url, headers=headers, json={"routerPath": "quyen"}, timeout=6)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, dict) and data.get("userInfo"):
+                return data["userInfo"]
+    except Exception:
+        pass
+    return {}
+
+
 def get_cached_auth() -> tuple:
     """Đọc token và user_info từ file cache hoặc lan_sessions.json nếu còn hiệu lực."""
     # 1. Đọc từ file cache chính
@@ -41,28 +81,43 @@ def get_cached_auth() -> tuple:
             with open(TOKEN_CACHE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 tok = (data.get("token") or "").strip()
-                if tok:
-                    return tok, data.get("user_info", {})
+                if tok and is_tts_old_token_valid(tok):
+                    usr = data.get("user_info", {})
+                    if not usr or not usr.get("Id") or usr.get("Id") == 0:
+                        fresh_usr = fetch_tts_old_user_info(tok)
+                        if fresh_usr and fresh_usr.get("Id"):
+                            usr = fresh_usr
+                            save_cached_auth(tok, usr)
+                    return tok, usr
         except Exception:
             pass
 
-    # 2. Fallback: Đọc từ lan_sessions.json
+    # 2. Đọc từ lan_sessions.json
     lan_file = BASE_DIR / "lan_sessions.json"
     if lan_file.exists():
         try:
             with open(lan_file, "r", encoding="utf-8") as f:
                 sessions = json.load(f)
-            sorted_sessions = sorted(
-                sessions.values(),
-                key=lambda s: s.get("timestamp", 0),
-                reverse=True
-            )
-            for s in sorted_sessions:
-                tok = (s.get("token") or "").strip()
-                if tok:
-                    usr = s.get("user", {})
-                    save_cached_auth(tok, usr)
-                    return tok, usr
+            # 2a. Ưu tiên máy chủ local (127.0.0.1, localhost, ::1)
+            for local_key in ("127.0.0.1", "localhost", "::1"):
+                s = sessions.get(local_key)
+                if s:
+                    tok = (s.get("token") or "").strip()
+                    if tok and is_tts_old_token_valid(tok):
+                        usr = s.get("user", {})
+                        if not usr or not usr.get("Id") or usr.get("Id") == 0:
+                            fresh_usr = fetch_tts_old_user_info(tok)
+                            if fresh_usr and fresh_usr.get("Id"):
+                                usr = fresh_usr
+                        return tok, usr
+
+            # 2b. Fallback: Nếu máy chủ local chưa login, dùng phiên hợp lệ của bất kỳ KTV LAN nào
+            for ip, s in sessions.items():
+                if isinstance(s, dict):
+                    tok = (s.get("token") or "").strip()
+                    if tok and is_tts_old_token_valid(tok):
+                        usr = s.get("user", {})
+                        return tok, usr
         except Exception:
             pass
 
@@ -157,7 +212,7 @@ def extract_token_from_browser(driver=None) -> tuple:
             from auth_extractor import extract_firefox_local_storage
             tok_ff = extract_firefox_local_storage("tts.vnpt.vn", "scnntttoken")
             user_str_ff = extract_firefox_local_storage("tts.vnpt.vn", "userInfo")
-            if tok_ff:
+            if tok_ff and is_tts_old_token_valid(tok_ff):
                 token = tok_ff
                 if user_str_ff:
                     user_info = _decode_user_str(user_str_ff)
@@ -181,21 +236,15 @@ def extract_token_from_browser(driver=None) -> tuple:
         if not user_info:
             user_info = cached_user
 
+    if token and (not user_info or not user_info.get("Id") or user_info.get("Id") == 0):
+        fresh_usr = fetch_tts_old_user_info(token)
+        if fresh_usr and fresh_usr.get("Id"):
+            user_info = fresh_usr
+
     if token:
         save_cached_auth(token, user_info)
 
     return token, user_info
-
-
-def get_request_headers(token: str) -> dict:
-    """Tạo headers chuẩn cho các lệnh gọi REST API TTS Cũ."""
-    auth_header = token if token.startswith("Bearer ") else ("Bearer " + token)
-    return {
-        "Authorization": auth_header,
-        "Content-Type": "application/json;charset=utf-8",
-        "Accept": "application/json, text/plain, */*",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
 
 
 def fetch_nguyen_nhan_list_api(token: str) -> dict:
@@ -375,6 +424,24 @@ def fetch_tts_old_tickets_api(token: str, limit: int = 200, from_date: str = Non
         raw_yc = t.get("IdYeuCau")
         clean_yc = int(raw_yc) if raw_yc is not None else None
 
+        # Kiểm tra trạng thái phiếu mở lại (XuLyLai > 0 hoặc ghi nhận mở lại trên TTS)
+        raw_xu_ly_lai = t.get("XuLyLai")
+        is_reopened = False
+        reopen_count = 0
+        try:
+            if raw_xu_ly_lai is not None and float(raw_xu_ly_lai) > 0:
+                is_reopened = True
+                reopen_count = int(float(raw_xu_ly_lai))
+        except Exception:
+            pass
+
+        if not is_reopened:
+            if "mở lại" in title_lower or "phiếu mở lại" in title_lower:
+                is_reopened = True
+                reopen_count = max(reopen_count, 1)
+
+        last_reopened_date = grid_date if is_reopened else ""
+
         ticket_item = {
             "phone": phone_84,
             "raw_phone": phone_raw,
@@ -384,6 +451,9 @@ def fetch_tts_old_tickets_api(token: str, limit: int = 200, from_date: str = Non
             "created_time": created_time,
             "service_type": service_type,
             "source": "tts_old_api",
+            "is_reopened": is_reopened,
+            "reopen_count": reopen_count,
+            "last_reopened_date": last_reopened_date,
             # Các trường kỹ thuật phục vụ đóng phiếu API
             "ticket_id": clean_id,
             "id_yeu_cau": clean_yc,
@@ -473,6 +543,12 @@ def close_tts_old_ticket_api(
         u_id = int(user_id) if user_id else 0
     except Exception:
         u_id = 0
+
+    if not u_id and token:
+        fetched_usr = fetch_tts_old_user_info(token)
+        if fetched_usr and (fetched_usr.get("Id") or fetched_usr.get("id")):
+            u_id = int(fetched_usr.get("Id") or fetched_usr.get("id"))
+            save_cached_auth(token, fetched_usr)
 
     if not u_id:
         fresh_token, fresh_user = extract_token_from_browser()
@@ -570,15 +646,17 @@ def close_tts_old_ticket_api(
                 "IdXuLy": t_id,
                 "dsFile": "[]"
             }
-            res2 = requests.post(url_step2, headers=headers, json=payload_step2, timeout=15)
+            res2 = requests.post(url_step2, headers=headers, json=payload_step2, timeout=30)
             if res2.status_code == 200:
                 data2 = res2.json()
                 cf = data2.get("codeField")
                 mf = data2.get("messageField", "")
                 if cf == 1:
-                    feedback_msg = f" (CCOS: {mf})"
+                    feedback_msg = f" (CCOS: {mf or 'Đã chuyển thành công'})"
                 elif cf == -1:
-                    feedback_msg = f" (CCOS phản hồi: {mf})"
+                    feedback_msg = f" (CCOS: {mf} - Đơn vị chủ trì sẽ duyệt đóng CCOS)"
+                else:
+                    feedback_msg = f" (CCOS: {mf})"
             else:
                 feedback_msg = f" (Lỗi CCOS HTTP {res2.status_code})"
 

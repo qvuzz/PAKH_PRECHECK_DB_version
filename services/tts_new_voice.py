@@ -18,7 +18,7 @@ from db_manager import (
 )
 import ttsnew_api
 
-def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
+def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: bool = False):
     type_labels = {
         "call": "Cuộc gọi",
         "sms": "Tin nhắn",
@@ -74,7 +74,8 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                 "ticket_id": t.get("ticket_id"),
                 "flow_id": t.get("flow_id", ""),
                 "reopen_count": int(t.get("reopen_count") or 0),
-                "last_reopened_date": str(t.get("last_reopened_date") or "").strip()
+                "last_reopened_date": str(t.get("last_reopened_date") or "").strip(),
+                "processing_content": t.get("processing_content", "")
             }
             save_or_update_ticket(rec)
 
@@ -121,12 +122,22 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                 existing_db_row = None
                 try:
                     conn_chk = get_db_connection()
-                    existing_db_row = conn_chk.execute("""
-                        SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary
-                        FROM tickets 
-                        WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
-                        ORDER BY updated_at DESC LIMIT 1
-                    """, (t.get("ticket_id"), f"{code}%", phone_84)).fetchone()
+                    t_id = t.get("ticket_id")
+                    clean_c = (code or "").split("\n")[0].strip()
+                    if t_id:
+                        existing_db_row = conn_chk.execute("""
+                            SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary, ccos_attachments
+                            FROM tickets 
+                            WHERE ticket_id = ? AND source = 'tts_new'
+                            ORDER BY updated_at DESC LIMIT 1
+                        """, (t_id,)).fetchone()
+                    if not existing_db_row and clean_c:
+                        existing_db_row = conn_chk.execute("""
+                            SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary, ccos_attachments
+                            FROM tickets 
+                            WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new'
+                            ORDER BY updated_at DESC LIMIT 1
+                        """, (clean_c, f"{clean_c}%")).fetchone()
                     conn_chk.close()
                 except Exception:
                     pass
@@ -140,9 +151,14 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                     return True
 
                 can_reuse_db = (
-                    existing_db_row 
+                    not force_recheck
+                    and existing_db_row 
                     and _is_valid_technical_status(existing_db_row["status"])
                 )
+
+                ccos_json_str = ""
+                if existing_db_row and "ccos_attachments" in existing_db_row.keys() and existing_db_row["ccos_attachments"]:
+                    ccos_json_str = existing_db_row["ccos_attachments"]
 
                 if can_reuse_db:
                     state.log("INFO", f"   ↳ 📋 Thuê bao {phone_84} đã có kết quả tiền kiểm trong DB: [{existing_db_row['status']}]. Giữ nguyên hiển thị.")
@@ -166,6 +182,19 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                     )
                     final_comment = eval_res.get("comment") or default_comment
                     final_plan = eval_res.get("action_plan") or default_action_plan
+
+                # Tra cứu file đính kèm trên CCOS nếu chưa có hoặc yêu cầu recheck
+                if force_recheck or not ccos_json_str or ccos_json_str == "null":
+                    try:
+                        from ccos_client import get_ccos_attachments
+                        ccos_info = get_ccos_attachments(phone_84, driver=driver)
+                        if ccos_info:
+                            ccos_json_str = json.dumps(ccos_info, ensure_ascii=False)
+                            if ccos_info.get("has_file"):
+                                f_names = ", ".join([f["name"] for f in ccos_info.get("files", [])])
+                                state.log("INFO", f"   📎 [CCOS] Thuê bao {phone_84} có file đính kèm: {f_names}")
+                    except Exception as e_ccos:
+                        ccos_json_str = json.dumps({"has_file": False, "files": [], "message": f"Lỗi CCOS: {e_ccos}"}, ensure_ascii=False)
 
                 ticket_content = t.get("content", "")
                 reopen_count = int(t.get("reopen_count") or 0)
@@ -192,7 +221,8 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                     "ticket_id": t.get("ticket_id"),
                     "flow_id": t.get("flow_id", ""),
                     "reopen_count": reopen_count,
-                    "last_reopened_date": last_reopened_date
+                    "last_reopened_date": last_reopened_date,
+                    "ccos_attachments": ccos_json_str
                 }
                 save_or_update_ticket(rec_update)
                 state.log("SUCCESS", f"[{idx}/{len(voice_tickets)}] Đã tiền kiểm Cuộc gọi: {phone_84} -> {eval_res.get('status')}")
@@ -201,7 +231,7 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
                 state.log("ERROR", f"Lỗi tiền kiểm {phone_84}: {e}")
                 return False
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             items = list(enumerate(voice_tickets, 1))
             futures = [executor.submit(_process_single_voice_ticket, it) for it in items]
             for future in concurrent.futures.as_completed(futures):
@@ -224,14 +254,14 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms"):
 # Alias & Helper cycles cho từng module
 execute_tts_new_voice_cycle = execute_ttsnew_voice_cycle
 
-def execute_tts_new_call_cycle():
-    return execute_ttsnew_voice_cycle(service_type="call")
+def execute_tts_new_call_cycle(force_recheck: bool = False):
+    return execute_ttsnew_voice_cycle(service_type="call", force_recheck=force_recheck)
 
-def execute_tts_new_sms_cycle():
-    return execute_ttsnew_voice_cycle(service_type="sms")
+def execute_tts_new_sms_cycle(force_recheck: bool = False):
+    return execute_ttsnew_voice_cycle(service_type="sms", force_recheck=force_recheck)
 
-def execute_tts_new_other_cycle():
-    return execute_ttsnew_voice_cycle(service_type="other")
+def execute_tts_new_other_cycle(force_recheck: bool = False):
+    return execute_ttsnew_voice_cycle(service_type="other", force_recheck=force_recheck)
 
 
 

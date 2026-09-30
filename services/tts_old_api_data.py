@@ -16,10 +16,19 @@ import update_tts.config as tts_config
 import update_tts.excel_reader as excel_reader
 
 
-def execute_tts_old_api_data_cycle(driver=None):
+def _is_valid_technical_status(st):
+    if not st:
+        return False
+    s_u = str(st).strip().upper()
+    if "LỖI KẾT NỐI" in s_u or "CHƯA ĐĂNG NHẬP" in s_u or "LỖI MÁY CHỦ" in s_u or "CHƯA PHÂN LOẠI" in s_u or "CHỜ TIỀN KIỂM" in s_u:
+        return False
+    return True
+
+
+def execute_tts_old_api_data_cycle(driver=None, force_recheck: bool = False):
     """
     Thực hiện 1 chu kỳ quét & tiền kiểm Mobile Internet trên TTS Cũ.
-    Chạy ngầm tự động 100%.
+    Chạy ngầm tự động 100%. Tái sử dụng kết quả DB nếu đã tiền kiểm, trừ khi force_recheck=True.
     """
     if state.status == "PROCESSING":
         state.log("WARN", "Hệ thống đang bận thực hiện chu kỳ khác.")
@@ -48,6 +57,46 @@ def execute_tts_old_api_data_cycle(driver=None):
         state.current_step = "Đang tải danh sách phiếu từ TTS Cũ..."
         raw_tickets = fetch_tts_old_tickets_api(token, limit=250)
 
+        # Lọc và đồng bộ nhanh các phiếu ngoài Data (Thoại / SMS / Gói cước / PA Khác) của TTS Cũ
+        voice_tickets = [t for t in raw_tickets if t.get("service_type") != "data"]
+        active_voice_phones = set()
+        for vt in voice_tickets:
+            p84 = vt.get("phone", "")
+            if not p84:
+                continue
+            active_voice_phones.add(p84)
+            inc_t = vt.get("incident_time") or ""
+            is_reopened_v = bool(vt.get("is_reopened") or (vt.get("reopen_count", 0) > 0))
+            reopen_count_v = int(vt.get("reopen_count", 0) or (1 if is_reopened_v else 0))
+            reopen_cmt_v = "Phiếu mở lại, KTV kiểm tra thêm." if is_reopened_v else ""
+
+            rec = {
+                "phone": p84,
+                "incident_time": inc_t,
+                "package_title": vt.get("title", "Thoại / SMS"),
+                "ticket_content": vt.get("content", ""),
+                "status": "⚠️ PHIẾU MỞ LẠI" if is_reopened_v else "",
+                "real_packages": "--",
+                "rat_types": "--",
+                "cem_data": "--",
+                "app_usage": "--",
+                "ai_summary": vt.get("content", ""),
+                "comment": reopen_cmt_v,
+                "action_plan": "KTV kiểm tra và xử lý thủ công" if is_reopened_v else "",
+                "ticket_status": "Chưa đóng",
+                "source": "tts_old_api",
+                "created_time": vt.get("created_time") or inc_t,
+                "ticket_id": vt.get("ticket_id"),
+                "flow_id": str(vt.get("id_yeu_cau") or ""),
+                "ticket_code": vt.get("ma_ccos") or vt.get("MaCCOS") or "",
+                "reopen_count": reopen_count_v,
+                "last_reopened_date": vt.get("last_reopened_date") or ""
+            }
+            save_or_update_ticket(rec)
+        sync_active_tickets_state(active_voice_phones, source="tts_old_api", key_type="phone", service_type="voice_sms")
+        if voice_tickets:
+            state.log("INFO", f"📞 [TTS CŨ] Đã tự động đồng bộ {len(voice_tickets)} phiếu Thoại / SMS / Gói cước / PA Khác.")
+
         # Lọc các phiếu thuộc Mobile Internet
         data_tickets = [t for t in raw_tickets if t.get("service_type") == "data"]
         state.total_scanned = len(data_tickets)
@@ -69,7 +118,7 @@ def execute_tts_old_api_data_cycle(driver=None):
         from sapc_client import SAPCClient
         from msisdn_info import tra_cell_tu_so_dien_thoai
         from converter import convert_sapc_response
-        from report_bot import get_formatted_sapc_packages, analyze_subscriber_status
+        from report_bot import get_formatted_sapc_packages, analyze_subscriber_status, extract_btools_packages_summary
         from ai_interpreter import analyze_ticket_with_ai
 
         from crawler_btools import extract_btools_single_phone
@@ -104,6 +153,98 @@ def execute_tts_old_api_data_cycle(driver=None):
 
             active_phones.add(phone_84)
             inc_time = t.get("incident_time") or ""
+            ticket_id = t.get("ticket_id") or t.get("id_yeu_cau")
+            ticket_code = t.get("ma_ccos") or t.get("MaCCOS") or t.get("ticket_code") or ""
+
+            # 0. Kiểm tra kế thừa kết quả tiền kiểm đã có trong DB
+            existing_db_row = None
+            if not force_recheck:
+                try:
+                    conn_chk = get_db_connection()
+                    if conn_chk:
+                        if ticket_id or ticket_code:
+                            existing_db_row = conn_chk.execute("""
+                                SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary
+                                FROM tickets 
+                                WHERE ((ticket_id IS NOT NULL AND ticket_id = ?) OR (ticket_code IS NOT NULL AND ticket_code = ?)) 
+                                  AND source = 'tts_old_api'
+                                ORDER BY updated_at DESC LIMIT 1
+                            """, (ticket_id, ticket_code)).fetchone()
+                        elif incident_time_str:
+                            existing_db_row = conn_chk.execute("""
+                                SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary
+                                FROM tickets 
+                                WHERE phone = ? AND incident_time = ?
+                                  AND source = 'tts_old_api'
+                                ORDER BY updated_at DESC LIMIT 1
+                            """, (phone_84, incident_time_str)).fetchone()
+                        conn_chk.close()
+                except Exception:
+                    pass
+
+            is_reopened = bool(t.get("is_reopened") or (t.get("reopen_count", 0) > 0))
+            reopen_count = int(t.get("reopen_count", 0) or (1 if is_reopened else 0))
+
+            can_reuse_db = (
+                existing_db_row 
+                and existing_db_row["comment"] 
+                and _is_valid_technical_status(existing_db_row["status"])
+            )
+
+            if can_reuse_db:
+                state.log("INFO", f"   ↳ 📋 [{ticket_code or phone_84}] Thuê bao {phone_84} đã có kết quả trong DB: [{existing_db_row['status']}]. Kế thừa hiển thị.")
+                reopen_prefix = "Phiếu mở lại, KTV kiểm tra thêm."
+                db_comment = str(existing_db_row["comment"] or "").strip()
+                if is_reopened:
+                    if reopen_prefix not in db_comment:
+                        final_comment = f"{reopen_prefix}\n\n{db_comment}" if db_comment else reopen_prefix
+                    else:
+                        final_comment = db_comment
+                else:
+                    final_comment = db_comment
+
+                real_pkgs_val = existing_db_row["real_packages"] or "--"
+                if "BTools:" in real_pkgs_val and "(max " not in real_pkgs_val and "Không phát sinh" not in real_pkgs_val:
+                    num_file = BASE_DIR / "number" / f"{phone_84}.json"
+                    if num_file.exists():
+                        try:
+                            with open(num_file, "r", encoding="utf-8") as jf:
+                                j_data = json.load(jf)
+                                b_data = j_data.get("btools_technical_data") or j_data.get("data") or []
+                                if b_data:
+                                    s_btools = extract_btools_packages_summary(b_data)
+                                    real_pkgs_val = get_formatted_sapc_packages(phone_84, fallback_btools=s_btools)
+                        except Exception:
+                            pass
+
+                rec = {
+                    "phone": phone_84,
+                    "incident_time": inc_time,
+                    "package_title": t.get("title", ""),
+                    "real_packages": real_pkgs_val,
+                    "rat_types": existing_db_row["rat_types"] or "--",
+                    "cem_data": existing_db_row["cem_data"] or "--",
+                    "app_usage": existing_db_row["app_usage"] or "--",
+                    "ticket_content": t.get("content", ""),
+                    "status": "⚠️ PHIẾU MỞ LẠI" if is_reopened and not str(existing_db_row["status"]).startswith("⚠️") else existing_db_row["status"],
+                    "comment": final_comment,
+                    "action_plan": existing_db_row["action_plan"] or ("KTV kiểm tra và xử lý thủ công" if is_reopened else ""),
+                    "color": existing_db_row["color"] or "#4CAF50",
+                    "ticket_status": "Chưa đóng",
+                    "created_time": t.get("created_time") or inc_time,
+                    "ai_summary": existing_db_row["ai_summary"] or t.get("content", ""),
+                    "source": "tts_old_api",
+                    "ticket_code": ticket_code,
+                    "ticket_id": ticket_id,
+                    "flow_id": str(t.get("id_yeu_cau") or ""),
+                    "phan_hoi_he_thong": t.get("phan_hoi_he_thong", 1),
+                    "id_he_thong": t.get("id_he_thong", 0),
+                    "reopen_count": reopen_count,
+                    "last_reopened_date": t.get("last_reopened_date") or "",
+                    "closed_by": None
+                }
+                save_or_update_ticket(rec)
+                continue
 
             state.current_step = f"Tiền kiểm tra thuê bao {idx}/{len(data_tickets)}: {phone_84}"
             state.log("STEP", f"[{idx}/{len(data_tickets)}] Tiền kiểm tra cho SĐT: {phone_84} ({t.get('title')})...")
@@ -169,25 +310,8 @@ def execute_tts_old_api_data_cycle(driver=None):
                 except Exception as ex_case2:
                     state.log("WARN", f"Lỗi tra cứu bổ sung Case 2: {ex_case2}")
 
-                # Trích xuất gói cước phát sinh từ BTools để đưa vào Data Usage (BTools)
-                cfg_p = BASE_DIR / "diagnostic_config.json"
-                ex_codes = set()
-                if cfg_p.exists():
-                    try:
-                        with open(cfg_p, "r", encoding="utf-8") as cf:
-                            ex_codes = set(json.load(cf).get("EXCLUDED_SYSTEM_CODES", []))
-                    except Exception:
-                        pass
-                real_pkgs = set()
-                for r in (clean_btools_data or []):
-                    sc = str(r.get("SERVICE_ID_CODE", "") or r.get("SERVICE_ID", "")).strip()
-                    sn = str(r.get("SERVICE_NAME", "")).strip()
-                    if sc.lower() and sc.lower() not in ex_codes and sc.lower() not in ("null", "none"):
-                        if sn and "gói cước lạ" not in sn.lower() and sn.lower() not in ex_codes and sn.lower() not in ("null", "none"):
-                            real_pkgs.add(sn)
-                        elif sc.lower() not in ("null", "none"):
-                            real_pkgs.add(sc)
-                real_pkgs_str = ", ".join(list(real_pkgs)) if real_pkgs else "Không phát sinh gói TM"
+                # Trích xuất gói cước phát sinh từ BTools kèm max session đưa vào Data Usage (BTools)
+                real_pkgs_str = extract_btools_packages_summary(clean_btools_data)
                 formatted_packages = get_formatted_sapc_packages(phone_84, fallback_btools=real_pkgs_str)
 
                 # Tra cứu CEM & App Usage
@@ -198,9 +322,11 @@ def execute_tts_old_api_data_cycle(driver=None):
                 try:
                     if cem_client is None:
                         cem_client = CEMClient(driver=driver)
-                    cem_records = cem_client.get_subscriber_history_5days(phone_84, days=5)
-                    app_events = cem_client.get_subscriber_app_events(phone_84, days=5)
-                    cem_data_str = CEMClient.extract_top_cells_summary(cem_records, app_events=app_events)
+                    cem_records = cem_client.get_subscriber_history_5days(phone_84, days=5, incident_time_str=inc_time)
+                    app_events = cem_client.get_subscriber_app_events(phone_84, days=5, incident_time_str=inc_time)
+                    _, _, cem_data_str = CEMClient.extract_two_period_summary(
+                        cem_records, incident_time_str=inc_time, app_events=app_events, days=5
+                    )
                     app_usage_str = CEMClient.extract_top_apps_summary(app_events)
                     save_cem_data_to_file(phone_84, cem_records, app_events, base_dir=BASE_DIR)
                 except Exception as ex_cem:
@@ -226,12 +352,19 @@ def execute_tts_old_api_data_cycle(driver=None):
                             pass
                     cem_data_str = f"Không có dữ liệu CEM (5 ngày) [Cell HSS: {cell_desc}]{vpn_suffix}"
 
+                is_reopened = bool(t.get("is_reopened") or (t.get("reopen_count", 0) > 0))
+                reopen_count = int(t.get("reopen_count", 0) or (1 if is_reopened else 0))
+                reopen_prefix = "Phiếu mở lại, KTV kiểm tra thêm."
+                if is_reopened:
+                    if reopen_prefix not in comment_calc:
+                        comment_calc = f"{reopen_prefix}\n\n{comment_calc}" if comment_calc else reopen_prefix
+
                 rec = {
                     "phone": phone_84,
                     "incident_time": inc_time,
                     "package_title": t.get("title", ""),
                     "ticket_content": t.get("content", ""),
-                    "status": status_calc,
+                    "status": "⚠️ PHIẾU MỞ LẠI" if is_reopened and not status_calc.startswith("⚠️") else status_calc,
                     "real_packages": formatted_packages,
                     "rat_types": rat_type_str,
                     "cem_data": cem_data_str,
@@ -247,6 +380,8 @@ def execute_tts_old_api_data_cycle(driver=None):
                     "ticket_code": t.get("ma_ccos") or t.get("MaCCOS") or "",
                     "phan_hoi_he_thong": t.get("phan_hoi_he_thong", 1),
                     "id_he_thong": t.get("id_he_thong", 0),
+                    "reopen_count": reopen_count,
+                    "last_reopened_date": t.get("last_reopened_date") or ""
                 }
 
                 # 5. Kiểm tra điều kiện tự động đóng
@@ -267,9 +402,11 @@ def execute_tts_old_api_data_cycle(driver=None):
                     action_plan = action_override
                     rec["action_plan"] = action_plan
 
-                can_close = bool(clean_btools_data is not None and matched_nguyen_nhan and excel_reader.is_level_1_auto_close_candidate(check_dict))
+                can_close = bool(not is_reopened and clean_btools_data is not None and matched_nguyen_nhan and excel_reader.is_level_1_auto_close_candidate(check_dict))
 
-                if clean_btools_data is None:
+                if is_reopened:
+                    state.log("WARN", f"⚠️ Phiếu {phone_84} là phiếu mở lại (reopen_count={reopen_count}). Giữ nguyên 'Chưa đóng' để KTV kiểm tra thủ công!")
+                elif clean_btools_data is None:
                     state.log("WARN", f"⚠️ Phiếu {phone_84} lỗi tra cứu BTools (chưa đăng nhập hoặc lỗi máy chủ). Giữ trạng thái 'Chưa đóng' để KTV kiểm tra!")
                 elif state.should_auto_close("tts_old") and can_close:
                     state.log("STEP", f"🤖 Thuê bao {phone_84} đủ điều kiện. Đang tự động đóng phiếu...")
@@ -313,7 +450,16 @@ def execute_tts_old_api_data_cycle(driver=None):
         return len(data_tickets)
 
     except Exception as e:
-        state.log("ERROR", f"Lỗi chu kỳ quét TTS Cũ: {e}")
+        err_str = str(e)
+        if "401" in err_str or "Authorization has been denied" in err_str:
+            state.log("WARN", "⚠️ Token TTS Cũ đã hết hạn trên máy chủ OneOSS (401). Đã dọn dẹp cache, vui lòng đăng nhập lại.")
+            try:
+                from tts_old_api import save_cached_auth
+                save_cached_auth("", {})
+            except Exception:
+                pass
+        else:
+            state.log("ERROR", f"Lỗi chu kỳ quét TTS Cũ: {e}")
         return 0
     finally:
         state.current_step = "Hoàn tất chu kỳ"

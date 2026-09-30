@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sơ Đồ Cây Quyết Định Kịch Bản Chẩn Đoán Tiền Kiểm — VNPT PAKH</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+    <style>
+        :root {
+            --primary: #005baa;
+            --primary-dark: #004480;
+            --primary-light: #e0f2fe;
+            --bg-main: #0f172a;
+            --bg-card: #1e293b;
+            --border-color: #334155;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-green: #22c55e;
+            --accent-yellow: #eab308;
+            --accent-red: #ef4444;
+            --accent-orange: #f97316;
+            --accent-blue: #38bdf8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+            background: var(--bg-main);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        /* Top Header Navbar */
+        header {
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 14px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .brand-box {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .brand-logo {
+            width: 38px;
+            height: 38px;
+            background: linear-gradient(135deg, #0284c7, #005baa);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 18px;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(2, 132, 199, 0.4);
+        }
+
+        .brand-title-wrap h1 {
+            font-size: 16px;
+            font-weight: 800;
+            color: #fff;
+            letter-spacing: -0.01em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .badge-live {
+            background: #0284c7;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 20px;
+            text-transform: uppercase;
+        }
+
+        .brand-subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* Tabs Selection */
+        .tabs-nav {
+            display: flex;
+            background: #1e293b;
+            padding: 4px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            gap: 4px;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .tab-btn:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn.active {
+            background: #0284c7;
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);
+        }
+
+        /* Action Buttons */
+        .actions-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-action {
+            background: #334155;
+            color: #f8fafc;
+            border: 1px solid #475569;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 7px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-action:hover {
+            background: #475569;
+            border-color: #64748b;
+        }
+
+        .btn-print {
+            background: linear-gradient(135deg, #10b981, #059669);
+            border: none;
+            color: #fff;
+        }
+        .btn-print:hover {
+            background: linear-gradient(135deg, #059669, #047857);
+        }
+
+        /* Main Workspace */
+        main {
+            flex: 1;
+            display: flex;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Diagram Viewport */
+        .diagram-viewport {
+            flex: 1;
+            height: calc(100vh - 72px);
+            background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .panzoom-canvas {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Float Zoom Controls */
+        .zoom-toolbar {
+            position: absolute;
+            bottom: 24px;
+            left: 24px;
+            background: rgba(30, 41, 59, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            z-index: 50;
+        }
+
+        .zoom-btn {
+            width: 36px;
+            height: 36px;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: #f8fafc;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+        }
+
+        .zoom-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #38bdf8;
+        }
+
+        .zoom-hint {
+            position: absolute;
+            bottom: 80px;
+            left: 24px;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 11px;
+            color: var(--text-muted);
+            pointer-events: none;
+            z-index: 40;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Legend Footer Bar */
+        .legend-bar {
+            position: absolute;
+            bottom: 24px;
+            right: 24px;
+            background: rgba(30, 41, 59, 0.9);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 10px 18px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: 12px;
+            font-weight: 600;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            z-index: 50;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 4px;
+        }
+
+        /* Diagram Tab Contents */
+        .tab-content {
+            position: absolute;
+            visibility: hidden;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .tab-content.active {
+            position: relative;
+            visibility: visible;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            pointer-events: auto;
+            opacity: 1;
+        }
+
+        /* Custom Mermaid Styling */
+        .mermaid {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .mermaid svg {
+            width: 100% !important;
+            height: 100% !important;
+            max-width: none !important;
+        }
+
+        /* Print styles */
+        @media print {
+            header, .zoom-toolbar, .legend-bar {
+                display: none !important;
+            }
+            body, main, .diagram-viewport {
+                background: #ffffff !important;
+                color: #000000 !important;
+                height: auto !important;
+                min-height: auto !important;
+                overflow: visible !important;
+            }
+            .tab-content {
+                position: static !important;
+                visibility: visible !important;
+                display: block !important;
+                opacity: 1 !important;
+                page-break-after: always !important;
+                break-after: page !important;
+                margin-bottom: 40px !important;
+                height: auto !important;
+            }
+            .panzoom-canvas {
+                transform: none !important;
+                width: 100% !important;
+                height: auto !important;
+                display: block !important;
+            }
+            .mermaid svg {
+                max-width: 100% !important;
+                height: auto !important;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header Navigation -->
+    <header>
+        <div class="brand-box">
+            <div class="brand-logo">V</div>
+            <div class="brand-title-wrap">
+                <h1>CÂY SƠ ĐỒ CHẨN ĐOÁN TIỀN KIỂM <span class="badge-live">RULE V2.4</span></h1>
+                <div class="brand-subtitle">Hệ thống Tiền kiểm PAKH VNPT — Logic Phân tích BTools & Hồ sơ Core SAPC</div>
+            </div>
+        </div>
+
+        <nav class="tabs-nav">
+            <button class="tab-btn active" onclick="switchTab('tab-data', this)">
+                <span>🌐</span> Mobile Internet (Data)
+            </button>
+            <button class="tab-btn" onclick="switchTab('tab-voice', this)">
+                <span>📞</span> Thoại / Cuộc gọi / SMS
+            </button>
+            <button class="tab-btn" onclick="switchTab('tab-hss', this)">
+                <span>🎯</span> Chuẩn HSS Profile & NAM
+            </button>
+        </nav>
+
+        <div class="actions-box">
+            <button class="btn-action" onclick="resetZoom()">
+                <span>🔄</span> Đặt lại góc nhìn
+            </button>
+            <button class="btn-action btn-print" onclick="window.print()">
+                <span>🖨️</span> In / Lưu PDF
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main>
+        <div class="diagram-viewport">
+            
+            <!-- Zoom Hint -->
+            <div class="zoom-hint">
+                💡 Cuộn chuột để Phóng to/Thu nhỏ • Giữ chuột trái để Kéo
+            </div>
+
+            <!-- Zoom Toolbar -->
+            <div class="zoom-toolbar">
+                <button class="zoom-btn" onclick="zoomIn()" title="Phóng to (+)">➕</button>
+                <button class="zoom-btn" onclick="zoomOut()" title="Thu nhỏ (-)">➖</button>
+                <button class="zoom-btn" onclick="resetZoom()" title="Về đầu trang / Chuẩn 100%">🎯</button>
+                <button class="zoom-btn" onclick="fitAll()" title="Xem toàn bộ cây (Fit All)">⛶</button>
+            </div>
+
+            <!-- Legend Bar -->
+            <div class="legend-bar">
+                <div class="legend-item">
+                    <div class="legend-dot" style="background:#22c55e;"></div>
+                    <span>Hoạt động bình thường / Mạng lưới đảm bảo</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background:#f97316;"></div>
+                    <span>Chưa có Profile 4G</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background:#ef4444;"></div>
+                    <span>Profile lạ / Khóa cước / Spam</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-dot" style="background:#eab308;"></div>
+                    <span>Gói cước / Sóng yếu / Theo dõi</span>
+                </div>
+            </div>
+
+            <!-- TAB 1: DATA (MOBILE INTERNET) -->
+            <div id="tab-data" class="tab-content active">
+                <div class="panzoom-canvas">
+                    <div class="mermaid" id="mermaid-data">
+flowchart TD
+    %% Khởi tạo kịch bản
+    START(["🚦 BẮT ĐẦU TIỀN KIỂM PHIẾU DATA"]) --> C_CONN{"BTools có kết nối được không?<br/>(Check phiên Chrome)"}
+
+    %% TẦNG 0: KẾT NỐI HẠ TẦNG & MS PURGED
+    C_CONN -- "Không kết nối / Hết session" --> RES_BTOOLS["⚠️ LỖI KẾT NỐI BTOOLS<br/>• Không đóng phiếu tự động<br/>• Yêu cầu kiểm tra BTools Chrome"]
+    style RES_BTOOLS fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#991b1b
+
+    C_CONN -- "BTools kết nối tốt" --> C_PURGED{"HLR / Core State<br/>có phải MS PURGED?"}
+    
+    C_PURGED -- "Đúng (MS PURGED)" --> RES_PURGED["📴 OFF THIẾT BỊ NHIỀU NGÀY<br/>• Khách hàng tắt máy dài ngày<br/>• Đóng phiếu: Yêu cầu mở lại máy"]
+    style RES_PURGED fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    C_PURGED -- "Không" --> STEP1["🔍 BƯỚC 1: ĐỐI SOÁT BTOOLS GROUND TRUTH<br/>(Trích xuất phiên sau sự cố & ngày gần nhất)"]
+    style STEP1 fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1
+
+    %% TẦNG 1: BTOOLS GROUND TRUTH
+    STEP1 --> C_NORMAL_DATA{"BTools có phiên data >= 10MB<br/>SAU mốc tiếp nhận sự cố?"}
+    
+    C_NORMAL_DATA -- "CÓ (Đang lướt data tốt)" --> C_APP_SLOW{"KH có báo lỗi App cụ thể<br/>(Zalo/TikTok/FB) hoặc báo CHẬM?"}
+    
+    C_APP_SLOW -- "Lỗi app cụ thể" --> RES_APP["📱 LỖI ỨNG DỤNG (KTV XỬ LÝ)<br/>• Có data nhưng lỗi app riêng biệt<br/>• Chuyển KTV hỗ trợ app"]
+    style RES_APP fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    C_APP_SLOW -- "Báo mạng chậm / CEM 1 cell >= 50%" --> RES_CELL_SLOW["📡 LƯU LƯỢNG YẾU / TẬP TRUNG 1 CELL<br/>• Suy hao trạm phát sóng cục bộ<br/>• Chuyển CLM tối ưu sóng trạm"]
+    style RES_CELL_SLOW fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    C_APP_SLOW -- "Không báo chậm (Bình thường)" --> RES_OK["✅ HOẠT ĐỘNG BÌNH THƯỜNG<br/>• Thuê bao đã dùng data tốt sau sự cố<br/>• Đóng phiếu OneOSS nguyên nhân 2011"]
+    style RES_OK fill:#f0fdf4,stroke:#22c55e,stroke-width:2px,color:#166534
+
+    %% TẦNG 2: CORE PROFILE FAILURE (KHI BTOOLS XÁC NHẬN CÓ SỰ CỐ)
+    C_NORMAL_DATA -- "KHÔNG có phiên >= 10MB sau tiếp nhận<br/>(BTools xác nhận không dùng được)" --> STEP2["⚙️ BƯỚC 2: KIỂM TRA HỒ SƠ CORE SAPC<br/>(check_core_profile_failure)"]
+    style STEP2 fill:#f1f5f9,stroke:#64748b,stroke-width:2px,color:#334155
+
+    STEP2 --> C_NAM{"Cờ NAM == '1'?"}
+    C_NAM -- "Đúng (Khóa cước Core)" --> RES_NAM["🔒 BỊ KHÓA GPRS<br/>• Bị chặn GPRS trên mạng lõi<br/>• Nhờ VNP mở lại GPRS cho KH"]
+    style RES_NAM fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+    
+    C_NAM -- "Sai (NAM=0)" --> C_EMPTY_HSS{"HSS Profile rỗng / null / trống?"}
+    C_EMPTY_HSS -- "Đúng (Chưa khai báo 4G)" --> RES_NO_4G_PROF["📶 CHƯA KHAI BÁO PROFILE 4G<br/>• Chưa mở profile 4G LTE trên Core<br/>• Chuyển IT bổ sung profile 4G"]
+    style RES_NO_4G_PROF fill:#fff7ed,stroke:#f97316,stroke-width:2px,color:#9a3412
+    
+    C_EMPTY_HSS -- "Sai (Có Profile)" --> C_STRANGE_HSS{"Điều kiện AND bắt buộc:<br/>Profile >= 3 chữ số<br/>VÀ IPv4 bắt đầu bằng 113. hoặc 172.?"}
+    C_STRANGE_HSS -- "Thỏa mãn cả 2" --> RES_STRANGE["⚠️ PROFILE LẠ<br/>• Phát hiện HSS Profile lạ, IP: 113./172.<br/>• Chuyển IT khai báo lại Profile"]
+    style RES_STRANGE fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#991b1b
+    
+    %% TẦNG 3: KỊCH BẢN ĐẶC THÙ (5G, VPN, GÓI VD2, 3G)
+    C_STRANGE_HSS -- "Không thỏa mãn (Profile bình thường<br/>hoặc iTel 3043 có IP 10.x)" --> STEP3["🧩 BƯỚC 3: XÉT CÁC KỊCH BẢN ĐẶC THÙ"]
+    style STEP3 fill:#f8fafc,stroke:#94a3b8,stroke-width:2px,color:#1e293b
+
+    STEP3 --> C_5G{"KH phản ánh dịch vụ 5G?"}
+    C_5G -- "Có" --> C_5G_PROF{"HSS Profile có phải 5G<br/>(55, 56, 65, 66, 67)?"}
+    C_5G_PROF -- "Không có profile 5G" --> RES_NO_5G["HSS CHƯA CÓ 5G<br/>• Nhờ VNP đăng ký gói 5G"]
+    style RES_NO_5G fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    C_5G_PROF -- "Có profile 5G" --> C_5G_RAT{"BTools có RAT_TYPE = 7 (5G)?"}
+    C_5G_RAT -- "Không có sóng 5G" --> RES_LACK_5G["THIẾU SÓNG 5G / THIẾT BỊ<br/>• Khu vực chưa có trạm 5G / Máy chưa bật"]
+    style RES_LACK_5G fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+    
+    C_5G -- "Không" --> C_VPN{"Dính bóp phiên 4.5MB - 11.5MB<br/>hoặc Báo chậm + Có app VPN ở CEM?"}
+    C_VPN -- "Đúng" --> RES_VPN["🛡️ ĐANG SỬ DỤNG VPN / 1.1.1.1<br/>• Lưu lượng quốc tế bị bóp qua app VPN<br/>• Hướng dẫn KH tắt/gỡ app VPN"]
+    style RES_VPN fill:#f0fdf4,stroke:#22c55e,stroke-width:2px,color:#166534
+    
+    C_VPN -- "Sai" --> C_VD2{"Báo gói VD2 nhưng thiếu PAYGO?"}
+    C_VD2 -- "Đúng" --> RES_VD2["LỖI GÓI VD2 - THIẾU PAYGO<br/>• Thiếu gói nền M0 dẫn đến mất data<br/>• Chuyển IT kích hoạt gói nền PAYGO"]
+    style RES_VD2 fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+    
+    C_VD2 -- "Sai" --> C_3G_AREA{"Sự cố trong ngày, Radio 3G, IP null,<br/>đi nhiều nơi, Data < 10MB?"}
+    C_3G_AREA -- "Đúng" --> RES_3G["SÓNG 4G KÉM / CHỈ CÓ 3G<br/>• Khu vực chỉ có sóng 3G, khó truy cập"]
+    style RES_3G fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    %% TẦNG 4: BTOOLS TRỐNG DỮ LIỆU (0 PHIÊN)
+    C_3G_AREA -- "Sai" --> C_NO_BTOOLS{"BTools hoàn toàn KHÔNG CÓ phiên nào<br/>(clean_data rỗng / 0 row)?"}
+    
+    C_NO_BTOOLS -- "Đúng (0 phiên BTools)" --> STEP4["📦 BƯỚC 4: ĐỐI SOÁT HẠN GÓI CƯỚC SAPC"]
+    style STEP4 fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    STEP4 --> C_ALL_EXP{"Tất cả gói SAPC đã hết hạn?"}
+    C_ALL_EXP -- "Đúng" --> RES_EXP["⌛ GÓI CƯỚC ĐÃ HẾT HẠN<br/>• Không còn gói data ưu đãi<br/>• Tư vấn KH nạp tiền gia hạn gói"]
+    style RES_EXP fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    C_ALL_EXP -- "Còn gói Active" --> C_PAYGO_ONLY{"Chỉ có gói mặc định PAYGO (M0)?"}
+    C_PAYGO_ONLY -- "Đúng" --> RES_PAYGO["CHỈ CÓ GÓI PAYGO<br/>• Tài khoản chính không đủ cước ngoài gói<br/>• Tư vấn đăng ký gói ưu đãi"]
+    style RES_PAYGO fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    C_PAYGO_ONLY -- "Gói thương mại" --> C_NEW_PKG{"Gói đăng ký mới trong 5 ngày<br/>nhưng không có lưu lượng?"}
+    C_NEW_PKG -- "Đúng" --> RES_COMM_NEW["GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC<br/>• Lỗi luồng cước / profile gói thương mại<br/>• Chuyển IT/Tính cước kiểm tra"]
+    style RES_COMM_NEW fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    C_NEW_PKG -- "Trước đó có dùng, 5 ngày tắt" --> RES_NO_DATA["KHÔNG CÓ DỮ LIỆU<br/>• Thiết bị KH tắt data hoặc treo data<br/>• Nhờ KH khởi động lại máy"]
+    style RES_NO_DATA fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    %% TẦNG 5: SCENARIOS ENGINE (HẠ TẦNG VÀ SÓNG BTOOLS)
+    C_NO_BTOOLS -- "Có phiên BTools" --> STEP5["⚡ BƯỚC 5: ENGINE HẠ TẦNG SÓNG (scenarios_engine)"]
+    style STEP5 fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1
+
+    STEP5 --> C_KC3{"BTools có mã bóp băng thông 100xx<br/>(10002, 10003, 10005, 10010..10014)?"}
+    C_KC3 -- "Đúng (Mã 100xx)" --> RES_KC3["THUÊ BAO BỊ BÓP BĂNG THÔNG<br/>• BTools ghi nhận mã bóp (10002 - 10014)<br/>• Hết data tốc độ cao, bị hạ băng thông<br/>• Tư vấn mua thêm dung lượng"]
+    style RES_KC3 fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#9a3412
+
+    C_KC3 -- "Sai" --> C_KC4{"Chỉ có mã hệ thống 300 / 2042 xuyên suốt?"}
+    C_KC4 -- "Đúng" --> RES_KC4["LỖI GÓI CƯỚC / THIẾT BỊ TREO<br/>• Treo phiên quản lý, không có data thật<br/>• Bật tắt lại data hoặc chuyển IT reset"]
+    style RES_KC4 fill:#f1f5f9,stroke:#64748b,stroke-width:2px,color:#334155
+
+    C_KC4 -- "Sai" --> C_KC1{"N ngày hoàn toàn chỉ bắt 2G/3G<br/>(RAT_TYPE chỉ có 0, 1, 2)?"}
+    C_KC1 -- "Đúng" --> RES_KC1["KHÔNG BẮT ĐƯỢC SÓNG 4G<br/>• Đã có profile 4G nhưng không bắt được<br/>• Hướng dẫn cài đặt máy / Đổi SIM 4G"]
+    style RES_KC1 fill:#fff7ed,stroke:#f97316,stroke-width:2px,color:#9a3412
+
+    C_KC1 -- "Sai" --> C_KC2{"Rớt sóng 2G/3G >= 70% tổng phiên?"}
+    C_KC2 -- "Đúng" --> RES_KC2["BẮT SÓNG 4G KÉM<br/>• Sóng chập chờn, rớt về 2G/3G đa số<br/>• Chuyển CLM tối ưu vùng phủ sóng"]
+    style RES_KC2 fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    %% TẦNG 6: SERVICE ID & LƯU LƯỢNG ĐA NGÀY
+    C_KC2 -- "Sai" --> STEP6["📊 BƯỚC 6: SERVICE ID GÓI & LƯU LƯỢNG ĐA NGÀY"]
+    style STEP6 fill:#f8fafc,stroke:#94a3b8,stroke-width:2px,color:#1e293b
+
+    STEP6 --> C_SYS_ONLY{"Lịch sử chỉ toàn mã hệ thống mặc định?"}
+    C_SYS_ONLY -- "Đúng" --> RES_NO_REG["CHƯA ĐĂNG KÝ GÓI<br/>• Không tồn tại gói thương mại phát sinh<br/>• Hướng dẫn KH đăng ký gói data"]
+    style RES_NO_REG fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    C_SYS_ONLY -- "Sai" --> C_MISMATCH_SVC{"Báo có gói nhưng BTools thiếu Service ID<br/>và phiên lớn nhất < 1MB?"}
+    C_MISMATCH_SVC -- "Đúng" --> RES_PKG_FAIL["LỖI DO GÓI CƯỚC<br/>• BTools không thấy Service ID của gói<br/>• Chuyển IT kiểm tra luồng cước"]
+    style RES_PKG_FAIL fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+    
+    C_MISMATCH_SVC -- "Sai" --> C_PRIOR_USAGE{"Có phiên data >= 10MB trước sự cố,<br/>sau tiếp nhận chưa có phiên mới?"}
+    C_PRIOR_USAGE -- "Đúng" --> RES_FOLLOW["👀 THEO DÕI THÊM<br/>• KH đã dùng trước đó, sau sự cố chưa có data<br/>• Có thể đi vào vùng sóng yếu, theo dõi thêm"]
+    style RES_FOLLOW fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    C_PRIOR_USAGE -- "Sai" --> C_LOW_TRAFFIC{"Phiên cao nhất chỉ đạt 1MB - 10MB?"}
+    C_LOW_TRAFFIC -- "Đúng" --> RES_WEAK["LƯU LƯỢNG YẾU<br/>• Lưu lượng data ở mức thấp (1MB - 10MB)<br/>• Chuyển CLM đo kiểm sóng địa bàn"]
+    style RES_WEAK fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    C_LOW_TRAFFIC -- "Data < 1MB" --> RES_NEGLIGIBLE["KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ<br/>• Ngày gần nhất data < 1MB<br/>• Nghi ngờ thiết bị bị treo data / Tắt data"]
+    style RES_NEGLIGIBLE fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: VOICE / CUOC GOI / SMS -->
+            <div id="tab-voice" class="tab-content">
+                <div class="panzoom-canvas">
+                    <div class="mermaid" id="mermaid-voice">
+flowchart TD
+    V_START(["🚦 BẮT ĐẦU TIỀN KIỂM PHIẾU THOẠI / CUỘC GỌI / SMS"]) --> V_REOPEN{"Phiếu mở lại nhiều lần<br/>(reopen_count > 0)?"}
+    
+    V_REOPEN -- "Đúng (reopen_count > 0)" --> V_RES_REOPEN["⚠️ PHIẾU MỞ LẠI (N LẦN)<br/>• Sự cố lặp đi lặp lại nhiều lần<br/>• Cần ĐTV/KTV kiểm tra xử lý dứt điểm"]
+    style V_RES_REOPEN fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#9a3412
+    
+    V_REOPEN -- "Sai (Phiếu bình thường)" --> V_SPAM{"Nội dung phản ánh có báo<br/>'Spam cuộc gọi'?"}
+    V_SPAM -- "Đúng (Spam cuộc gọi)" --> V_RES_SPAM["🚫 BỊ KHÓA SPAM CUỘC GỌI<br/>• Thuê bao phát sinh cuộc gọi rác bị hệ thống chặn<br/>• Hướng dẫn KH kiểm tra cam kết mở khóa"]
+    style V_RES_SPAM fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#991b1b
+    
+    V_SPAM -- "Sai" --> V_NAM{"Core HLR cờ NAM == '1'?"}
+    V_NAM -- "Đúng (NAM = 1)" --> V_RES_NAM["🔒 KHÓA DỊCH VỤ (NAM: 1)<br/>• Thuê bao bị khóa cước / chặn dịch vụ mạng lõi<br/>• Hướng dẫn KH kiểm tra cước thanh toán"]
+    style V_RES_NAM fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#991b1b
+    
+    V_NAM -- "Sai (NAM = 0)" --> V_HSS{"Điều kiện AND bắt buộc:<br/>HSS Profile >= 3 chữ số<br/>VÀ IPv4 bắt đầu bằng 113. hoặc 172.?"}
+    V_HSS -- "Thỏa mãn cả 2" --> V_RES_HSS["⚠️ HSS PROFILE LẠ (ẢNH HƯỞNG VOLTE)<br/>• Profile lạ cấp sai dải IP ảnh hưởng VoLTE/IMS<br/>• Chuyển IT Core khai báo lại Profile"]
+    style V_RES_HSS fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#991b1b
+    
+    V_HSS -- "Profile chuẩn (10, 20, 23, 5G...)<br/>hoặc iTel 3043 IP 10.x" --> V_RES_OK["✅ MẠNG LƯỚI ĐẢM BẢO<br/>• Trạm phát sóng khu vực đảm bảo<br/>• Thiết bị và mạng thoại kết nối bình thường"]
+    style V_RES_OK fill:#f0fdf4,stroke:#22c55e,stroke-width:2px,color:#166534
+
+    %% Xử lý tự động bước 2.3
+    V_RES_OK --> V_STEP23{"Bước hiện tại trên OneOSS là bước 2.3?"}
+    V_RES_REOPEN --> V_STEP23
+    V_RES_SPAM --> V_STEP23
+    V_RES_NAM --> V_STEP23
+    V_RES_HSS --> V_STEP23
+
+    V_STEP23 -- "Đúng (Bước 2.3)" --> V_ACTION["⚡ TỰ ĐỘNG ĐIỀN NỘI DUNG BƯỚC 2.3:<br/>• Ý kiến phân tích: 'Chuyển 2.4'<br/>• Nội dung phản hồi: 'Chuyển 2.4'"]
+    style V_ACTION fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1
+
+    V_STEP23 -- "Bước khác (2.4...)" --> V_END(["🏁 KẾT THÚC TIỀN KIỂM"])
+    V_ACTION --> V_END
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 3: HSS PROFILE & NAM ZOOM-IN -->
+            <div id="tab-hss" class="tab-content">
+                <div class="panzoom-canvas">
+                    <div class="mermaid" id="mermaid-hss">
+flowchart TD
+    HSS_START(["🚦 KHÁCH HÀNG PHẢN ÁNH BÁO KHÔNG ĐƯỢC MẠNG"]) --> BTOOLS_CHECK{"🔍 KIỂM TRA BTOOLS XÁC NHẬN:<br/>Có phiên data >= 10MB sau tiếp nhận<br/>(hoặc ngày gần nhất có phiên lớn >= 10MB)?"}
+
+    BTOOLS_CHECK -- "CÓ PHÁT SINH DATA BÌNH THƯỜNG<br/>(BTools xác nhận KH vẫn đang dùng được mạng)" --> BTOOLS_OK["✅ BTOOLS XÁC NHẬN BÌNH THƯỜNG:<br/>• Kết luận: HOẠT ĐỘNG BÌNH THƯỜNG<br/>• Không bị chặn bởi Profile lạ<br/>• Tránh phán sai cho thuê bao đang lướt mạng tốt"]
+    style BTOOLS_OK fill:#f0fdf4,stroke:#22c55e,stroke-width:2px,color:#166534
+
+    BTOOLS_CHECK -- "KHÔNG CÓ DATA BÌNH THƯỜNG<br/>(BTools xác nhận KH thực sự không dùng được)" --> PROFILE_LAYER["⚙️ KIỂM TRA HỒ SƠ MẠNG LÕI CORE (SAPC)<br/>(check_core_profile_failure)"]
+    style PROFILE_LAYER fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1
+
+    PROFILE_LAYER --> PRIO1{"ƯU TIÊN 1:<br/>Cờ NAM == '1'?"}
+    PRIO1 -- "Đúng" --> R_NAM["🔒 BỊ KHÓA GPRS<br/>• Thuê bao đang bị khóa GPRS (cờ NAM = 1 trên Core).<br/>• Nhờ VNP khai báo lại GPRS cho Khách hàng.<br/>• Màu: FFF2CC | Mã OneOSS: 2143"]
+    style R_NAM fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#854d0e
+
+    PRIO1 -- "Sai (NAM = 0)" --> PRIO2{"ƯU TIÊN 2:<br/>HSS Profile rỗng / null / trống?"}
+    PRIO2 -- "Đúng" --> R_EMPTY["📶 CHƯA KHAI BÁO PROFILE 4G<br/>• Thuê bao chưa được mở profile dịch vụ 4G LTE.<br/>• Chuyển bộ phận IT/Khai thác mạng kích hoạt profile 4G.<br/>• Màu: FCE4D6 | Mã OneOSS: 2040"]
+    style R_EMPTY fill:#fff7ed,stroke:#f97316,stroke-width:2px,color:#9a3412
+
+    PRIO2 -- "Sai (Có Profile)" --> PRIO3{"ƯU TIÊN 3: ĐIỀU KIỆN 'AND' BẮT BUỘC:<br/>1. HSS Profile có >= 3 chữ số<br/>VÀ<br/>2. IPv4 bắt đầu bằng 113. hoặc 172.?"}
+    
+    PRIO3 -- "Thỏa mãn CẢ HAI điều kiện" --> R_STRANGE["⚠️ PROFILE LẠ (GHI NHẬN NGẮN GỌN):<br/>• Ý kiến: Phát hiện HSS Profile lạ ({hss_profile}), IP: {ipv4_val}.<br/>• Phương án: Chuyển IT kiểm tra khai báo lại HSS Profile cho khách hàng.<br/>• Màu: FFC7CE | Mã OneOSS: 2040"]
+    style R_STRANGE fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#991b1b
+
+    PRIO3 -- "Không thỏa mãn cả 2<br/>(Ví dụ: iTel Profile 3043 nhưng IP 10.x.x.x<br/>hoặc Profile chuẩn 10, 20, 23, 5G)" --> R_PASS["➡️ BỎ QUA PROFILE LẠ, XÉT TIẾP CÁC NGUYÊN NHÂN KHÁC:<br/>• Kiểm tra gói cước SAPC (Hết hạn, Chỉ có PAYGO, Lỗi gói...)<br/>• Kiểm tra sóng yếu / rớt 2G/3G / lỗi thiết bị<br/>• Đảm bảo chính xác 100% không phán bừa"]
+    style R_PASS fill:#f8fafc,stroke:#94a3b8,stroke-width:2px,color:#1e293b
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // Initialize Mermaid
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            securityLevel: 'loose',
+            flowchart: {
+                useMaxWidth: false,
+                htmlLabels: true,
+                curve: 'basis',
+                nodeSpacing: 45,
+                rankSpacing: 60
+            }
+        });
+
+        let panzoomInstances = {};
+
+        function initPanZoomForTab(tabId) {
+            const svgElement = document.querySelector(`#${tabId} .mermaid svg`);
+            if (svgElement && !panzoomInstances[tabId]) {
+                try {
+                    panzoomInstances[tabId] = svgPanZoom(svgElement, {
+                        zoomEnabled: true,
+                        controlIconsEnabled: false,
+                        fit: true,
+                        center: true,
+                        minZoom: 0.2,
+                        maxZoom: 10,
+                        zoomScaleSensitivity: 0.25
+                    });
+                } catch (e) {
+                    console.error("Panzoom error:", e);
+                }
+            }
+        }
+
+        function focusTop(tabId) {
+            const pz = panzoomInstances[tabId];
+            if (pz) {
+                pz.zoom(0.85);
+                pz.center();
+                const pan = pz.getPan();
+                pz.pan({ x: pan.x, y: 40 });
+            }
+        }
+
+        // Wait for mermaid to finish rendering before attaching panzoom
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                ['tab-data', 'tab-voice', 'tab-hss'].forEach(id => initPanZoomForTab(id));
+                focusTop('tab-data');
+            }, 1000);
+        });
+
+        function switchTab(tabId, btnElem) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            if (btnElem) {
+                btnElem.classList.add('active');
+            } else if (window.event && window.event.currentTarget) {
+                window.event.currentTarget.classList.add('active');
+            } else {
+                const btn = document.querySelector(`.tab-btn[onclick*="${tabId}"]`);
+                if (btn) btn.classList.add('active');
+            }
+
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            const activeTab = document.getElementById(tabId);
+            if (activeTab) {
+                activeTab.classList.add('active');
+            }
+
+            setTimeout(() => {
+                initPanZoomForTab(tabId);
+                if (panzoomInstances[tabId]) {
+                    panzoomInstances[tabId].resize();
+                    focusTop(tabId);
+                }
+            }, 50);
+        }
+
+        function getActivePanZoom() {
+            const activeTab = document.querySelector('.tab-content.active');
+            if (activeTab) {
+                const tabId = activeTab.id;
+                return panzoomInstances[tabId];
+            }
+            return null;
+        }
+
+        function zoomIn() {
+            const pz = getActivePanZoom();
+            if (pz) pz.zoomIn();
+        }
+
+        function zoomOut() {
+            const pz = getActivePanZoom();
+            if (pz) pz.zoomOut();
+        }
+
+        function resetZoom() {
+            const activeTab = document.querySelector('.tab-content.active');
+            if (activeTab) {
+                focusTop(activeTab.id);
+            }
+        }
+
+        function fitAll() {
+            const pz = getActivePanZoom();
+            if (pz) {
+                pz.fit();
+                pz.center();
+            }
+        }
+    </script>
+</body>
+</html>

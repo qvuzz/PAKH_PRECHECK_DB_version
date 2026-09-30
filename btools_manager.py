@@ -89,22 +89,28 @@ def get_cdp_browser_btools_cookie(port: int = 9222) -> str:
     Truy vấn toàn bộ cookie trình duyệt mà không cần chuyển tab.
     """
     try:
+        from auth_extractor import is_debug_port_open, _run_async_safely
+        if not is_debug_port_open(port):
+            return ""
+
         import urllib.request, websockets, asyncio
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1.5) as r:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1.0) as r:
             ver = json.loads(r.read().decode("utf-8"))
         ws_url = ver.get("webSocketDebuggerUrl")
         if not ws_url:
             return ""
 
         async def _query():
-            async with websockets.connect(ws_url) as ws:
+            async with websockets.connect(ws_url, open_timeout=1.0, close_timeout=1.0) as ws:
                 await ws.send(json.dumps({"id": 1, "method": "Storage.getCookies"}))
-                res = json.loads(await ws.recv())
+                raw_resp = await asyncio.wait_for(ws.recv(), timeout=1.5)
+                res = json.loads(raw_resp)
                 cookies = res.get("result", {}).get("cookies", [])
                 btools_cookies = [f"{c['name']}={c['value']}" for c in cookies if "10.159.21.241" in c.get("domain", "")]
                 return "; ".join(btools_cookies)
 
-        return asyncio.run(_query())
+        res = _run_async_safely(_query(), timeout=2.0)
+        return res or ""
     except Exception:
         return ""
 

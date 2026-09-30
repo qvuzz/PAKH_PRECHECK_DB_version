@@ -34,8 +34,11 @@ class AutomationState:
         self.status_message = "Hệ thống tự động tiền kiểm đang hoạt động"
         self.interval_minutes = 2.5  # Chu kỳ quét chuyên sâu nền tự động (BTools + SAPC)
         self.auto_close = False  # Mặc định KHÔNG tự đóng để đảm bảo an toàn, KTV phải chủ động bật & xác nhận 2 lần
-        self.scan_scopes = ["tts_old_data", "tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"]  # Quét tự động toàn bộ phân hệ nghiệp vụ
+        self.auto_close_tts_old = False  # Trạng thái tự đóng TTS Cũ
+        self.auto_close_tts_new = False  # Trạng thái tự đóng TTS Mới
+        self.scan_scopes = ["tts_old_data", "tts_old_voice", "tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"]  # Quét tự động toàn bộ phân hệ nghiệp vụ
         self.auto_close_mode = "none"  # 'all', 'tts_old', 'tts_new', 'none'
+        self.ai_summary_engine = "qwen"  # 'qwen' (Qwen 2.5 GGUF) hoặc 'regex' (Regex thuần)
         self.engine = "api"  # 'api' (TTS Cũ) hoặc 'tts_new' (TTS Mới)
         self.dry_run = False
         self.observe = False
@@ -86,22 +89,61 @@ class AutomationState:
     def should_auto_close(self, source: str) -> bool:
         """
         Kiểm tra xem nguồn phiếu (source: 'tts_old' hoặc 'tts_new') có được phép tự động đóng hay không.
-        Dựa trên cấu hình auto_close_mode:
-        - 'all': Đóng cả 2 hệ thống
-        - 'tts_old': Chỉ đóng TTS Cũ
-        - 'tts_new': Chỉ đóng TTS Mới
-        - 'none': Đóng thủ công (Không tự đóng hệ thống nào)
         """
-        mode = getattr(self, "auto_close_mode", "none")
-        if mode == "all":
-            return True
-        elif mode == "tts_old":
-            return source == "tts_old"
-        elif mode == "tts_new":
-            return source == "tts_new"
-        elif mode == "none":
-            return False
-        return getattr(self, "auto_close", False)
+        norm_source = "tts_old" if "old" in str(source).lower() else "tts_new"
+        if norm_source == "tts_old":
+            return bool(getattr(self, "auto_close_tts_old", False))
+        elif norm_source == "tts_new":
+            return bool(getattr(self, "auto_close_tts_new", False))
+        return False
+
+    def set_auto_close_for_system(self, system: str, enabled: bool):
+        """
+        Bật/tắt tự động đóng riêng biệt cho từng hệ thống (TTS Cũ hoặc TTS Mới)
+        """
+        with self.lock:
+            s_low = str(system).lower()
+            if "old" in s_low:
+                self.auto_close_tts_old = bool(enabled)
+            elif "new" in s_low:
+                self.auto_close_tts_new = bool(enabled)
+
+            if self.auto_close_tts_old and self.auto_close_tts_new:
+                self.auto_close_mode = "all"
+                self.auto_close = True
+            elif self.auto_close_tts_old and not self.auto_close_tts_new:
+                self.auto_close_mode = "tts_old"
+                self.auto_close = True
+            elif not self.auto_close_tts_old and self.auto_close_tts_new:
+                self.auto_close_mode = "tts_new"
+                self.auto_close = True
+            else:
+                self.auto_close_mode = "none"
+                self.auto_close = False
+
+    def set_auto_close_mode(self, mode: str):
+        """
+        Cập nhật chế độ đóng phiếu từ chuỗi mode ('all', 'tts_old', 'tts_new', 'none')
+        """
+        with self.lock:
+            m = str(mode or "none").strip().lower()
+            self.auto_close_mode = m
+            if m == "all":
+                self.auto_close_tts_old = True
+                self.auto_close_tts_new = True
+                self.auto_close = True
+            elif m in ("tts_old", "old"):
+                self.auto_close_tts_old = True
+                self.auto_close_tts_new = False
+                self.auto_close = True
+            elif m in ("tts_new", "new"):
+                self.auto_close_tts_old = False
+                self.auto_close_tts_new = True
+                self.auto_close = True
+            else:
+                self.auto_close_tts_old = False
+                self.auto_close_tts_new = False
+                self.auto_close = False
 
     def get_snapshot(self):
         with self.lock:
@@ -112,6 +154,9 @@ class AutomationState:
                 "interval_minutes": self.interval_minutes,
                 "auto_close": self.auto_close,
                 "auto_close_mode": getattr(self, "auto_close_mode", "none"),
+                "auto_close_tts_old": self.should_auto_close("tts_old"),
+                "auto_close_tts_new": self.should_auto_close("tts_new"),
+                "ai_summary_engine": getattr(self, "ai_summary_engine", "qwen"),
                 "scan_scopes": list(getattr(self, "scan_scopes", ["tts_old_data", "tts_new_data"])),
                 "engine": getattr(self, "engine", "api"),
                 "dry_run": self.dry_run,

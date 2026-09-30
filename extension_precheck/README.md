@@ -1,21 +1,30 @@
-# Tiện Ích Chrome: VNPT TTS Precheck Helper
+# ⚡ VNPT Multi-Tool Auto-Sync Helper (v2.5)
 
-Hỗ trợ kỹ thuật viên đăng nhập hoàn toàn trên cổng chính thức **https://tts.vnpt.vn** (Bảo đảm 100% An Toàn Bảo Mật Thông Tin - ATBMTT), và tự động tạo nút chuyển sang hệ thống Precheck chỉ với 1 cú click!
+Tiện ích Chrome mở rộng hỗ trợ kỹ sư VNPT Telecom tự động liên kết và đồng bộ token/cookie từ các cổng nghiệp vụ trực tiếp về **KPI AI Assistant (Port 710)** và **PAKH Precheck (Port 1234)** mà **KHÔNG CẦN mở port CDP 9222** hay quét ổ cứng:
+
+1. **OneOSS / NPMRAN** (`https://npmran.vnpt.vn`, `https://oneoss.vnpt.vn`) $\rightarrow$ Đồng bộ Token 4G về KPI Assistant (Port 710)
+2. **PMS 3G & 5G** (`https://pms.vnpt.vn`) $\rightarrow$ Đồng bộ Cookie sessionid & csrftoken về KPI Assistant (Port 710)
+3. **TTS Mới** (`https://tts.vnptnet.vn`) $\rightarrow$ Đồng bộ sang cả Port 710 & Port 1234
+4. **TTS Cũ** (`https://tts.vnpt.vn`), **BTools**, **CEM Sóng trạm**, **SAPC**, **CCOS** $\rightarrow$ Đồng bộ sang Precheck (Port 1234)
 
 ---
 
-## 🛠️ Hướng dẫn cài đặt (Chỉ mất 10 giây - Không cần tải từ Store):
+## 🛠️ Hướng Dẫn Cài Đặt / Nạp Vào Chrome:
 
-1. Mở trình duyệt Chrome / Edge trên máy tính của bạn.
+1. Mở trình duyệt Chrome hoặc Microsoft Edge.
 2. Truy cập: `chrome://extensions/` (hoặc `edge://extensions/`).
 3. Bật công tắc **Chế độ dành cho nhà phát triển (Developer mode)** ở góc trên bên phải.
-4. Bấm nút **Tải tiện ích đã giải nén (Load unpacked)** ở góc trên bên trái.
-5. Chọn thư mục `extension_precheck` này.
+4. **Nếu đã cài tiện ích trước đó (`extension_precheck`)**:
+   - Nhấp vào nút **Tải lại (Biểu tượng 🔄)** trên thẻ tiện ích.
+5. **Nếu cài mới**:
+   - Nhấp nút **Tải tiện ích đã giải nén (Load unpacked)** $\rightarrow$ Chọn thư mục `chrome_extension` này (hoặc `..\PAKH_PRECHECK\extension_precheck`).
 
 ---
 
-## 🚀 Cách sử dụng:
-1. Mở trang **https://tts.vnpt.vn** và đăng nhập tài khoản của bạn bình thường.
-2. Ở góc dưới bên phải màn hình TTS sẽ xuất hiện nút màu xanh:
-   `⚡ Vào Precheck (KTV: [Tên của bạn])`.
-3. Bấm vào nút này để mở thẳng Dashboard Precheck, hệ thống sẽ tự động nhận diện danh tính và mở khóa toàn bộ quyền thao tác cho bạn!
+## 🚀 Cách Sử Dụng (Hoàn toàn tự động 100%):
+- Mỗi khi bạn mở tab **OneOSS** (`npmran.vnpt.vn`), **PMS** (`pms.vnpt.vn`) hoặc các cổng nghiệp vụ trên Chrome:
+  Tiện ích sẽ tự động nhận diện token và gửi về `http://localhost:710`.
+- Góc dưới màn hình sẽ hiển thị huy hiệu thông báo: `⚡ Đã đồng bộ Token OneOSS / Cookie PMS thành công!`.
+- Trên giao diện **KPI AI Assistant**, chip trạng thái sẽ tự động chuyển sang màu xanh:
+  - `4G OneOSS: Đã kết nối (tên_tài_khoản)`
+  - `PMS 3G/5G: Hoạt động (...)`

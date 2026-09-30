@@ -28,8 +28,10 @@ def get_current_user_info(request: Request):
         if time.time() - ACTIVE_LAN_SESSIONS[client_ip].get("timestamp", 0) < 86400:
             token = ACTIVE_LAN_SESSIONS[client_ip].get("token", "")
             user_info = ACTIVE_LAN_SESSIONS[client_ip].get("user", {})
-        if time.time() - ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_timestamp", 0) < 86400:
-            lan_ttsnew_tok = ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_token", "")
+        cand_tok = ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_token", "")
+        from ttsnew_api import _is_jwt_valid
+        if cand_tok and _is_jwt_valid(cand_tok):
+            lan_ttsnew_tok = cand_tok
             lan_ttsnew_usr = ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_user", {})
 
     # Lấy token đang hoạt động từ máy chủ (TTS Cũ & TTS Mới)
@@ -97,18 +99,19 @@ async def login_tts_step1(request: Request):
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok_to_save
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
-            if tok_to_save:
+            if is_local and tok_to_save:
                 save_cached_token(tok_to_save)
         else:
             ACTIVE_LAN_SESSIONS[client_ip]["token"] = token
             ACTIVE_LAN_SESSIONS[client_ip]["user"] = user_info
             ACTIVE_LAN_SESSIONS[client_ip]["timestamp"] = time.time()
-            if ttsnew_token:
-                ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = ttsnew_token
-                ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
-                save_cached_token(ttsnew_token)
-            if token:
-                save_cached_auth(token, user_info)
+            if is_local:
+                if ttsnew_token:
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = ttsnew_token
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
+                    save_cached_token(ttsnew_token)
+                if token:
+                    save_cached_auth(token, user_info)
         _save_lan_sessions()
 
         user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or user_info.get("displayName") or username
@@ -164,18 +167,19 @@ async def login_tts_step2_otp(request: Request):
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok_to_save
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
-            if tok_to_save:
+            if is_local and tok_to_save:
                 save_cached_token(tok_to_save)
         else:
             ACTIVE_LAN_SESSIONS[client_ip]["token"] = token
             ACTIVE_LAN_SESSIONS[client_ip]["user"] = user_info
             ACTIVE_LAN_SESSIONS[client_ip]["timestamp"] = time.time()
-            if ttsnew_token:
-                ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = ttsnew_token
-                ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
-                save_cached_token(ttsnew_token)
-            if token:
-                save_cached_auth(token, user_info)
+            if is_local:
+                if ttsnew_token:
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = ttsnew_token
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
+                    save_cached_token(ttsnew_token)
+                if token:
+                    save_cached_auth(token, user_info)
         _save_lan_sessions()
 
         user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or user_info.get("displayName") or "KTV"
@@ -205,17 +209,33 @@ async def login_tts_step2_otp(request: Request):
 
 
 @router.post("/session/register")
+@router.post("/tts_old/token")
 async def register_browser_session(request: Request):
     body = await request.json()
     token = body.get("token", "").strip()
     user_info = body.get("user") or {}
     client_ip = request.client.host if request.client else "127.0.0.1"
+    is_local = client_ip in ("127.0.0.1", "localhost", "::1")
     if token:
+        from tts_old_api import is_tts_old_token_valid, fetch_tts_old_user_info
+        if not is_tts_old_token_valid(token):
+            return {"success": False, "message": "Token TTS Cũ đã hết hạn hoặc không hợp lệ trên máy chủ"}
+
+        if not user_info or not user_info.get("Id") or user_info.get("Id") == 0:
+            fresh_u = fetch_tts_old_user_info(token)
+            if fresh_u and fresh_u.get("Id"):
+                user_info = fresh_u
+
         if client_ip not in ACTIVE_LAN_SESSIONS:
             ACTIVE_LAN_SESSIONS[client_ip] = {}
         ACTIVE_LAN_SESSIONS[client_ip]["token"] = token
         ACTIVE_LAN_SESSIONS[client_ip]["user"] = user_info
         ACTIVE_LAN_SESSIONS[client_ip]["timestamp"] = time.time()
+        _save_lan_sessions()
+
+        if is_local:
+            save_cached_auth(token, user_info)
+
         try:
             u_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or "KTV"
             state.log("SUCCESS", f"🔑 [AUTH] Đã kết nối phiên TTS Cũ cho [{u_display}] (IP: {client_ip})")
@@ -236,6 +256,7 @@ async def save_ttsnew_token_api(request: Request):
         tok_input = f"Bearer {tok_input}"
 
     client_ip = request.client.host if request.client else "127.0.0.1"
+    is_local = (client_ip in ("127.0.0.1", "localhost", "::1"))
     if client_ip not in ACTIVE_LAN_SESSIONS:
         ACTIVE_LAN_SESSIONS[client_ip] = {}
     ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok_input
@@ -243,7 +264,8 @@ async def save_ttsnew_token_api(request: Request):
     ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
     _save_lan_sessions()
 
-    save_cached_token(tok_input)
+    if is_local:
+        save_cached_token(tok_input)
 
     u_name = user_info.get("displayName") or user_info.get("username") or "KTV"
     try:

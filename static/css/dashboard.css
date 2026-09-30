@@ -1182,7 +1182,7 @@
         }
         .detail-expanded-grid {
             display: grid;
-            grid-template-columns: 1.15fr 1fr 1.25fr;
+            grid-template-columns: minmax(0, 3fr) minmax(0, 3fr) minmax(0, 4fr);
             gap: 12px;
             background: #ffffff;
             border: 1px solid #cbd5e1;
@@ -1198,6 +1198,8 @@
             border: 1px solid #e2e8f0;
             border-radius: 6px;
             padding: 10px 12px;
+            min-width: 0;
+            overflow: hidden;
         }
         .detail-card-title {
             font-size: 11.5px;
@@ -2153,6 +2155,35 @@
         .btn-move-2-4:active {
             transform: translateY(0);
         }
+
+        /* NÚT CHUYỂN BƯỚC 2.6 CHO TTS MỚI (CYAN / TEAL - PHÂN BIỆT RÕ VỚI ĐÓNG DỨT ĐIỂM) */
+        .btn-move-2-6 {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+            color: #ffffff;
+            border: 1px solid #0284c7;
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: 700;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            line-height: 1.2;
+            transition: all 0.15s ease;
+            box-shadow: 0 1px 3px rgba(2, 132, 199, 0.3);
+            white-space: nowrap;
+            font-family: inherit;
+        }
+        .btn-move-2-6:hover {
+            background: linear-gradient(135deg, #0369a1 0%, #075985 100%);
+            box-shadow: 0 2px 6px rgba(2, 132, 199, 0.45);
+            transform: translateY(-1px);
+        }
+        .btn-move-2-6:active {
+            transform: translateY(0);
+        }
         .btn-move-2-4-sm {
             display: inline-flex;
             align-items: center;
@@ -2233,4 +2264,709 @@
         }
         .sort-icon.active {
             color: #0284c7;
+        }
+
+        /* COMPACT SMSC CDR STYLES */
+        .cdr-time-btn {
+            border: none;
+            background: transparent;
+            padding: 0 9px;
+            height: 24px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #475569;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .cdr-time-btn:hover {
+            color: #0f172a;
+            background: rgba(255, 255, 255, 0.7);
+        }
+        .cdr-time-btn.active {
+            background: #ffffff;
+            color: #0d9488;
+            font-weight: 700;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+        }
+
+        .cdr-page-btn {
+            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            padding: 0 7px;
+            height: 24px;
+            min-width: 24px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #334155;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+        .cdr-page-btn:hover:not(:disabled) {
+            background: #f0fdfa;
+            border-color: #0d9488;
+            color: #0d9488;
+        }
+        .cdr-page-btn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+            background: #f8fafc;
+            border-color: #e2e8f0;
+            color: #94a3b8;
+        }
+
+        /* THEME TOGGLE BUTTON */
+        .btn-theme-toggle {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            height: 30px;
+            padding: 0 10px;
+            border-radius: 6px;
+            background: #f8fafc;
+            border: 1px solid var(--border-color);
+            color: var(--text-body);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            user-select: none;
+        }
+        .btn-theme-toggle:hover {
+            background: #f1f5f9;
+            border-color: #cbd5e1;
+            color: var(--text-heading);
+        }
+        .btn-theme-toggle svg {
+            width: 15px;
+            height: 15px;
+            flex-shrink: 0;
+            transition: transform 0.3s ease;
+        }
+        .btn-theme-toggle:hover svg {
+            transform: rotate(15deg);
+        }
+
+        /* DARK THEME STYLES (Chế độ ban đêm - Deep Slate / Premium Navy dịu mắt) */
+        [data-theme="dark"] {
+            --bg-page: #0d1117;
+            --bg-surface: #161b22;
+            --border-color: #30363d;
+            --border-focus: #58a6ff;
+            --text-heading: #f0f6fc;
+            --text-body: #c9d1d9;
+            --text-muted: #8b949e;
+            --primary: #238636;
+            --primary-hover: #2ea043;
+            --success: #3fb950;
+            --warning: #d29922;
+            --danger: #f85149;
+        }
+
+        [data-theme="dark"] body {
+            background-color: var(--bg-page);
+            color: var(--text-body);
+        }
+
+        [data-theme="dark"] header {
+            background: #161b22;
+            border-color: #30363d;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+        }
+
+        [data-theme="dark"] .logo-title {
+            color: #f0f6fc;
+        }
+        [data-theme="dark"] .logo-divider {
+            color: #484f58;
+        }
+        [data-theme="dark"] .logo-subtitle {
+            color: #8b949e;
+        }
+
+        [data-theme="dark"] .btn-theme-toggle {
+            background: #21262d;
+            border-color: #363b42;
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] .btn-theme-toggle:hover {
+            background: #30363d;
+            border-color: #8b949e;
+            color: #58a6ff;
+        }
+
+        [data-theme="dark"] .top-toolbar {
+            background: #161b22;
+            border-color: #30363d;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        }
+
+        [data-theme="dark"] .stat-pill {
+            background: #21262d;
+            border-color: #30363d;
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] .stat-pill strong {
+            color: #f0f6fc;
+        }
+
+        /* SIDEBAR NAVIGATION - TINH CHỈNH ĐẸP MẮT, RÕ RÀNG */
+        [data-theme="dark"] .sidebar-nav {
+            background: #161b22;
+            border-color: #30363d;
+        }
+        [data-theme="dark"] .nav-section-title {
+            color: #58a6ff !important;
+            letter-spacing: 0.04em;
+        }
+        [data-theme="dark"] .nav-item {
+            color: #e6edf3;
+            background: transparent;
+        }
+        [data-theme="dark"] .nav-item .nav-item-title {
+            color: #f0f6fc;
+            font-weight: 600;
+        }
+        [data-theme="dark"] .nav-item .nav-item-sub {
+            color: #8b949e;
+        }
+        [data-theme="dark"] .nav-item:hover {
+            background: #21262d;
+            color: #ffffff;
+        }
+        [data-theme="dark"] .nav-item:hover .nav-item-title {
+            color: #58a6ff;
+        }
+        [data-theme="dark"] .nav-item.active {
+            background: rgba(56, 139, 253, 0.15);
+            color: #58a6ff;
+            border-color: rgba(56, 139, 253, 0.4);
+        }
+        [data-theme="dark"] .nav-item.active .nav-item-title {
+            color: #58a6ff;
+        }
+        [data-theme="dark"] .nav-item.has-new-tickets {
+            border-left: 3.5px solid #f85149 !important;
+            background: rgba(248, 81, 73, 0.12) !important;
+        }
+        [data-theme="dark"] .nav-item.has-new-tickets .nav-item-title {
+            color: #f0f6fc !important;
+        }
+        [data-theme="dark"] .nav-item.has-new-tickets .nav-item-sub {
+            color: #8b949e !important;
+        }
+        [data-theme="dark"] .nav-badge {
+            background: #21262d;
+            color: #8b949e;
+            border: 1px solid #30363d;
+        }
+        [data-theme="dark"] .nav-badge.has-new {
+            background: #f85149 !important;
+            color: #ffffff !important;
+            border-color: #f85149;
+            box-shadow: 0 0 10px rgba(248, 81, 73, 0.5);
+        }
+
+        [data-theme="dark"] .panel-control,
+        [data-theme="dark"] .panel-table,
+        [data-theme="dark"] .panel-logs {
+            background: #161b22;
+            border-color: #30363d;
+        }
+
+        /* TABS HEADER */
+        [data-theme="dark"] .tabs-header {
+            border-bottom-color: #30363d;
+        }
+        [data-theme="dark"] .tab-btn {
+            background: #21262d;
+            border-color: #30363d;
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] .tab-btn:hover {
+            background: #30363d;
+            color: #58a6ff;
+            border-color: #58a6ff;
+        }
+        [data-theme="dark"] .tab-btn.active {
+            background: #1f6feb;
+            border-color: #1f6feb;
+            color: #ffffff;
+            box-shadow: 0 0 10px rgba(31, 111, 235, 0.35);
+        }
+        [data-theme="dark"] .tab-badge {
+            background: #161b22;
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] .tab-badge.closed {
+            background: rgba(46, 160, 67, 0.2);
+            color: #3fb950;
+        }
+
+        /* BẢNG DỮ LIỆU & TIÊU ĐỀ TH (SOFT NEON SẮC NÉT) */
+        [data-theme="dark"] .table-container {
+            background: #161b22;
+            border-color: #30363d;
+        }
+        [data-theme="dark"] thead {
+            background: #1c2128;
+        }
+        [data-theme="dark"] th {
+            color: #93c5fd !important; /* Soft Cyan Neon Header */
+            border-bottom-color: #30363d;
+            font-weight: 700;
+        }
+        [data-theme="dark"] .sortable-th:hover {
+            background-color: #262c36;
+            color: #38bdf8 !important;
+        }
+        [data-theme="dark"] td {
+            background: #161b22;
+            color: #f0f6fc;
+            border-bottom-color: #262c36;
+        }
+        [data-theme="dark"] tr:nth-child(even) td {
+            background: #1c2128;
+        }
+        [data-theme="dark"] tr:hover td {
+            background: #263040 !important;
+        }
+
+        /* Ô TÌM KIẾM & BỘ LỌC SELECT TRÊN BẢNG */
+        [data-theme="dark"] #tableTitleText {
+            color: #f0f6fc !important;
+        }
+        [data-theme="dark"] .search-box input {
+            background: #21262d;
+            border-color: #30363d;
+            color: #f0f6fc;
+        }
+        [data-theme="dark"] .search-box input:focus {
+            border-color: #58a6ff;
+            box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.25);
+            background: #161b22;
+        }
+        [data-theme="dark"] .control-input {
+            background: #21262d;
+            border-color: #30363d;
+            color: #f0f6fc;
+        }
+        [data-theme="dark"] .control-input:focus {
+            border-color: #58a6ff;
+            background: #161b22;
+        }
+
+        /* KHUNG THỐNG KÊ PHIẾU ĐÃ ĐÓNG (CLOSED ANALYTICS) */
+        [data-theme="dark"] .closed-analytics-box {
+            background: #161b22;
+            border-color: #30363d;
+        }
+        [data-theme="dark"] .ca-title {
+            color: #f0f6fc;
+        }
+        [data-theme="dark"] .ca-subtitle {
+            color: #8b949e;
+        }
+        [data-theme="dark"] .ca-filter-bar {
+            background: #1c2128;
+            border-color: #30363d;
+        }
+        [data-theme="dark"] .ca-filter-label {
+            color: #93c5fd;
+        }
+        [data-theme="dark"] .ca-filter-pills {
+            background: #21262d;
+        }
+        [data-theme="dark"] .ca-filter-btn {
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] .ca-filter-btn:hover {
+            color: #f0f6fc;
+        }
+        [data-theme="dark"] .ca-filter-btn.active {
+            background: #30363d;
+            color: #58a6ff;
+        }
+        [data-theme="dark"] .ca-filter-select {
+            background-color: #21262d;
+            border-color: #30363d;
+            color: #f0f6fc;
+        }
+        [data-theme="dark"] .ca-card {
+            background: #1c2128;
+            border-color: #30363d;
+        }
+        [data-theme="dark"] .ca-panel {
+            background: #1c2128;
+            border-color: #30363d;
+        }
+        [data-theme="dark"] .ca-panel-header {
+            border-bottom-color: #30363d;
+        }
+        [data-theme="dark"] .ca-panel-title {
+            color: #f0f6fc;
+        }
+
+        [data-theme="dark"] .table-phone-link {
+            color: #58a6ff !important;
+        }
+        [data-theme="dark"] .table-time-val {
+            color: #8b949e !important;
+        }
+        [data-theme="dark"] td span[style*="color:#0f172a"] {
+            color: #f0f6fc !important;
+        }
+        [data-theme="dark"] td div[style*="color:#1e293b"],
+        [data-theme="dark"] td div[style*="color:#334155"],
+        [data-theme="dark"] td div[style*="color:#475569"] {
+            color: #c9d1d9 !important;
+        }
+
+        [data-theme="dark"] .pagination-container {
+            background: #161b22;
+            border-color: #30363d;
+        }
+        [data-theme="dark"] .page-btn {
+            background: #21262d;
+            border-color: #30363d;
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] .page-btn:hover:not(:disabled) {
+            background: #30363d;
+            border-color: #58a6ff;
+            color: #58a6ff;
+        }
+        [data-theme="dark"] .page-btn.active {
+            background: #1f6feb;
+            border-color: #1f6feb;
+            color: #ffffff;
+        }
+        [data-theme="dark"] .page-btn:disabled {
+            background: #161b22;
+            border-color: #21262d;
+            color: #484f58;
+        }
+        [data-theme="dark"] .page-size-select {
+            background-color: #21262d;
+            border-color: #30363d;
+            color: #c9d1d9;
+        }
+
+        [data-theme="dark"] .btn-secondary,
+        [data-theme="dark"] .btn-sm.btn-secondary {
+            background: #21262d;
+            border-color: #30363d;
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] .btn-secondary:hover,
+        [data-theme="dark"] .btn-sm.btn-secondary:hover {
+            background: #30363d;
+            border-color: #484f58;
+            color: #f0f6fc;
+        }
+        [data-theme="dark"] .btn-icon,
+        [data-theme="dark"] .btn-icon-refresh {
+            background: #21262d;
+            border-color: #30363d;
+            color: #58a6ff;
+        }
+        [data-theme="dark"] .btn-icon:hover,
+        [data-theme="dark"] .btn-icon-refresh:hover {
+            background: #30363d;
+            border-color: #58a6ff;
+            color: #58a6ff;
+        }
+
+        [data-theme="dark"] .ctrl-select-sm,
+        [data-theme="dark"] .ctrl-input-sm,
+        [data-theme="dark"] .dropdown-multiselect-btn {
+            background: #21262d;
+            border-color: #30363d;
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] .dropdown-multiselect-panel {
+            background: #161b22;
+            border-color: #30363d;
+        }
+        [data-theme="dark"] .dropdown-item-checkbox {
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] .dropdown-item-checkbox:hover {
+            background: #21262d;
+        }
+
+        [data-theme="dark"] .svc-status-pill {
+            background: #21262d;
+            border-color: #30363d;
+        }
+        [data-theme="dark"] .svc-name {
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] .auth-pill.auth {
+            background: #21262d;
+            border-color: #30363d;
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] #authUserName {
+            color: #f0f6fc !important;
+        }
+
+        [data-theme="dark"] .stt-expand-pill {
+            background: #21262d;
+            border-color: #30363d;
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] .stt-expand-pill:hover {
+            background: #30363d;
+            color: #58a6ff;
+            border-color: #58a6ff;
+        }
+        [data-theme="dark"] .stt-expand-pill.is-expanded {
+            background: #1f6feb;
+            color: #ffffff;
+            border-color: #1f6feb;
+        }
+        [data-theme="dark"] tr.ticket-main-row.is-row-expanded td {
+            background-color: #1c2128 !important;
+            border-bottom: 1px solid #58a6ff !important;
+        }
+
+        /* KHUNG CHI TIẾT MỞ RỘNG (EXPANDED DETAIL ROW) - ĐỘ TƯƠNG PHẢN CAO, SÁNG RÕ */
+        [data-theme="dark"] tr.ticket-detail-row td {
+            background: #0d1117 !important;
+            border-bottom: 2px solid #30363d !important;
+        }
+        [data-theme="dark"] .detail-expanded-grid {
+            background: #161b22;
+            border: 1px solid #30363d;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        }
+        [data-theme="dark"] .detail-card {
+            background: #1c2128 !important;
+            border: 1px solid #30363d !important;
+            color: #e6edf3 !important;
+        }
+        [data-theme="dark"] .detail-card-title {
+            color: #f0f6fc !important;
+            border-bottom: 1px solid #30363d !important;
+            font-weight: 700;
+        }
+        [data-theme="dark"] .detail-card-title span {
+            color: #f0f6fc !important;
+        }
+
+        /* CÁC THÀNH PHẦN BÊN TRONG CHI TIẾT MỞ RỘNG (PALETTE NEON NHẸ, CÔNG NGHỆ, SẮC NÉT) */
+        [data-theme="dark"] .detail-card div,
+        [data-theme="dark"] .detail-card p {
+            color: #e2e8f0;
+        }
+        [data-theme="dark"] .detail-card span {
+            color: #cbd5e1;
+        }
+        [data-theme="dark"] .detail-card strong,
+        [data-theme="dark"] .detail-card b {
+            color: #f8fafc !important;
+        }
+
+        /* Khối nhãn "Tóm Tắt Nội Dung" - Neon Cyan công nghệ */
+        [data-theme="dark"] .detail-card div[style*="background:#f0f9ff"],
+        [data-theme="dark"] .detail-card div[style*="background: #f0f9ff"] {
+            background: rgba(14, 165, 233, 0.15) !important;
+            border-color: #0284c7 !important;
+            color: #38bdf8 !important;
+            font-weight: 700 !important;
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.2);
+        }
+
+        /* Nhãn thuộc tính (KH đang dùng gói, KH dùng Máy, KH đã thao tác...) */
+        [data-theme="dark"] .detail-card span[style*="color:#475569"],
+        [data-theme="dark"] .detail-card span[style*="color: #475569"] {
+            color: #7dd3fc !important; /* Soft Cyan Neon */
+            font-weight: 600 !important;
+        }
+
+        /* Giá trị thuộc tính (YOLO90, iPhone xs, Bật DLDĐ...) */
+        [data-theme="dark"] .detail-card span[style*="color:#0f172a"],
+        [data-theme="dark"] .detail-card span[style*="color: #0f172a"] {
+            color: #f8fafc !important; /* Pure White High Contrast */
+            font-weight: 500 !important;
+        }
+
+        /* Tên gói cước / Dịch vụ SAPC */
+        [data-theme="dark"] .detail-card span[style*="color:#0f766e"],
+        [data-theme="dark"] .detail-card span[style*="color: #0f766e"] {
+            color: #34d399 !important; /* Soft Mint Neon */
+            font-weight: 700 !important;
+        }
+
+        /* Khối "Xem phản ánh gốc" */
+        [data-theme="dark"] .detail-card details summary {
+            color: #38bdf8 !important; /* Neon Sky */
+        }
+        [data-theme="dark"] .detail-card details summary:hover {
+            color: #7dd3fc !important;
+        }
+        [data-theme="dark"] .detail-card details div {
+            background: #0d1117 !important;
+            border-color: #30363d !important;
+            color: #94a3b8 !important;
+        }
+
+        [data-theme="dark"] .detail-card [style*="background:#f8fafc"],
+        [data-theme="dark"] .detail-card [style*="background: #f8fafc"] {
+            background: #21262d !important;
+            border-color: #30363d !important;
+        }
+        [data-theme="dark"] .detail-card [style*="background:#ffffff"],
+        [data-theme="dark"] .detail-card [style*="background: #ffffff"] {
+            background: #1c2128 !important;
+            border-color: #30363d !important;
+        }
+
+        /* KHUNG CHỌN NGUYÊN NHÂN & NHẬP Ý KIẾN / PHẢN HỒI */
+        [data-theme="dark"] select[id^="select-detail-cause"] {
+            background: #21262d !important;
+            border-color: #30363d !important;
+            color: #f0f6fc !important;
+        }
+        [data-theme="dark"] select[id^="select-detail-cause"] option,
+        [data-theme="dark"] select[id^="select-detail-cause"] optgroup {
+            background: #161b22;
+            color: #f0f6fc;
+        }
+
+        [data-theme="dark"] .editable-cell,
+        [data-theme="dark"] .compact-input-cell {
+            background: #0d1117 !important;
+            border: 1px solid #30363d !important;
+            color: #f8fafc !important;
+        }
+        [data-theme="dark"] .editable-cell:focus,
+        [data-theme="dark"] .compact-input-cell:focus {
+            border-color: #38bdf8 !important;
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25) !important;
+            background: #161b22 !important;
+        }
+
+        /* CARD 2: HỒ SƠ KỸ THUẬT & TELECOM METRIC (SOFT NEON HI-TECH) */
+        [data-theme="dark"] .diag-metric-item {
+            background: #21262d !important;
+            border: 1px solid #30363d !important;
+        }
+        [data-theme="dark"] .diag-metric-label {
+            color: #93c5fd !important; /* Soft Cyan Neon Label */
+            font-weight: 700 !important;
+            letter-spacing: 0.04em;
+        }
+        [data-theme="dark"] .diag-metric-val {
+            color: #f8fafc !important;
+        }
+        [data-theme="dark"] .diag-metric-val.val-radio {
+            color: #38bdf8 !important; /* Neon Sky Blue */
+            font-weight: 800;
+        }
+        [data-theme="dark"] .diag-metric-val.val-hss {
+            color: #34d399 !important; /* Neon Mint/Emerald */
+            font-weight: 800;
+        }
+        [data-theme="dark"] .diag-metric-val.val-ip {
+            color: #c084fc !important; /* Neon Lavender / Purple */
+            font-weight: 800;
+        }
+        [data-theme="dark"] .diag-metric-val.val-normal {
+            color: #4ade80 !important; /* Soft Neon Green */
+            font-weight: 800;
+        }
+        [data-theme="dark"] .diag-metric-val.val-locked {
+            color: #f87171 !important;
+            background: rgba(239, 68, 68, 0.2) !important;
+            border-color: #ef4444 !important;
+        }
+        [data-theme="dark"] .diag-metric-val.val-hss-strange {
+            color: #fbbf24 !important; /* Neon Amber */
+            background: rgba(245, 158, 11, 0.18) !important;
+            border-color: #d97706 !important;
+        }
+
+        /* Khung Data Usage (BTools) & Link SAPC / BTools */
+        [data-theme="dark"] .detail-card div[style*="Data Usage (BTools)"],
+        [data-theme="dark"] .detail-card div:has(> div > strong[style*="color:#b45309"]) {
+            background: #21262d !important;
+            border-color: #30363d !important;
+        }
+        [data-theme="dark"] .detail-card strong[style*="color:#b45309"],
+        [data-theme="dark"] .detail-card strong[style*="color: #b45309"] {
+            color: #fbbf24 !important; /* Amber Neon */
+            font-weight: 700 !important;
+        }
+        [data-theme="dark"] .detail-card a[style*="color:#b45309"],
+        [data-theme="dark"] .detail-card a[style*="color: #b45309"] {
+            color: #fbbf24 !important; /* Amber Neon */
+        }
+        [data-theme="dark"] .detail-card a[style*="color:#005baa"],
+        [data-theme="dark"] .detail-card a[style*="color: #005baa"],
+        [data-theme="dark"] .detail-card a[style*="color:#0284c7"],
+        [data-theme="dark"] .detail-card a[style*="color: #0284c7"] {
+            color: #38bdf8 !important; /* Sky Neon */
+        }
+        [data-theme="dark"] .detail-card a:hover {
+            color: #7dd3fc !important;
+            text-shadow: 0 0 6px rgba(56, 189, 248, 0.4);
+        }
+
+        /* Dữ liệu tiêu dùng BTools (BIG70, X (BIG70), MoMo...) */
+        [data-theme="dark"] .detail-card span[style*="color:#334155"],
+        [data-theme="dark"] .detail-card span[style*="color: #334155"] {
+            color: #f1f5f9 !important; /* Sáng rõ nét 100% */
+            font-weight: 600 !important;
+        }
+
+        [data-theme="dark"] .badge-gray {
+            background: #21262d;
+            color: #c9d1d9;
+            border-color: #30363d;
+        }
+        [data-theme="dark"] .badge-rat-4g {
+            background: #21262d;
+            color: #38bdf8;
+            border-color: #0284c7;
+        }
+        [data-theme="dark"] .badge-rat-3g {
+            background: #21262d;
+            color: #fbbf24;
+            border-color: #d97706;
+        }
+        [data-theme="dark"] .badge-rat-signal {
+            background: #21262d;
+            color: #94a3b8;
+            border-color: #30363d;
+        }
+        [data-theme="dark"] .log-terminal {
+            background: #0d1117;
+            border-color: #30363d;
+            color: #e6edf3;
+        }
+        [data-theme="dark"] .modal-box {
+            background: #161b22;
+            border-color: #30363d;
+            color: #f0f6fc;
+        }
+        [data-theme="dark"] #welcomeTtsModal,
+        [data-theme="dark"] #modalWelcomeTtsNew,
+        [data-theme="dark"] #modalBtoolsSync,
+        [data-theme="dark"] #modalCemSync {
+            background: #161b22 !important;
+            border-color: #30363d !important;
+            color: #c9d1d9 !important;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7) !important;
         }

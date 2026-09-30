@@ -10,7 +10,32 @@ LEVEL_1_STATUS = "hoạt động bình thường"
 LEVEL_1_ACCESS_STATUSES = {
     "không được",
     "không được hoàn toàn",
+    "không vào được mạng (toàn bộ)",
+    "truy cập chậm, chập chờn",
 }
+LEVEL_1_ACCESS_PREFIXES = (
+    "không được",
+    "không vào được",
+    "không truy cập",
+    "truy cập không",
+    "truy cập chậm",
+    "chậm",
+    "chập chờn",
+    "chỉ bị chậm",
+    "mất kết nối",
+    "không kết nối",
+    "không sử dụng được",
+    "không dùng được",
+    "load chậm",
+)
+
+
+def is_level_1_access_status(access_status):
+    norm = normalize_text(access_status)
+    if not norm or norm == "không đề cập" or "lỗi ứng dụng" in norm:
+        return False
+    return norm.startswith(LEVEL_1_ACCESS_PREFIXES) or norm in LEVEL_1_ACCESS_STATUSES
+
 
 # Các trạng thái đã được scenarios_engine và phân tích số liệu kỹ thuật xác nhận
 # (KC_01/KC_02/KC_03/KC_07, CEM dominant cell, Gói cước SAPC) -> Tự động cập nhật + đóng phiếu.
@@ -47,9 +72,18 @@ AUTO_CLOSE_STATUSES_NO_ACCESS_CHECK = {
 }
 
 LEVEL_LUU_LUONG_YEU_STATUS = "lưu lượng yếu"
-# Tiền tố nhận diện "lỗi khoanh vùng tại 1 khu vực cụ thể" - giá trị thật luôn kèm chi tiết
-# trong ngoặc (vd "Tại 1 khu vực (Phường X...)"), nên so khớp theo PREFIX, không so tuyệt đối.
-ERROR_AREA_LOCALIZED_PREFIX = "tại 1 khu vực"
+# Tiền tố nhận diện "lỗi khoanh vùng tại 1 khu vực cụ thể" - hỗ trợ nhiều biến thể diễn đạt phổ biến
+ERROR_AREA_LOCALIZED_PREFIXES = (
+    "tại 1 khu vực",
+    "chỉ ở 1 khu vực",
+    "chỉ tại 1 khu vực",
+    "ở 1 khu vực",
+    "chỉ bị ở 1 khu vực",
+    "bị ở 1 khu vực",
+    "tại một khu vực",
+    "chỉ ở một khu vực",
+    "chỉ bị một khu vực",
+)
 
 
 def normalize_text(value):
@@ -95,14 +129,14 @@ def get_nguyen_nhan_and_action(record):
 
     # Row 6: HOẠT ĐỘNG BÌNH THƯỜNG
     if status == LEVEL_1_STATUS:
-        if access_status in LEVEL_1_ACCESS_STATUSES:
+        if is_level_1_access_status(access_status):
             return "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường", current_action
         else:
             return "Khách hàng theo dõi thêm", "Có thể Khách hàng đang di chuyển vào khu vực sóng kém, hoặc nghẽn mạng tạm thời. Nhờ KH theo dõi thêm giúp."
 
     # Row 7: LƯU LƯỢNG YẾU
     if status == LEVEL_LUU_LUONG_YEU_STATUS:
-        if access_status != "không đề cập" and error_area.startswith(ERROR_AREA_LOCALIZED_PREFIX):
+        if access_status != "không đề cập" and error_area.startswith(ERROR_AREA_LOCALIZED_PREFIXES):
             return "Thông tin đầu vào chưa chính xác, trùng lặp", current_action
         else:
             return "Khách hàng theo dõi thêm", "Có thể Khách hàng đang di chuyển vào khu vực sóng kém, hoặc nghẽn mạng tạm thời. Nhờ KH theo dõi thêm giúp."
@@ -133,14 +167,20 @@ def is_level_1_auto_close_candidate(record):
     Tất cả các trường hợp đã được định nghĩa trong bảng cấu hình đóng đều trả về True.
     """
     status = normalize_text(record.get("status", ""))
+    comment = str(record.get("comment", "")).lower()
     ai_sum = str(record.get("ai_summary", "")).lower()
+
+    # Phiếu mở lại -> BẮT BUỘC KTV KIỂM TRA THỦ CÔNG, KHÔNG TỰ ĐỘNG ĐÓNG
+    if "mở lại" in status or "mở lại" in comment or int(record.get("reopen_count") or 0) > 0:
+        return False
 
     # Phản ánh lỗi ứng dụng cụ thể -> Dành cho KTV review, không tự động đóng
     if "lỗi ứng dụng" in status or "lỗi ứng dụng cụ thể" in ai_sum:
         return False
 
     if status == LEVEL_1_STATUS:
-        return True
+        access_status = normalize_text(record.get("access_status") or get_access_status(record.get("ai_summary", "")))
+        return is_level_1_access_status(access_status)
 
     if status == LEVEL_LUU_LUONG_YEU_STATUS:
         return True

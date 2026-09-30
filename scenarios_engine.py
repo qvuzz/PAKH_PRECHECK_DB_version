@@ -1,4 +1,43 @@
-# scenarios_engine.py
+THROTTLED_SERVICE_CODES = {
+    "10002": "64/64",
+    "10003": "128/64",
+    "10005": "512/256",
+    "10010": "1024/1024",
+    "10011": "2048/2048",
+    "10012": "3072/3072",
+    "10013": "2048/1024",
+    "10014": "128/128",
+}
+
+def is_throttled_service_code(code):
+    """
+    Kiểm tra mã dịch vụ hạ/bóp băng thông BTools:
+    Bao gồm các mã chính thức từ VNPT:
+    - 10002: bóp băng thông 64/64
+    - 10003: bóp băng thông 128/64
+    - 10005: bóp băng thông 512/256
+    - 10010: bóp băng thông 1024/1024
+    - 10011: bóp băng thông 2048/2048
+    - 10012: bóp băng thông 3072/3072
+    - 10013: bóp băng thông 2048/1024
+    - 10014: bóp băng thông 128/128
+    Hoặc các mã code thuộc dải 100xx (độ dài 5 số bắt đầu bằng 100).
+    """
+    if not code:
+        return False
+    s = str(code).strip().lstrip("0")
+    if s in THROTTLED_SERVICE_CODES:
+        return True
+    return len(s) == 5 and s.startswith("100") and s.isdigit()
+
+
+def get_throttled_speed_desc(code):
+    """Lấy chi tiết thông số tốc độ bóp băng thông (ví dụ: 3072/3072)."""
+    if not code:
+        return ""
+    s = str(code).strip().lstrip("0")
+    return THROTTLED_SERVICE_CODES.get(s, "")
+
 
 def match_diagnostic_scenarios(rat_set, service_set, rat_codes, downlink_values, total_sessions, scenarios, service_set_3days=None, rat_set_3days=None, has_4g_profile=None):
     """
@@ -22,13 +61,16 @@ def match_diagnostic_scenarios(rat_set, service_set, rat_codes, downlink_values,
     # =========================================================================
 
     # --- Kịch bản 3: Thuê bao bị bóp băng thông ---
-    if "0000010002" in service_set:
+    # BTools các code 100xx (ví dụ: 10003, 10002, 0000010003, 0000010002...)
+    if any(is_throttled_service_code(c) for c in service_set) or (_service_set_Nday and any(is_throttled_service_code(c) for c in _service_set_Nday)):
         return "KC_03_THROTTLED", "SYSTEM"
 
     # --- Kịch bản 4: Chỉ có dịch vụ hệ thống (Treo gói / Thiết bị treo) ---
-    # Kiểm tra trên N ngày gần nhất: chỉ xuất hiện '000000300' hoặc '0000002042'
-    # xuyên suốt, không có mã dịch vụ nào khác phát sinh -> chắc chắn hơn 1 ngày
-    if _service_set_Nday and _service_set_Nday.issubset({"000000300", "0000002042"}):
+    # Kiểm tra trên N ngày gần nhất: chỉ xuất hiện các mã dịch vụ quản lý hệ thống (300, 302, 330, 2042)
+    # xuyên suốt, không có mã dịch vụ data thương mại nào khác phát sinh
+    SYSTEM_SERVICE_CODES = {"300", "302", "330", "2042"}
+    norm_service_set_Nday = set(str(c).strip().lstrip("0") for c in _service_set_Nday) if _service_set_Nday else set()
+    if norm_service_set_Nday and norm_service_set_Nday.issubset(SYSTEM_SERVICE_CODES):
         return "KC_04_PACKAGE_OR_DEVICE_HANG", "SYSTEM"
 
     # --- Kịch bản 1 / 7: Không bắt được sóng 4G ---

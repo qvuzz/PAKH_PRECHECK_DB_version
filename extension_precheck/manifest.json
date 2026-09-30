@@ -1,18 +1,31 @@
 {
   "manifest_version": 3,
-  "name": "VNPT TTS Precheck Helper",
-  "version": "1.0",
-  "description": "Hỗ trợ đồng bộ phiên đăng nhập an toàn (ATBMTT) từ TTS VNPT sang hệ thống Tiền kiểm PAKH Precheck.",
+  "name": "VNPT Multi-Tool Auto-Sync Helper (Port 710 & 1234)",
+  "version": "2.6",
+  "description": "Tự động đồng bộ phiên đăng nhập an toàn (OneOSS 4G, PMS 3G/5G, TTS, BTools, CEM, SAPC) sang KPI AI Assistant và PAKH Precheck.",
   "permissions": [
-    "storage"
+    "storage",
+    "cookies",
+    "tabs"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "host_permissions": [
-    "https://tts.vnpt.vn/*"
+    "<all_urls>"
   ],
   "content_scripts": [
     {
       "matches": [
-        "https://tts.vnpt.vn/*"
+        "*://pms.vnpt.vn/*",
+        "*://npmran.vnpt.vn/*",
+        "*://oneoss.vnpt.vn/*",
+        "*://tts.vnpt.vn/*",
+        "*://tts.vnptnet.vn/*",
+        "*://10.159.21.241/*",
+        "*://cem.vnptmedia.vn/*",
+        "*://10.155.42.218/*",
+        "*://gqknccos.vnpt.vn/*"
       ],
       "js": [
         "content.js"

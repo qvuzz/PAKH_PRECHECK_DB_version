@@ -95,11 +95,13 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
     if info_result.get("Radio"):
         rat_type_str = str(info_result.get("Radio"))
 
-    # Kiểm tra HSS Profile bất thường ảnh hưởng dịch vụ VoLTE
+    # Kiểm tra HSS Profile bất thường ảnh hưởng dịch vụ VoLTE (Điều kiện AND: Profile >= 3 chữ số VÀ IP: 113.x / 172.x / 192.168.x)
     is_strange_hss = False
     if hss_profile:
         hss_digits = re.sub(r'\D', '', hss_profile)
-        if len(hss_digits) >= 3 or "lạ" in hss_profile.lower():
+        ipv4_val = str(info_result.get("IPv4") or info_result.get("IP") or "").strip()
+        is_ip_captured = ipv4_val.startswith("113.") or ipv4_val.startswith("172.") or ipv4_val.startswith("192.168.")
+        if (len(hss_digits) >= 3 and is_ip_captured) or "lạ" in hss_profile.lower():
             is_strange_hss = True
 
     # Thông tin trạm Cell (lấy từ SAPC/HLR, không tiền kiểm CEM)

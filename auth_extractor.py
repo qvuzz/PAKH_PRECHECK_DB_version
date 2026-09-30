@@ -112,33 +112,56 @@ def extract_firefox_cookies(domain_keyword: str) -> dict:
     return results
 
 
+def is_debug_port_open(port: int = 9222) -> bool:
+    """Kiểm tra cực nhanh (0.05s) xem port debug có đang mở hay không trước khi gửi request."""
+    try:
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.05)
+        is_open = (sock.connect_ex(('127.0.0.1', port)) == 0)
+        sock.close()
+        return is_open
+    except Exception:
+        return False
+
+
+def _run_async_safely(coro, timeout: float = 2.0):
+    """Chạy coroutine async an toàn, tương thích 100% với FastAPI event loop và có timeout bắt buộc."""
+    import concurrent.futures
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(asyncio.run, coro).result(timeout=timeout)
+    except Exception:
+        return None
+
+
 def extract_cdp_cookies(domain_keyword: str, port: int = 9222) -> dict:
-    """Trích xuất cookies qua Chrome/Edge CDP nếu cổng 9222 đang mở."""
+    """Trích xuất cookies qua Chrome/Edge CDP nếu cổng debug đang mở (an toàn, không treo)."""
+    if not is_debug_port_open(port):
+        return {}
+
     results = {}
     try:
         import websockets
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=1.5) as r:
-            tabs = json.loads(r.read().decode("utf-8"))
-        ws_url = None
-        for t in tabs:
-            if t.get("type") == "page" and t.get("webSocketDebuggerUrl"):
-                ws_url = t.get("webSocketDebuggerUrl")
-                break
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1.0) as r:
+            ver = json.loads(r.read().decode("utf-8"))
+        ws_url = ver.get("webSocketDebuggerUrl")
         if not ws_url:
             return results
 
         async def _query():
-            async with websockets.connect(ws_url) as ws:
-                msg = {"id": 1, "method": "Network.getAllCookies", "params": {}}
+            async with websockets.connect(ws_url, open_timeout=1.0, close_timeout=1.0) as ws:
+                msg = {"id": 1, "method": "Storage.getCookies", "params": {}}
                 await ws.send(json.dumps(msg))
-                resp = await ws.recv()
+                resp = await asyncio.wait_for(ws.recv(), timeout=1.5)
                 data = json.loads(resp)
                 cookies = data.get("result", {}).get("cookies", [])
                 for c in cookies:
                     if domain_keyword.lower() in c.get("domain", "").lower():
                         results[c["name"]] = c["value"]
+            return results
 
-        asyncio.run(_query())
+        _run_async_safely(_query(), timeout=2.0)
     except Exception:
         pass
     return results
@@ -146,9 +169,12 @@ def extract_cdp_cookies(domain_keyword: str, port: int = 9222) -> dict:
 
 def extract_cdp_local_storage(domain_keyword: str, key_name: str, port: int = 9222) -> str:
     """Trích xuất localStorage qua Chrome/Edge CDP port 9222 nếu đang mở."""
+    if not is_debug_port_open(port):
+        return ""
+
     try:
         import websockets
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=1.5) as r:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=1.0) as r:
             tabs = json.loads(r.read().decode("utf-8"))
         ws_url = None
         for t in tabs:
@@ -159,18 +185,19 @@ def extract_cdp_local_storage(domain_keyword: str, key_name: str, port: int = 92
             return ""
 
         async def _query():
-            async with websockets.connect(ws_url) as ws:
+            async with websockets.connect(ws_url, open_timeout=1.0, close_timeout=1.0) as ws:
                 msg = {
                     "id": 1,
                     "method": "Runtime.evaluate",
                     "params": {"expression": f"localStorage.getItem('{key_name}')"}
                 }
                 await ws.send(json.dumps(msg))
-                resp = await ws.recv()
+                resp = await asyncio.wait_for(ws.recv(), timeout=1.5)
                 data = json.loads(resp)
                 return data.get("result", {}).get("result", {}).get("value") or ""
 
-        return asyncio.run(_query())
+        res = _run_async_safely(_query(), timeout=2.0)
+        return res or ""
     except Exception:
         return ""
 
@@ -202,7 +229,7 @@ def get_universal_btools_cookie(driver=None) -> str:
     # 4. Thử lấy qua browser_cookie3 (quét tất cả các trình duyệt cài đặt trên máy)
     try:
         import browser_cookie3
-        for loader in (browser_cookie3.firefox, browser_cookie3.edge, browser_cookie3.chrome):
+        for loader in (browser_cookie3.firefox,):
             try:
                 cj = loader(domain_name="10.159.21.241")
                 parts = [f"{c.name}={c.value}" for c in cj]
@@ -295,7 +322,7 @@ def _load_cem_cache():
     return None, {}
 
 
-def get_universal_cem_auth(driver=None):
+def get_universal_cem_auth(driver=None, force_refresh=False):
     """
     Trích xuất tự động apikey và cookies của CEM VNPT Media từ bất kỳ trình duyệt nào:
     1. Chrome debug driver / Chrome port 9222 (ưu tiên cao nhất, tức thì trong RAM).
@@ -308,7 +335,13 @@ def get_universal_cem_auth(driver=None):
     api_key = None
     cookies_dict = {}
 
-    # 1. Thử lấy từ driver nếu đang mở tab hoặc có cookies
+    # 1. Ưu tiên đọc từ cache file cem_auth_cache.json trước tiên nếu không bị ép buộc làm mới
+    if not force_refresh:
+        cached_key, cached_cookies = _load_cem_cache()
+        if cached_key:
+            return cached_key, cached_cookies
+
+    # 2. Thử lấy từ driver nếu đang mở tab hoặc có cookies
     if driver:
         try:
             cookies = driver.execute_cdp_cmd("Network.getAllCookies", {}).get("cookies", [])
@@ -323,16 +356,17 @@ def get_universal_cem_auth(driver=None):
         except Exception:
             pass
 
-    # 2. Thử lấy từ Chrome/Edge CDP port 9222 (an toàn, socket timeout 0.3s)
-    cdp_cookies = extract_cdp_cookies("vnptmedia")
-    if cdp_cookies:
-        cookies_dict.update(cdp_cookies)
-        if "apikey" in cdp_cookies:
-            api_key = urllib.parse.unquote(cdp_cookies["apikey"])
-            _save_cem_cache(api_key, cookies_dict)
-            return api_key, cookies_dict
+    # 3. Thử lấy từ Chrome/Edge CDP nếu port debug mở
+    if is_debug_port_open():
+        cdp_cookies = extract_cdp_cookies("vnptmedia")
+        if cdp_cookies:
+            cookies_dict.update(cdp_cookies)
+            if "apikey" in cdp_cookies:
+                api_key = urllib.parse.unquote(cdp_cookies["apikey"])
+                _save_cem_cache(api_key, cookies_dict)
+                return api_key, cookies_dict
 
-    # 3. Thử lấy trực tiếp từ Firefox cookies.sqlite
+    # 4. Thử lấy trực tiếp từ Firefox cookies.sqlite
     try:
         ff_cookies = extract_firefox_cookies("vnptmedia")
         if ff_cookies:
@@ -344,10 +378,10 @@ def get_universal_cem_auth(driver=None):
     except Exception:
         pass
 
-    # 4. Quét qua browser_cookie3 (Firefox session cookies trong recovery.jsonlz4, Chrome, Edge)
+    # 5. Quét nhẹ qua Firefox session trong browser_cookie3 (bỏ qua Chrome/Edge tránh nghẽn Admin trên Windows)
     try:
         import browser_cookie3
-        for loader in (browser_cookie3.firefox, browser_cookie3.edge, browser_cookie3.chrome):
+        for loader in (browser_cookie3.firefox,):
             try:
                 cj = loader(domain_name="vnptmedia.vn")
                 for c in cj:
@@ -361,11 +395,6 @@ def get_universal_cem_auth(driver=None):
                 continue
     except Exception:
         pass
-
-    # 5. Fallback lấy từ file cache nếu trình duyệt đang tắt hoặc chưa mở lại
-    cached_key, cached_cookies = _load_cem_cache()
-    if cached_key:
-        return cached_key, cached_cookies
 
     return api_key, cookies_dict
 

@@ -1,5 +1,49 @@
 let isRunning = false;
 let currentAutoClose = false;
+let currentSystem = 'tts_old_api';
+let currentService = 'data';
+
+// ==================== QUẢN LÝ CHẾ ĐỘ BAN NGÀY / BAN ĐÊM (THEME SYSTEM) ====================
+function getAppTheme() {
+    return document.documentElement.getAttribute('data-theme') || localStorage.getItem('pakh_theme') || 'light';
+}
+
+function updateThemeUI(theme) {
+    const btn = document.getElementById('btnThemeToggle');
+    const iconSpan = document.getElementById('themeToggleIcon');
+    const labelSpan = document.getElementById('themeToggleLabel');
+    if (!btn) return;
+
+    if (theme === 'dark') {
+        if (iconSpan) {
+            iconSpan.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`;
+        }
+        if (labelSpan) labelSpan.innerText = 'Sáng';
+        btn.title = 'Chuyển sang Giao diện Ban ngày (Light mode)';
+    } else {
+        if (iconSpan) {
+            iconSpan.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
+        }
+        if (labelSpan) labelSpan.innerText = 'Tối';
+        btn.title = 'Chuyển sang Giao diện Ban đêm (Dark mode)';
+    }
+}
+
+function toggleAppTheme() {
+    const current = getAppTheme();
+    const target = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', target);
+    try {
+        localStorage.setItem('pakh_theme', target);
+    } catch (e) {}
+    updateThemeUI(target);
+}
+
+// Khởi chạy cập nhật trạng thái UI theme ngay khi DOM sẵn sàng
+document.addEventListener('DOMContentLoaded', function() {
+    updateThemeUI(getAppTheme());
+});
+
 
 // Xác định quyền Admin đồng bộ ngay lập tức dựa trên Hostname (Localhost hoặc dải IP 127.x.x.x)
 function checkIsLocalHost() {
@@ -7,6 +51,7 @@ function checkIsLocalHost() {
     return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.startsWith('127.');
 }
 let isSystemAdmin = checkIsLocalHost() || (new URLSearchParams(window.location.search).get('role') === 'admin');
+let currentAiEngine = 'qwen';
 
 function escapeHtml(str) {
     if (!str) return '';
@@ -33,43 +78,83 @@ function updateNavBadge(elem, count) {
     }
 }
 
-function updateModeUI(autoClose) {
-    currentAutoClose = !!autoClose;
-    const chk = document.getElementById('chkAutoClose');
-    if (chk) chk.checked = currentAutoClose;
-    const chkApi = document.getElementById('chkAutoCloseApi');
-    if (chkApi) chkApi.checked = currentAutoClose;
-    const chkNew = document.getElementById('chkAutoCloseNew');
-    if (chkNew) chkNew.checked = currentAutoClose;
+let autoCloseState = {
+    tts_old: false,
+    tts_new: false,
+    mode: 'none'
+};
+
+function getCurrentSystemKey() {
+    return (currentSystem === 'tts_new') ? 'tts_new' : 'tts_old';
+}
+
+function updateModeUI() {
+    const sysKey = getCurrentSystemKey();
+    const isSysNew = (sysKey === 'tts_new');
+    const isSysActive = isSysNew ? autoCloseState.tts_new : autoCloseState.tts_old;
+    currentAutoClose = isSysActive;
+
     const chkUnified = document.getElementById('chkAutoCloseUnified');
+    const ctrlUnified = document.getElementById('ctrlAutoCloseUnified');
+    const lblUnified = document.getElementById('autoCloseUnifiedLabel');
+
     if (chkUnified) {
         if (!isSystemAdmin) {
             chkUnified.checked = false;
             chkUnified.disabled = true;
         } else {
             chkUnified.disabled = false;
-            chkUnified.checked = currentAutoClose;
+            chkUnified.checked = isSysActive;
+        }
+    }
+
+    if (lblUnified) {
+        lblUnified.innerText = isSysNew ? 'Tự đóng TTS Mới' : 'Tự đóng TTS Cũ';
+    }
+
+    if (ctrlUnified) {
+        if (isSysActive) {
+            ctrlUnified.style.background = '#fef2f2';
+            ctrlUnified.style.borderColor = 'rgba(220,38,38,0.5)';
+            ctrlUnified.style.color = '#dc2626';
+            ctrlUnified.title = `Chế độ: ĐANG BẬT tự động đóng cho ${isSysNew ? 'TTS Mới' : 'TTS Cũ'} (Bấm để tắt)`;
+        } else {
+            ctrlUnified.style.background = '#f8fafc';
+            ctrlUnified.style.borderColor = '#cbd5e1';
+            ctrlUnified.style.color = '#64748b';
+            ctrlUnified.title = `Chế độ: ĐANG TẮT tự động đóng cho ${isSysNew ? 'TTS Mới' : 'TTS Cũ'} (Bấm để bật)`;
         }
     }
 
     const modeLabelBadge = document.getElementById('modeLabelBadge');
     const headerModeTag = document.getElementById('headerModeTag');
 
-    if (currentAutoClose) {
-        if (modeLabelBadge) {
+    if (modeLabelBadge) {
+        if (autoCloseState.mode === 'all') {
             modeLabelBadge.className = 'badge-mode auto';
-            modeLabelBadge.innerText = 'Bật: Tự động đóng (TTS Cũ & Mới)';
-        }
-        if (headerModeTag) {
-            headerModeTag.style.color = '#dc2626';
-            headerModeTag.innerText = 'Chế độ: ⚠️ Tự động đóng phiếu (Đang bật)';
-        }
-    } else {
-        if (modeLabelBadge) {
+            modeLabelBadge.innerText = 'Bật: Cả TTS Cũ & Mới';
+        } else if (autoCloseState.mode === 'tts_old') {
+            modeLabelBadge.className = 'badge-mode auto';
+            modeLabelBadge.innerText = 'Bật: Chỉ TTS Cũ';
+        } else if (autoCloseState.mode === 'tts_new') {
+            modeLabelBadge.className = 'badge-mode auto';
+            modeLabelBadge.innerText = 'Bật: Chỉ TTS Mới';
+        } else {
             modeLabelBadge.className = 'badge-mode manual';
             modeLabelBadge.innerText = 'Tắt: Đóng thủ công 100%';
         }
-        if (headerModeTag) {
+    }
+    if (headerModeTag) {
+        if (autoCloseState.mode === 'all') {
+            headerModeTag.style.color = '#dc2626';
+            headerModeTag.innerText = 'Chế độ: Tự đóng cả TTS Cũ & Mới (Đang bật)';
+        } else if (autoCloseState.mode === 'tts_old') {
+            headerModeTag.style.color = '#0284c7';
+            headerModeTag.innerText = 'Chế độ: Chỉ tự đóng TTS Cũ (Đang bật)';
+        } else if (autoCloseState.mode === 'tts_new') {
+            headerModeTag.style.color = '#6366f1';
+            headerModeTag.innerText = 'Chế độ: Chỉ tự đóng TTS Mới (Đang bật)';
+        } else {
             headerModeTag.style.color = '#b45309';
             headerModeTag.innerText = 'Chế độ: Đóng thủ công 100%';
         }
@@ -85,15 +170,20 @@ function handleAutoCloseClick(e) {
         return;
     }
 
-    // 2. Nếu là Admin:
-    // Nếu đang BẬT -> Click là TẮT ngay lập tức
-    if (currentAutoClose) {
-        updateModeUI(false);
-        saveAutoCloseConfig(false);
+    const sysKey = getCurrentSystemKey();
+    const isSysNew = (sysKey === 'tts_new');
+    const isSysActive = isSysNew ? autoCloseState.tts_new : autoCloseState.tts_old;
+
+    // 2. Nếu đang BẬT -> Click là TẮT ngay lập tức cho riêng hệ thống này
+    if (isSysActive) {
+        if (isSysNew) autoCloseState.tts_new = false;
+        else autoCloseState.tts_old = false;
+        updateModeUI();
+        saveAutoCloseConfig(sysKey, false);
         return;
     }
 
-    // Nếu đang TẮT -> Bật Modal xác nhận 2 bước
+    // 3. Nếu đang TẮT -> Bật Modal xác nhận 2 bước cho hệ thống này
     openAutoCloseConfirmModal();
 }
 
@@ -103,6 +193,20 @@ function openAutoCloseConfirmModal() {
     const step2 = document.getElementById('autoCloseStep2');
     const blocked = document.getElementById('autoCloseClientBlocked');
     if (!modal) return;
+
+    const sysKey = getCurrentSystemKey();
+    const sysName = (sysKey === 'tts_new') ? 'HỆ THỐNG TTS MỚI' : 'HỆ THỐNG TTS CŨ';
+
+    const targetSub1 = document.getElementById('autoCloseModalTargetSub1');
+    const targetSub2 = document.getElementById('autoCloseModalTargetSub2');
+    const targetSysTag1 = document.getElementById('autoCloseTargetSysName1');
+    const targetSysTag2 = document.getElementById('autoCloseTargetSysName2');
+
+    if (targetSub1) targetSub1.innerText = `Kích hoạt Tự Động Đóng Phiếu cho ${sysName}`;
+    if (targetSub2) targetSub2.innerText = `Trách nhiệm vận hành KTV — ${sysName}`;
+    if (targetSysTag1) targetSysTag1.innerText = sysName;
+    if (targetSysTag2) targetSysTag2.innerText = sysName;
+
     if (step1) step1.style.display = 'block';
     if (step2) step2.style.display = 'none';
     if (blocked) blocked.style.display = 'none';
@@ -131,24 +235,27 @@ function showAutoCloseClientBlocked() {
 function cancelAutoCloseModal() {
     const modal = document.getElementById('modalAutoCloseConfirm');
     if (modal) modal.style.display = 'none';
-    const chk = document.getElementById('chkAutoCloseUnified');
-    if (chk) chk.checked = currentAutoClose;
+    updateModeUI();
 }
 
 async function confirmAndActivateAutoClose() {
     cancelAutoCloseModal();
-    updateModeUI(true);
-    await saveAutoCloseConfig(true);
+    const sysKey = getCurrentSystemKey();
+    if (sysKey === 'tts_new') autoCloseState.tts_new = true;
+    else autoCloseState.tts_old = true;
+    updateModeUI();
+    await saveAutoCloseConfig(sysKey, true);
 }
 
-async function saveAutoCloseConfig(isActive) {
+async function saveAutoCloseConfig(targetSystem, isActive) {
     try {
+        const sys = targetSystem || getCurrentSystemKey();
         await fetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                auto_close: isActive,
-                auto_close_mode: isActive ? 'all' : 'none'
+                system: sys,
+                auto_close: !!isActive
             })
         });
         loadTickets();
@@ -165,10 +272,61 @@ async function toggleAutoCloseMode(isChecked) {
     return handleAutoCloseClick();
 }
 
+async function handleAiSummaryModelChange(modelValue) {
+    if (!isSystemAdmin) {
+        alert('⛔ Bạn không có quyền Admin để thay đổi mô hình Tóm tắt nội dung!\n(Chỉ máy chủ Admin chạy trên localhost mới được phép cấu hình)');
+        const selAi = document.getElementById('selectAiSummaryModel');
+        if (selAi) selAi.value = currentAiEngine || 'qwen';
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ai_summary_engine: modelValue
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            currentAiEngine = data.ai_summary_engine || modelValue;
+            const modelName = currentAiEngine === 'regex' ? 'Regex (Quy tắc mẫu)' : 'Qwen 2.5 (Offline AI)';
+            alert(`✅ Đã chuyển mô hình Tóm tắt sang: ${modelName}\nCác lượt quét và tiền kiểm tiếp theo sẽ áp dụng mô hình này.`);
+        } else {
+            alert('⚠️ Lỗi cập nhật mô hình: ' + (data.error || 'Không xác định'));
+        }
+    } catch (e) {
+        alert('⚠️ Lỗi kết nối máy chủ: ' + e.message);
+    }
+}
+
 async function fetchStatus() {
     try {
         const res = await fetch('/api/status');
         const data = await res.json();
+
+        // Đồng bộ lựa chọn mô hình Tóm tắt nội dung
+        if (data.ai_summary_engine) {
+            currentAiEngine = data.ai_summary_engine;
+            const selAi = document.getElementById('selectAiSummaryModel');
+            if (selAi && selAi.value !== currentAiEngine) {
+                selAi.value = currentAiEngine;
+            }
+            if (selAi) {
+                if (!isSystemAdmin) {
+                    selAi.disabled = true;
+                    selAi.title = "Chỉ máy chủ Admin (127./localhost) mới có quyền đổi mô hình AI";
+                    selAi.style.opacity = "0.7";
+                    selAi.style.cursor = "not-allowed";
+                } else {
+                    selAi.disabled = false;
+                    selAi.title = "Chọn mô hình Tóm tắt nội dung PAKH (Qwen 2.5 hoặc Regex)";
+                    selAi.style.opacity = "1";
+                    selAi.style.cursor = "pointer";
+                }
+            }
+        }
 
         isRunning = data.is_running;
         const currentEngine = data.engine || 'api';
@@ -288,10 +446,17 @@ async function fetchStatus() {
             if (cbUnified) cbUnified.innerText = '--:--';
         }
 
-        const isAutoCloseActive = (data.auto_close_mode !== 'none' && data.auto_close !== false);
-        if (isAutoCloseActive !== currentAutoClose) {
-            updateModeUI(isAutoCloseActive);
+        if (data.auto_close_tts_old !== undefined && data.auto_close_tts_new !== undefined) {
+            autoCloseState.tts_old = !!data.auto_close_tts_old;
+            autoCloseState.tts_new = !!data.auto_close_tts_new;
+            autoCloseState.mode = data.auto_close_mode || 'none';
+        } else if (data.auto_close_mode) {
+            const m = data.auto_close_mode;
+            autoCloseState.mode = m;
+            autoCloseState.tts_old = (m === 'all' || m === 'tts_old');
+            autoCloseState.tts_new = (m === 'all' || m === 'tts_new');
         }
+        updateModeUI();
 
         if (data.interval_minutes) {
             const inpInt = document.getElementById('inpIntervalUnified');
@@ -363,8 +528,6 @@ async function fetchStatus() {
 
 let lastTicketsSignature = "";
 let currentTableTab = 'chua_dong';
-let currentSystem = 'tts_old_api';
-let currentService = 'data';
 
 // SẮP XẾP DANH SÁCH PHIẾU THEO NGÀY TIẾP NHẬN
 let sortIncidentTimeOrder = 'none'; // 'none', 'desc' (mới nhất trước), 'asc' (cũ nhất trước)
@@ -553,34 +716,39 @@ async function loadClosedAnalytics() {
         const res = await fetch(`/api/tickets/closed_stats?period=${encodeURIComponent(currentClosedPeriod)}&source=${encodeURIComponent(currentClosedSource)}&service_type=${encodeURIComponent(currentClosedService)}`);
         const data = await res.json();
 
-        // 1. Cập nhật các thẻ KPI
+        // 1. Cập nhật các thẻ KPI chuẩn hóa
         const elTotal = document.getElementById('caValTotal');
         const elAuto = document.getElementById('caValAuto');
         const elAutoPct = document.getElementById('caValAutoPercent');
-        const elBarAuto = document.getElementById('caBarAuto');
         const elManual = document.getElementById('caValManual');
         const elManualPct = document.getElementById('caValManualPercent');
+        const elBarManual = document.getElementById('caBarManual');
+        const elSynced = document.getElementById('caValSynced');
         const elSubManual = document.getElementById('caSubManual');
         const elToday = document.getElementById('caValToday');
         const elTtsNew = document.getElementById('caValTtsNew');
         const elTtsOld = document.getElementById('caValTtsOld');
         const elData = document.getElementById('caValData');
-        const elVoice = document.getElementById('caValVoice');
+        const elCall = document.getElementById('caValCall');
+        const elSms = document.getElementById('caValSms');
+        const elOther = document.getElementById('caValOther');
         const elBadge = document.getElementById('caSourceBadge');
 
         if (elTotal) elTotal.innerText = (data.total || 0).toLocaleString();
-        if (elAuto) elAuto.innerText = (data.auto_cnt || 0).toLocaleString();
-        if (elAutoPct) elAutoPct.innerText = `${data.auto_percent || 0}%`;
-        if (elBarAuto) elBarAuto.style.width = `${Math.min(100, data.auto_percent || 0)}%`;
-
         if (elManual) elManual.innerText = (data.manual_cnt || 0).toLocaleString();
         if (elManualPct) elManualPct.innerText = `${data.manual_percent || 0}%`;
+        if (elBarManual) elBarManual.style.width = `${Math.min(100, data.manual_percent || 0)}%`;
+
+        if (elAuto) elAuto.innerText = (data.auto_cnt || 0).toLocaleString();
+        if (elAutoPct) elAutoPct.innerText = `${data.auto_percent || 0}%`;
+        if (elSynced) elSynced.innerText = (data.synced_cnt || 0).toLocaleString();
+
         if (elSubManual) {
             if (data.staff_list && data.staff_list.length > 0) {
                 const names = data.staff_list.map(s => `${s.name} (${s.count})`).join(', ');
-                elSubManual.innerHTML = `KTV: <span style="font-weight:600; color:#b45309;">${escapeHtml(names)}</span>`;
+                elSubManual.innerHTML = `KTV: <span style="font-weight:600; color:#15803d;">${escapeHtml(names)}</span>`;
             } else {
-                elSubManual.innerText = "Phiếu cần can thiệp nghiệp vụ / mở lại";
+                elSubManual.innerText = "Chưa có lượt đóng qua giao diện";
             }
         }
 
@@ -588,7 +756,9 @@ async function loadClosedAnalytics() {
         if (elTtsNew) elTtsNew.innerText = (data.tts_new_cnt || 0).toLocaleString();
         if (elTtsOld) elTtsOld.innerText = (data.tts_old_cnt || 0).toLocaleString();
         if (elData) elData.innerText = (data.data_cnt || 0).toLocaleString();
-        if (elVoice) elVoice.innerText = (data.voice_cnt || 0).toLocaleString();
+        if (elCall) elCall.innerText = (data.call_cnt || 0).toLocaleString();
+        if (elSms) elSms.innerText = (data.sms_cnt || 0).toLocaleString();
+        if (elOther) elOther.innerText = (data.other_cnt || 0).toLocaleString();
 
         if (elBadge) {
             if (currentClosedSource === 'tts_new') elBadge.innerText = 'TTS Mới';
@@ -796,6 +966,8 @@ function selectModule(sys, srv, updateUrl = true) {
     if (filterStatus) filterStatus.style.display = isDataSrv ? '' : 'none';
     const ctrlAutoClose = document.getElementById('ctrlAutoCloseUnified');
     if (ctrlAutoClose) ctrlAutoClose.style.display = isDataSrv ? 'flex' : 'none';
+    const btnCdr = document.getElementById('btnOpenSmscCdrSearch');
+    if (btnCdr) btnCdr.style.display = (srv === 'sms') ? 'inline-flex' : 'none';
 
     // Ẩn bộ lọc nguồn & loại PAKH vì đây là menu chuyên biệt của TTS
     const srcSel = document.getElementById('filterSourceSelect');
@@ -803,6 +975,7 @@ function selectModule(sys, srv, updateUrl = true) {
     const catSel = document.getElementById('filterCategorySelect');
     if (catSel) catSel.style.display = 'none';
 
+    updateModeUI();
     switchTableTab(currentTableTab);
 }
 
@@ -810,6 +983,9 @@ function selectHistoryModule(tab = 'all', updateUrl = true) {
     isHistoryStatsView = false;
     currentSystem = 'all';
     currentService = 'all';
+
+    const btnCdr = document.getElementById('btnOpenSmscCdrSearch');
+    if (btnCdr) btnCdr.style.display = 'none';
 
     if (updateUrl && window.location.pathname !== '/lich-su') {
         history.pushState({ tab: 'lich-su' }, '', '/lich-su');
@@ -1096,7 +1272,7 @@ async function precheckSingleTicket(phone, incidentTime, btnElem) {
             alert(data.error || "Không thể thực hiện tiền kiểm.");
             if (btnElem) {
                 btnElem.disabled = false;
-                btnElem.innerHTML = 'Tiền kiểm Core';
+                btnElem.innerHTML = 'Tiền kiểm lại';
                 btnElem.style.opacity = '1';
             }
         }
@@ -1104,7 +1280,7 @@ async function precheckSingleTicket(phone, incidentTime, btnElem) {
         alert("Lỗi khi gửi yêu cầu tiền kiểm: " + e);
         if (btnElem) {
             btnElem.disabled = false;
-            btnElem.innerHTML = 'Tiền kiểm Core';
+            btnElem.innerHTML = 'Tiền kiểm lại';
             btnElem.style.opacity = '1';
         }
     }
@@ -1262,6 +1438,680 @@ function syncDetailToCompact(ticketKey, field, val) {
     }
 }
 
+// =========================================================================
+// QUẢN LÝ VÀ ĐỊNH VỊ CELL TỪ SERVICE CUSTOMERPOSITION (PORT 1708)
+// =========================================================================
+const cellInfoClientCache = {};
+const pendingCellLookups = new Set();
+const cellLocationClientCache = {};
+const pendingCellLocationLookups = new Set();
+
+function formatRadioCellHtml(radioVal, cellName) {
+    if (!radioVal && !cellName) return '--';
+    let r = radioVal || '4G';
+    let c = cellName || '';
+    if (!c && r.includes(',')) {
+        const parts = r.split(',');
+        r = parts[0].trim();
+        c = parts.slice(1).join(',').trim();
+    }
+    if (c) {
+        const cellUrl = `http://127.0.0.1:1708/cellid/${encodeURIComponent(c)}`;
+        return `${escapeHtml(r)}, <a href="${cellUrl}" target="_blank" style="color:#0284c7; font-weight:700; text-decoration:underline;" title="Xem vị trí Cell ${escapeHtml(c)} trên bản đồ (CustomerPosition)">${escapeHtml(c)}</a>`;
+    }
+    return escapeHtml(r);
+}
+
+function renderRadioStatus(radioVal, ticketKey, phone) {
+    let raw = (radioVal || '').trim();
+    if (raw.includes(',')) {
+        return formatRadioCellHtml(raw);
+    }
+    const cleanPhone = (phone || '').trim();
+    if (cleanPhone && cellInfoClientCache[cleanPhone]) {
+        const info = cellInfoClientCache[cleanPhone];
+        return formatRadioCellHtml(raw || info.radio || '4G', info.cell_name);
+    }
+    if (cleanPhone) {
+        triggerAsyncCellLookup(ticketKey, cleanPhone, raw);
+    }
+    return escapeHtml(raw || '--');
+}
+
+function renderRadioLocation(phone, ticketKey = '', incidentTime = '') {
+    const cleanPhone = (phone || '').trim();
+    if (!cleanPhone) return '';
+    const info = cellInfoClientCache[cleanPhone];
+    if (info && (info.ward || info.province || info.location_str)) {
+        const loc = info.location_str || (info.ward + (info.ward && info.province ? ', ' : '') + info.province);
+        const quickWardBtn = (info.ward || loc) ? `
+            <button type="button" class="btn-quick-apply-ward" onclick="quickApplyWardFromCell('${escapeHtml(cleanPhone)}', '${escapeHtml(incidentTime || '')}', '${escapeHtml(ticketKey || '')}', '${escapeHtml(info.ward || loc)}', '${escapeHtml(info.province || '')}', this, event)" style="margin-left:4px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:3px; padding:0 4px; font-size:11px; cursor:pointer; line-height:1.2; color:#1d4ed8; font-weight:700; transition:all 0.15s;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(info.ward || loc)}) vào Tóm tắt Nội dung & TTS Mới">⬆️</button>
+        ` : '';
+        return `
+            <div style="display:flex; align-items:center; gap:3px; margin-top:2px; color:#0f172a; flex-wrap:wrap;">
+                <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="#0369a1" stroke-width="2" style="flex-shrink:0; margin-top:1px;"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                <span style="font-weight:600; color:#0f172a; font-size:10.5px;">${escapeHtml(loc)}</span>
+                ${quickWardBtn}
+            </div>
+        `;
+    }
+    return '';
+}
+
+async function triggerAsyncCellLookup(ticketKey, phone, currentRadio) {
+    if (!phone || pendingCellLookups.has(phone)) return;
+    pendingCellLookups.add(phone);
+    try {
+        const res = await fetch(`/api/cell_info/${encodeURIComponent(phone)}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data && (data.success || data.cell_name || data.ward || data.province)) {
+                cellInfoClientCache[phone] = data;
+                const el = document.getElementById(`val-radio-${ticketKey}`);
+                if (el && data.cell_name) {
+                    el.innerHTML = formatRadioCellHtml(currentRadio || data.radio || '4G', data.cell_name);
+                }
+                const locEl = document.getElementById(`radio-loc-${ticketKey}`);
+                if (locEl && (data.ward || data.province || data.location_str)) {
+                    let t = (typeof cachedTickets !== 'undefined') ? cachedTickets.find((item, idx) => {
+                        const key = (item.phone + '_' + (item.incident_time || item.ticket_code || idx)).replace(/[^a-zA-Z0-9]/g, '_');
+                        return key === ticketKey;
+                    }) : null;
+                    const incTime = t ? t.incident_time : '';
+                    locEl.innerHTML = renderRadioLocation(phone, ticketKey, incTime);
+                }
+                const compactEl = document.getElementById(`compact-radio-${ticketKey}`);
+                if (compactEl && data.cell_name) {
+                    compactEl.innerHTML = formatRadioCellHtml(currentRadio || data.radio || '4G', data.cell_name);
+                }
+                const compactLocEl = document.getElementById(`compact-radio-loc-${ticketKey}`);
+                if (compactLocEl && (data.ward || data.province || data.location_str)) {
+                    let t = (typeof cachedTickets !== 'undefined') ? cachedTickets.find((item, idx) => {
+                        const key = (item.phone + '_' + (item.incident_time || item.ticket_code || idx)).replace(/[^a-zA-Z0-9]/g, '_');
+                        return key === ticketKey;
+                    }) : null;
+                    const incTime = t ? t.incident_time : '';
+                    const loc = data.location_str || (data.ward + (data.ward && data.province ? ', ' : '') + data.province);
+                    const wardVal = data.ward || loc;
+                    const quickBtn = wardVal ? ` <button type="button" onclick="quickApplyWardFromCell('${escapeHtml(phone)}', '${escapeHtml(incTime)}', '${escapeHtml(ticketKey)}', '${escapeHtml(wardVal)}', '${escapeHtml(data.province || '')}', this, event)" style="background:transparent; border:none; cursor:pointer; font-size:10px; padding:0; line-height:1; vertical-align:middle;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(wardVal)}) vào Tóm tắt Nội dung">⬆️</button>` : '';
+                    compactLocEl.innerHTML = ` (${escapeHtml(loc)})${quickBtn}`;
+                }
+                updateAllWardAudits();
+            }
+        }
+    } catch (e) {
+        // im lặng nếu không kết nối được
+    } finally {
+        pendingCellLookups.delete(phone);
+    }
+}
+
+function extractTopCellFromCem(text) {
+    if (!text) return null;
+    const m = text.match(/•\s*([2345]G[-_][A-Za-z0-9_-]+)/i) || 
+              text.match(/([2345]G[-_][A-Za-z0-9_-]+)/i) ||
+              text.match(/•\s*([A-Za-z0-9_-]+):/);
+    return m ? m[1].trim() : null;
+}
+
+function extractAllCellsFromCem(text) {
+    if (!text || text.includes('Chưa quét theo ngày tiếp nhận') || text.includes('Không có dữ liệu')) return [];
+    const matches = text.match(/[2345]G[-_][A-Za-z0-9_-]+/gi) || [];
+    return Array.from(new Set(matches.map(c => c.trim())));
+}
+
+function normalizeVnLocation(text) {
+    if (!text) return '';
+    return text.toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[đĐ]/g, 'd')
+        .replace(/\b(phuong|xa|thi tran|quan|huyen|tp|tp\.|thanh pho|tinh|p\.|x\.|q\.)\b/g, '')
+        .replace(/[^a-z0-9]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function renderCemIncidentLocation(ticketKey, rawCemIncident, phone = '', incidentTime = '') {
+    const cellName = extractTopCellFromCem(rawCemIncident);
+    if (!cellName) return '';
+
+    if (cellLocationClientCache[cellName]) {
+        const info = cellLocationClientCache[cellName];
+        if (info && (info.ward || info.province || info.location_str)) {
+            const locText = info.location_str || (info.ward + (info.ward && info.province ? ', ' : '') + info.province);
+            const quickWardBtn = (info.ward || locText) ? `
+                <button type="button" class="btn-quick-apply-ward" onclick="quickApplyWardFromCell('${escapeHtml(phone || '')}', '${escapeHtml(incidentTime || '')}', '${escapeHtml(ticketKey || '')}', '${escapeHtml(info.ward || locText)}', '${escapeHtml(info.province || '')}', this, event)" style="margin-left:4px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:3px; padding:0 4px; font-size:11px; cursor:pointer; line-height:1.2; color:#1d4ed8; font-weight:700; transition:all 0.15s;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(info.ward || locText)}) vào Tóm tắt Nội dung & TTS Mới">⬆️</button>
+            ` : '';
+            return `
+                <div style="display:flex; align-items:flex-start; gap:4px; margin-top:5px; padding-top:4px; border-top:1px dashed #cbd5e1; font-size:10.5px; color:#334155; line-height:1.35;">
+                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#0284c7" stroke-width="2" style="flex-shrink:0; margin-top:2px;"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                    <div>
+                        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:3px;">
+                            <span style="font-weight:700; color:#0284c7;">Địa bàn Cell (${escapeHtml(cellName)}):</span>
+                            ${quickWardBtn}
+                        </div>
+                        <div style="font-weight:600; color:#0f172a; margin-top:1px;">${escapeHtml(locText)}</div>
+                    </div>
+                </div>
+            `;
+        }
+        return '';
+    }
+
+    triggerAsyncCellLocationLookup(ticketKey, cellName);
+    return `
+        <div id="cem-incident-loc-spin-${ticketKey}" style="margin-top:5px; padding-top:4px; border-top:1px dashed #cbd5e1; font-size:10px; color:#64748b; font-style:italic; display:flex; align-items:center; gap:4px;">
+            <span>Đang tra cứu địa bàn Cell ${escapeHtml(cellName)}...</span>
+        </div>
+    `;
+}
+
+async function triggerAsyncCellLocationLookup(ticketKey, cellName) {
+    if (!cellName || pendingCellLocationLookups.has(cellName)) return;
+    pendingCellLocationLookups.add(cellName);
+    try {
+        const res = await fetch(`/api/cell_location/${encodeURIComponent(cellName)}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data && (data.ward || data.province || data.location_str)) {
+                cellLocationClientCache[cellName] = data;
+                const el = document.getElementById(`cem-incident-loc-${ticketKey}`);
+                if (el) {
+                    let t = (typeof cachedTickets !== 'undefined') ? cachedTickets.find((item, idx) => {
+                        const key = (item.phone + '_' + (item.incident_time || item.ticket_code || idx)).replace(/[^a-zA-Z0-9]/g, '_');
+                        return key === ticketKey;
+                    }) : null;
+                    const phone = t ? t.phone : '';
+                    const incTime = t ? t.incident_time : '';
+                    const locText = data.location_str || (data.ward + (data.ward && data.province ? ', ' : '') + data.province);
+                    const quickWardBtn = (data.ward || locText) ? `
+                        <button type="button" class="btn-quick-apply-ward" onclick="quickApplyWardFromCell('${escapeHtml(phone)}', '${escapeHtml(incTime)}', '${escapeHtml(ticketKey)}', '${escapeHtml(data.ward || locText)}', '${escapeHtml(data.province || '')}', this, event)" style="margin-left:4px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:3px; padding:0 4px; font-size:11px; cursor:pointer; line-height:1.2; color:#1d4ed8; font-weight:700; transition:all 0.15s;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(data.ward || locText)}) vào Tóm tắt Nội dung & TTS Mới">⬆️</button>
+                    ` : '';
+                    el.innerHTML = `
+                        <div style="display:flex; align-items:flex-start; gap:4px; margin-top:5px; padding-top:4px; border-top:1px dashed #cbd5e1; font-size:10.5px; color:#334155; line-height:1.35;">
+                            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#0284c7" stroke-width="2" style="flex-shrink:0; margin-top:2px;"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                            <div>
+                                <div style="display:flex; align-items:center; flex-wrap:wrap; gap:3px;">
+                                    <span style="font-weight:700; color:#0284c7;">Địa bàn Cell (${escapeHtml(cellName)}):</span>
+                                    ${quickWardBtn}
+                                </div>
+                                <div style="font-weight:600; color:#0f172a; margin-top:1px;">${escapeHtml(locText)}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+                updateAllWardAudits();
+            } else {
+                cellLocationClientCache[cellName] = { ward: '', province: '', location_str: '' };
+                const spinEl = document.getElementById(`cem-incident-loc-spin-${ticketKey}`);
+                if (spinEl) spinEl.remove();
+            }
+        }
+    } catch (e) {
+        // im lặng
+    } finally {
+        pendingCellLocationLookups.delete(cellName);
+    }
+}
+
+// ==================== QUẢN LÝ ĐỊA BÀN TTS MỚI (DROPDOWN VNP) & ĐỐI SOÁT ====================
+let ttsNewTicketBoundaryCache = {};
+let pendingTtsBoundaryLookups = new Set();
+
+async function triggerAsyncTicketBoundaryLookup(ticketId, ticketKey) {
+    if (!ticketId || pendingTtsBoundaryLookups.has(ticketId)) return;
+    pendingTtsBoundaryLookups.add(ticketId);
+    try {
+        const res = await fetch(`/api/tts_new/ticket_boundary/${ticketId}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data && data.success) {
+                ttsNewTicketBoundaryCache[ticketId] = data;
+                updateAllWardAudits();
+            }
+        }
+    } catch (e) {
+        // im lặng
+    } finally {
+        pendingTtsBoundaryLookups.delete(ticketId);
+    }
+}
+
+function normalizeLocationString(str) {
+    if (!str) return '';
+    return str.toString()
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/\b(phuong|xa|thi tran|quan|huyen|thi xa|thanh pho|tinh|tp\.|tp|p\.|x\.|p\d+)\b/gi, '')
+        .replace(/[^a-z0-9]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function isLocationMatched(ttsWard, ttsProv, actualWard, actualProv) {
+    const normTtsWard = normalizeLocationString(ttsWard);
+    const normActWard = normalizeLocationString(actualWard);
+    if (!normTtsWard || !normActWard) return false;
+
+    // So sánh Phường/Xã: nếu trùng hoặc một bên chứa bên kia
+    const wardMatched = normTtsWard === normActWard || normTtsWard.includes(normActWard) || normActWard.includes(normTtsWard);
+    if (!wardMatched) return false;
+
+    // Nếu cả hai đều có thông tin Tỉnh/TP thì kiểm tra tiếp Tỉnh/TP
+    const normTtsProv = normalizeLocationString(ttsProv);
+    const normActProv = normalizeLocationString(actualProv);
+    if (normTtsProv && normActProv) {
+        const isHcm1 = normTtsProv.includes('ho chi minh') || normTtsProv.includes('hcm') || normTtsProv.includes('sai gon');
+        const isHcm2 = normActProv.includes('ho chi minh') || normActProv.includes('hcm') || normActProv.includes('sai gon');
+        if (isHcm1 && isHcm2) return true;
+
+        const isHn1 = normTtsProv.includes('ha noi') || normTtsProv.includes('hni');
+        const isHn2 = normActProv.includes('ha noi') || normActProv.includes('hni');
+        if (isHn1 && isHn2) return true;
+
+        return normTtsProv === normActProv || normTtsProv.includes(normActProv) || normActProv.includes(normTtsProv);
+    }
+
+    return true;
+}
+
+// Đánh giá kiểm tra tính chính xác của địa bàn Phường/Xã + Tỉnh/TP trên TTS Mới (do VNP nhập qua dropdown)
+// 1. Chưa cập nhật Phường/Xã: Nếu trên TTS mới bỏ trống Phường/Xã
+// 2. Chưa cập nhật Tỉnh/Tp: Nếu trên TTS mới bỏ trống Tỉnh/TP
+// 3. Sai khác so với check CEM&PROFILE Status: Nếu không khớp với bất kỳ trạm nào trong tập hợp trạm CEM (ngày phản ánh), backup Radio Status ngày hiện tại nếu không có dữ liệu CEM.
+// Tuyệt đối KHÔNG lấy dữ liệu vị trí trong phần Nội dung phản ánh!
+function evaluateTicketWardStatus(t, ticketKey, rawCemIncident) {
+    const isTtsNew = (t.source === 'tts_new');
+    
+    // Nếu là TTS Cũ: hiển thị chuỗi địa bàn sẵn có nếu có
+    if (!isTtsNew) {
+        const wardLocation = (t.ward || '').trim();
+        return {
+            status: 'TTS_OLD',
+            badgeHtml: wardLocation ? `
+                <div style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; padding:3px 8px; margin-bottom:7px; display:flex; align-items:center; gap:5px;">
+                    <span style="font-weight:700; font-size:10.5px; color:#475569; white-space:nowrap;">ĐỊA BÀN:</span>
+                    <span id="display-ward-${ticketKey}" style="font-weight:600; font-size:11.5px; color:#475569; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(wardLocation)}">${escapeHtml(wardLocation)}</span>
+                </div>
+            ` : '',
+            compactBadge: wardLocation ? `<span class="badge-status" style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">${escapeHtml(wardLocation)}</span>` : ''
+        };
+    }
+
+    // Với TTS MỚI: CHỈ LẤY Phường/Xã + Tỉnh/TP theo ghi nhận trên TTS Mới (do VNP nhập qua dropdown)
+    const ticketId = t.ticket_id ? Number(t.ticket_id) : 0;
+    let ttsBoundary = ticketId && ttsNewTicketBoundaryCache[ticketId] ? ttsNewTicketBoundaryCache[ticketId] : null;
+
+    // Ưu tiên nạp từ boundary cache OneOSS hoặc các trường boundary đã lưu trong DB
+    let ttsProvinceId = ttsBoundary ? ttsBoundary.province_id : (t.province_id || null);
+    let ttsProvinceName = ttsBoundary ? (ttsBoundary.province_name || '').trim() : (t.province_name || t.province || '').trim();
+    let ttsWardId = ttsBoundary ? ttsBoundary.ward_id : (t.ward_id || null);
+    let ttsWardName = ttsBoundary ? (ttsBoundary.ward_name || '').trim() : (t.ward_name || '').trim();
+
+    // Nếu chưa có boundary cache và chưa có ward_name/province_name, gọi API OneOSS lấy thông tin dropdown
+    if (!ttsBoundary && (!ttsProvinceName || !ttsWardName) && ticketId) {
+        triggerAsyncTicketBoundaryLookup(ticketId, ticketKey);
+        return {
+            status: 'LOADING_TTS',
+            badgeHtml: `
+                <div id="ward-status-box-${ticketKey}" style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:4px; padding:4px 8px; margin-bottom:7px; display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                    <div style="display:flex; align-items:center; gap:5px; min-width:0; flex:1;">
+                        <span style="font-weight:700; font-size:10.5px; color:#475569; white-space:nowrap;">ĐỊA BÀN:</span>
+                        <span style="font-size:11px; color:#64748b; font-style:italic;">(Đang lấy dữ liệu từ TTS Mới...)</span>
+                    </div>
+                </div>
+            `,
+            compactBadge: `<span class="badge-status" style="background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">Đang tải P/Xã...</span>`
+        };
+    }
+
+    // 1. Kiểm tra đã có Phường/Xã hay chưa
+    const hasWard = Boolean(ttsWardName || (ttsWardId && Number(ttsWardId) > 0));
+    // 2. Kiểm tra đã có Tỉnh/TP hay chưa
+    const hasProvince = Boolean(ttsProvinceName || (ttsProvinceId && Number(ttsProvinceId) > 0));
+
+    if (!hasProvince) {
+        return {
+            status: 'NO_PROVINCE',
+            title: 'Chưa cập nhật Tỉnh/Tp',
+            badgeHtml: `
+                <div id="ward-status-box-${ticketKey}" style="background:#fff7ed; border:1px solid #fdba74; border-radius:4px; padding:4px 8px; margin-bottom:7px; display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                    <div style="display:flex; align-items:center; gap:5px; min-width:0; flex:1;">
+                        <span style="font-weight:700; font-size:11px; color:#c2410c; white-space:nowrap;">Chưa cập nhật Tỉnh/Tp</span>
+                    </div>
+                    <button type="button" onclick="editTicketWard(event, '${escapeHtml(t.phone)}', '${escapeHtml(t.incident_time || '')}', '${ticketKey}')" style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:700; color:#c2410c; background:#ffffff; border:1px solid #f97316; padding:1px 8px; border-radius:3px; cursor:pointer; white-space:nowrap;" title="Cập nhật Tỉnh/TP lên TTS Mới">
+                        <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                        Cập nhật
+                    </button>
+                </div>
+            `,
+            compactBadge: `<span class="badge-status" style="background:#fff7ed; color:#c2410c; border:1px solid #fdba74; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">Chưa có Tỉnh/TP</span>`
+        };
+    }
+
+    if (!hasWard) {
+        return {
+            status: 'NO_WARD',
+            title: 'Chưa cập nhật Phường/Xã',
+            badgeHtml: `
+                <div id="ward-status-box-${ticketKey}" style="background:#fff7ed; border:1px solid #fdba74; border-radius:4px; padding:4px 8px; margin-bottom:7px; display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                    <div style="display:flex; align-items:center; gap:5px; min-width:0; flex:1;">
+                        <span style="font-weight:700; font-size:11px; color:#c2410c; white-space:nowrap;">Chưa cập nhật Phường/Xã</span>
+                        <span style="font-size:10px; color:#9a3412; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">(${escapeHtml(ttsProvinceName)})</span>
+                    </div>
+                    <button type="button" onclick="editTicketWard(event, '${escapeHtml(t.phone)}', '${escapeHtml(t.incident_time || '')}', '${ticketKey}')" style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:700; color:#c2410c; background:#ffffff; border:1px solid #f97316; padding:1px 8px; border-radius:3px; cursor:pointer; white-space:nowrap;" title="Cập nhật Phường/Xã lên TTS Mới">
+                        <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                        Cập nhật
+                    </button>
+                </div>
+            `,
+            compactBadge: `<span class="badge-status" style="background:#fff7ed; color:#c2410c; border:1px solid #fdba74; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">Chưa có P/Xã</span>`
+        };
+    }
+
+    // 3. Đã có đầy đủ Phường/Xã + Tỉnh/TP trên TTS Mới
+    const ttsDisplayText = `${ttsWardName}, ${ttsProvinceName}`;
+
+    // Lấy tập hợp Phường/Xã + Tỉnh/TP từ CEM (ngày phản ánh), backup Radio Status ngày hiện tại nếu không có CEM
+    const cemCells = extractAllCellsFromCem(rawCemIncident);
+    let expectedWardsList = [];
+    let isWaitingApi = false;
+
+    if (cemCells.length > 0) {
+        cemCells.forEach(cell => {
+            if (cellLocationClientCache[cell]) {
+                const info = cellLocationClientCache[cell];
+                if (info && info.ward) {
+                    expectedWardsList.push({
+                        ward: info.ward,
+                        province: info.province || '',
+                        source: `CEM (${cell})`
+                    });
+                }
+            } else {
+                isWaitingApi = true;
+                triggerAsyncCellLocationLookup(ticketKey, cell);
+            }
+        });
+    }
+
+    // Backup: Nếu CEM ngày phản ánh không có dữ liệu cell hoặc không lấy được ward, lấy từ Radio Status ngày hiện tại
+    if (expectedWardsList.length === 0 && (!cemCells.length || !isWaitingApi)) {
+        const phone = (t.phone || '').trim();
+        if (cellInfoClientCache[phone]) {
+            const info = cellInfoClientCache[phone];
+            if (info && info.ward) {
+                expectedWardsList.push({
+                    ward: info.ward,
+                    province: info.province || '',
+                    source: `Radio Status (${info.cell_name || 'Hiện tại'})`
+                });
+            }
+        } else if (phone) {
+            isWaitingApi = true;
+            triggerAsyncCellLookup(ticketKey, phone, '');
+        }
+    }
+
+    // Nếu đang chờ API tra cứu từ 1708 (CEM hoặc Radio Status)
+    if (isWaitingApi && expectedWardsList.length === 0) {
+        return {
+            status: 'CHECKING',
+            badgeHtml: `
+                <div id="ward-status-box-${ticketKey}" style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:4px; padding:4px 8px; margin-bottom:7px; display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                    <div style="display:flex; align-items:center; gap:5px; min-width:0; flex:1;">
+                        <span style="font-weight:700; font-size:10.5px; color:#475569; white-space:nowrap;">ĐỊA BÀN:</span>
+                        <span id="display-ward-${ticketKey}" style="font-weight:600; font-size:11px; color:#0369a1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(ttsDisplayText)}">${escapeHtml(ttsDisplayText)}</span>
+                        <span style="font-size:9.5px; color:#94a3b8; font-style:italic;">(Đang đối soát CEM/Profile...)</span>
+                    </div>
+                    <button type="button" onclick="editTicketWard(event, '${escapeHtml(t.phone)}', '${escapeHtml(t.incident_time || '')}', '${ticketKey}')" style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:600; color:#0284c7; background:#ffffff; border:1px solid #bae6fd; padding:1px 6px; border-radius:3px; cursor:pointer; white-space:nowrap;">
+                        <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                        Sửa
+                    </button>
+                </div>
+            `,
+            compactBadge: `<span class="badge-status" style="background:#f1f5f9; color:#0369a1; border:1px solid #bae6fd; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">${escapeHtml(ttsDisplayText)}</span>`
+        };
+    }
+
+    // Nếu không có dữ liệu đối soát từ cả CEM và Radio: hiển thị bình thường
+    if (expectedWardsList.length === 0) {
+        return {
+            status: 'NO_AUDIT_DATA',
+            badgeHtml: `
+                <div id="ward-status-box-${ticketKey}" style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; padding:4px 8px; margin-bottom:7px; display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                    <div style="display:flex; align-items:center; gap:5px; min-width:0; flex:1;">
+                        <span style="font-weight:700; font-size:10.5px; color:#475569; white-space:nowrap;">ĐỊA BÀN:</span>
+                        <span id="display-ward-${ticketKey}" style="font-weight:600; font-size:11.5px; color:#0369a1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(ttsDisplayText)}">${escapeHtml(ttsDisplayText)}</span>
+                    </div>
+                    <button type="button" onclick="editTicketWard(event, '${escapeHtml(t.phone)}', '${escapeHtml(t.incident_time || '')}', '${ticketKey}')" style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:600; color:#0284c7; background:#ffffff; border:1px solid #bae6fd; padding:1px 6px; border-radius:3px; cursor:pointer; white-space:nowrap;">
+                        <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                        Sửa
+                    </button>
+                </div>
+            `,
+            compactBadge: `<span class="badge-status" style="background:#f1f5f9; color:#0369a1; border:1px solid #bae6fd; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">${escapeHtml(ttsDisplayText)}</span>`
+        };
+    }
+
+    // So khớp TTS Mới với tập hợp trạm CEM / Radio: chỉ cần 1 trạm khớp thì là TRUE
+    let isMatched = false;
+    for (const item of expectedWardsList) {
+        if (isLocationMatched(ttsWardName, ttsProvinceName, item.ward, item.province)) {
+            isMatched = true;
+            break;
+        }
+    }
+
+    if (isMatched) {
+        // Hợp lệ (Màu xanh)
+        return {
+            status: 'MATCHED',
+            badgeHtml: `
+                <div id="ward-status-box-${ticketKey}" style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:4px; padding:4px 8px; margin-bottom:7px; display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                    <div style="display:flex; align-items:center; gap:5px; min-width:0; flex:1;">
+                        <span style="font-weight:700; font-size:10.5px; color:#15803d; white-space:nowrap;">ĐỊA BÀN:</span>
+                        <span id="display-ward-${ticketKey}" style="font-weight:600; font-size:11.5px; color:#15803d; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(ttsDisplayText)}">${escapeHtml(ttsDisplayText)}</span>
+                    </div>
+                    <button type="button" onclick="editTicketWard(event, '${escapeHtml(t.phone)}', '${escapeHtml(t.incident_time || '')}', '${ticketKey}')" style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:600; color:#15803d; background:#ffffff; border:1px solid #86efac; padding:1px 6px; border-radius:3px; cursor:pointer; white-space:nowrap;" title="Chỉnh sửa Phường/Xã, Tỉnh/TP và đồng bộ lên TTS Mới">
+                        <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                        Sửa
+                    </button>
+                </div>
+            `,
+            compactBadge: `<span class="badge-status" style="background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">${escapeHtml(ttsDisplayText)}</span>`
+        };
+    } else {
+        // Sai khác (Màu đỏ)
+        const actualNames = Array.from(new Set(expectedWardsList.map(it => it.ward + (it.province ? `, ${it.province}` : '')))).join(' | ');
+        return {
+            status: 'MISMATCH',
+            title: 'Sai khác so với check CEM&PROFILE Status',
+            badgeHtml: `
+                <div id="ward-status-box-${ticketKey}" style="background:#fef2f2; border:1px solid #fca5a5; border-radius:4px; padding:4px 8px; margin-bottom:7px; display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                    <div style="display:flex; flex-direction:column; gap:1px; min-width:0; flex:1;">
+                        <div style="display:flex; align-items:center; gap:5px;">
+                            <span style="font-weight:700; font-size:11px; color:#b91c1c; white-space:nowrap;">Sai khác so với check CEM&PROFILE Status</span>
+                        </div>
+                        <div style="font-size:10px; color:#7f1d1d; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="TTS Mới: ${escapeHtml(ttsDisplayText)} | Trạm ghi nhận: ${escapeHtml(actualNames)}">
+                            TTS Mới: <strong>${escapeHtml(ttsDisplayText)}</strong> | Trạm ghi nhận: <strong>${escapeHtml(actualNames)}</strong>
+                        </div>
+                    </div>
+                    <button type="button" onclick="editTicketWard(event, '${escapeHtml(t.phone)}', '${escapeHtml(t.incident_time || '')}', '${ticketKey}')" style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:700; color:#b91c1c; background:#ffffff; border:1px solid #ef4444; padding:2px 8px; border-radius:3px; cursor:pointer; white-space:nowrap;" title="Chỉnh sửa Phường/Xã cho đúng với dữ liệu CEM / Radio Status">
+                        <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                        Sửa
+                    </button>
+                </div>
+            `,
+            compactBadge: `<span class="badge-status" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;" title="Sai khác so với check CEM&PROFILE Status (Trạm: ${escapeHtml(actualNames)})">Sai khác CEM/Profile</span>`
+        };
+    }
+}
+
+function updateAllWardAudits() {
+    if (!Array.isArray(cachedTickets) || cachedTickets.length === 0) return;
+    cachedTickets.forEach((t, idx) => {
+        if (t.source !== 'tts_new') return;
+        const ticketKey = (t.phone + '_' + (t.incident_time || t.ticket_code || idx)).replace(/[^a-zA-Z0-9]/g, '_');
+        const box = document.getElementById(`ward-status-box-${ticketKey}`);
+        const compactBadge = document.getElementById(`compact-ward-badge-${ticketKey}`);
+        if (!box && !compactBadge) return;
+
+        let rawCemIncident = (t.cem_data_incident || '').trim();
+        if (!rawCemIncident && t.cem_data && t.cem_data !== '--') {
+            const rawCem = t.cem_data.trim();
+            if (rawCem.includes('[TIẾP NHẬN]') && rawCem.includes('[GẦN NHẤT]')) {
+                const parts = rawCem.split('[GẦN NHẤT]');
+                rawCemIncident = parts[0].replace('[TIẾP NHẬN]', '').trim();
+            } else {
+                rawCemIncident = 'Chưa quét theo ngày tiếp nhận (Bấm Tiền kiểm lại)';
+            }
+        }
+
+        const audit = evaluateTicketWardStatus(t, ticketKey, rawCemIncident);
+        if (box) {
+            box.outerHTML = audit.badgeHtml;
+        }
+        if (compactBadge) {
+            compactBadge.innerHTML = audit.compactBadge;
+        }
+    });
+}
+
+// =========================================================================
+// DANH MỤC NGUYÊN NHÂN SỰ CỐ CHUẨN ONEOSS TTS (Áp dụng bước 2.6 & Đóng phiếu)
+// =========================================================================
+const TTS_INCIDENT_CAUSES = [
+    "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+    "Thông tin đầu vào chưa chính xác, trùng lặp",
+    "Lỗi do gói cước",
+    "Lỗi profile thuê bao",
+    "Do thiết bị đầu cuối",
+    "Khách hàng theo dõi thêm",
+    "Lỗi do VNPT-VinaPhone khai báo dịch vụ cho khách hàng"
+];
+
+function getPredictedIncidentCause(status) {
+    if (!status) return "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường";
+    const s = String(status).toUpperCase().trim();
+    if (s.includes("BÌNH THƯỜNG") || s.includes("BINH THUONG") || s.includes("ĐẢM BẢO") || s.includes("ĐỦ ĐIỀU KIỆN ĐÓNG")) {
+        return "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường";
+    }
+    if (s.includes("BÓP BĂNG THÔNG") || s.includes("LƯU LƯỢNG YẾU") || s.includes("BẮT SÓNG 4G KÉM") || s.includes("KHÔNG BẮT ĐƯỢC SÓNG 4G") || s.includes("CHẬP CHỜN")) {
+        return "Thông tin đầu vào chưa chính xác, trùng lặp";
+    }
+    if (s.includes("GÓI") || s.includes("PAYGO") || s.includes("HẾT HẠN") || s.includes("VD2")) {
+        return "Lỗi do gói cước";
+    }
+    if (s.includes("PROFILE LẠ") || s.includes("CHƯA KHAI BÁO PROFILE")) {
+        return "Lỗi profile thuê bao";
+    }
+    if (s.includes("THIẾT BỊ") || s.includes("VPN") || s.includes("1.1.1.1") || s.includes("OFF THIẾT BỊ") || s.includes("TẮT THIẾT BỊ") || s.includes("KHÔNG CÓ LƯU LƯỢNG")) {
+        return "Do thiết bị đầu cuối";
+    }
+    if (s.includes("THEO DÕI")) {
+        return "Khách hàng theo dõi thêm";
+    }
+    if (s.includes("HSS CHƯA CÓ 5G") || s.includes("KHÓA GPRS") || s.includes("KHAI BÁO")) {
+        return "Lỗi do VNPT-VinaPhone khai báo dịch vụ cho khách hàng";
+    }
+    return "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường";
+}
+
+function handleCauseChange(ticketKey, phone, incidentTime, val) {
+    updateTicket(phone, incidentTime, 'incident_cause', val);
+    const item = cachedTickets.find(t => {
+        const key = (t.phone + '_' + (t.incident_time || t.ticket_code || '')).replace(/[^a-zA-Z0-9]/g, '_');
+        return key === ticketKey || t.phone === phone;
+    });
+    if (item) {
+        item.incident_cause = val;
+    }
+}
+
+function formatPrecheckTimeDisplay(precheckedAtStr) {
+    if (!precheckedAtStr || precheckedAtStr === '--' || precheckedAtStr === 'null') {
+        return '<span style="color:#94a3b8; font-style:italic;">--</span>';
+    }
+    try {
+        const cleaned = String(precheckedAtStr).replace('T', ' ').trim();
+        const parts = cleaned.split(' ');
+        if (parts.length >= 2) {
+            const dParts = parts[0].split('-');
+            const timePart = parts[1].split('.')[0];
+            const datePart = (dParts.length === 3) ? `${dParts[2]}/${dParts[1]}` : parts[0];
+            return `<span title="Thời gian tiền kiểm gần nhất: ${escapeHtml(cleaned)} (UTC+7)">${escapeHtml(timePart)} ${escapeHtml(datePart)}</span>`;
+        }
+        return `<span>${escapeHtml(cleaned)}</span>`;
+    } catch (e) {
+        return `<span>${escapeHtml(String(precheckedAtStr))}</span>`;
+    }
+}
+
+function renderPrecheckBtnHtml(phone, incidentTime, precheckedAtStr) {
+    const timeDisplay = formatPrecheckTimeDisplay(precheckedAtStr);
+    return `
+        <div style="display:inline-flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; vertical-align:middle;">
+            <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff; line-height:1.2;" onclick="precheckSingleTicket('${escapeHtml(phone)}', '${escapeHtml(incidentTime || '')}', this)" title="Tiền kiểm tra lại Core tức thì">Tiền kiểm lại</button>
+            <div style="font-size:9.5px; color:#64748b; font-family:'JetBrains Mono', monospace; font-weight:600; text-align:center; line-height:1; white-space:nowrap;">${timeDisplay}</div>
+        </div>
+    `;
+}
+
+function formatClosedTimeDisplay(closedAtStr, closedBy, ticketStatus) {
+    if (!closedAtStr || closedAtStr === '--') {
+        return '<div style="text-align:center;"><span style="color:#94a3b8; font-style:italic;">--</span></div>';
+    }
+    let timePart = '';
+    let datePart = '';
+    try {
+        const cleaned = String(closedAtStr).replace('T', ' ').trim();
+        const parts = cleaned.split(' ');
+        if (parts.length >= 2) {
+            const dParts = parts[0].split('-');
+            if (dParts.length === 3) {
+                datePart = `${dParts[2]}/${dParts[1]}/${dParts[0]}`;
+            } else {
+                datePart = parts[0];
+            }
+            timePart = parts[1].split('.')[0];
+        } else {
+            timePart = cleaned;
+        }
+    } catch (e) {
+        timePart = String(closedAtStr);
+    }
+
+    let actorHtml = '';
+    if (closedBy && closedBy !== 'null' && String(closedBy).trim()) {
+        actorHtml = `<span style="font-size:9.5px; font-weight:600; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:3px; max-width:130px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="KTV thực hiện: ${escapeHtml(closedBy)}">${escapeHtml(closedBy)}</span>`;
+    } else {
+        actorHtml = `<span style="font-size:9.5px; font-weight:600; color:#15803d; background:#dcfce7; border:1px solid #86efac; padding:1px 5px; border-radius:3px;">Đã đóng</span>`;
+    }
+
+    let stepBadge = '';
+    const stLower = String(ticketStatus || '').toLowerCase();
+    if (stLower.includes('5.1')) {
+        stepBadge = `<span style="font-size:9px; font-weight:700; color:#b45309; background:#fef3c7; border:1px solid #fde68a; padding:1px 4px; border-radius:2px;" title="Đóng hướng 5.1 Xây dựng PA xử lý">Đóng 5.1</span>`;
+    } else if (stLower.includes('2.6')) {
+        stepBadge = `<span style="font-size:9px; font-weight:700; color:#15803d; background:#dcfce7; border:1px solid #86efac; padding:1px 4px; border-radius:2px;" title="Đóng dứt điểm bước 2.6">Đóng 2.6</span>`;
+    }
+
+    return `
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; text-align:center; padding:1px 0;">
+            <div style="display:inline-flex; align-items:center; gap:4px;">
+                <span style="font-family:'JetBrains Mono', monospace; font-weight:700; font-size:11.5px; color:#0f172a;">${escapeHtml(timePart)}</span>
+                ${datePart ? `<span style="font-size:10px; color:#64748b; font-weight:500;">${escapeHtml(datePart)}</span>` : ''}
+            </div>
+            <div style="display:inline-flex; align-items:center; justify-content:center; gap:3px; flex-wrap:wrap;">
+                ${actorHtml}
+                ${stepBadge}
+            </div>
+        </div>
+    `;
+}
+
 function renderTicketsTable(force = false) {
     const tbody = document.getElementById('ticketsBody');
     const pagContainer = document.getElementById('ticketsPaginationContainer');
@@ -1269,7 +2119,7 @@ function renderTicketsTable(force = false) {
 
     // Cột Nhận Định chỉ hiển thị cho phân hệ Mobile Internet (Data)
     const isDataService = (currentService === 'data');
-    const totalCols = isDataService ? 13 : 12;
+    const totalCols = isDataService ? 12 : 11;
 
     const thStatus = document.getElementById('thStatus');
     if (thStatus) {
@@ -1283,6 +2133,19 @@ function renderTicketsTable(force = false) {
     const thTicketCode = document.getElementById('thTicketCode');
     if (thTicketCode) {
         thTicketCode.style.display = 'table-cell';
+    }
+
+    const thAiSummary = document.getElementById('thAiSummary');
+    if (thAiSummary) {
+        if (currentTableTab === 'da_dong') {
+            thAiSummary.innerText = 'Thời Điểm Đóng';
+            thAiSummary.style.textAlign = 'center';
+            thAiSummary.title = 'Thời gian KTV bấm đóng 2.6 / 5.1 hoặc hệ thống tự động đóng';
+        } else {
+            thAiSummary.innerText = 'Tóm Tắt Nội Dung PAKH';
+            thAiSummary.style.textAlign = '';
+            thAiSummary.title = '';
+        }
     }
     const ticketCodeDisplay = '';
 
@@ -1380,6 +2243,10 @@ function renderTicketsTable(force = false) {
             !pkgTitleLower.includes('cvqt')
         );
         const isOtherPakh = !isDataTicket || (currentService === 'voice_sms');
+        const isSmsTicket = (currentService === 'sms') ||
+            (t.service_type === 'sms') ||
+            pkgTitleLower.includes('tin nhắn') ||
+            pkgTitleLower.includes('sms');
 
         let stepName = t.step_name || '';
         if (!stepName && t.ticket_code && t.ticket_code.includes('\n')) {
@@ -1398,7 +2265,7 @@ function renderTicketsTable(force = false) {
         const isStep26 = rawStepCheck.includes('2.6') || (t.ticket_status === 'Chờ đóng lần 2');
         const isStep24 = !isStep23 && !isStep26;
 
-        if (t.ticket_status === 'Đã đóng' || t.ticket_status === 'Da dong') {
+        if (t.ticket_status === 'Đã đóng' || t.ticket_status === 'Da dong' || (t.ticket_status && t.ticket_status.includes('Đã đóng'))) {
             actionHtml = `
                         <div style="display:flex; flex-direction:column; align-items:center; gap:3px;">
                             <span class="badge-status badge-green" style="font-weight:700; padding:4px 8px; font-size:11px;">ĐÃ ĐÓNG</span>
@@ -1429,7 +2296,7 @@ function renderTicketsTable(force = false) {
 
                 actionHtml = `
                     <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                        <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Tiền kiểm lại</button>
+                        ${renderPrecheckBtnHtml(t.phone, t.incident_time, t.prechecked_at || t.updated_at)}
                         <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; display:inline-flex; align-items:center; gap:3px;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở trang chi tiết phiếu trên TTS Mới">
                             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
                             Mở TTS
@@ -1449,7 +2316,7 @@ function renderTicketsTable(force = false) {
 
                 actionHtml = `
                     <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                        <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Tiền kiểm lại</button>
+                        ${renderPrecheckBtnHtml(t.phone, t.incident_time, t.prechecked_at || t.updated_at)}
                         <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; display:inline-flex; align-items:center; gap:3px;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở trang chi tiết phiếu trên TTS Mới">
                             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
                             Mở TTS
@@ -1468,19 +2335,19 @@ function renderTicketsTable(force = false) {
                 ` : '';
 
                 compactActionHtml = `
-                    <button class="btn-close-green" style="padding:2px 8px; font-size:10px; height:24px; line-height:1; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '2.6')" title="Chuyển phiếu sang bước 2.6">
+                    <button class="btn-move-2-6" style="padding:2px 8px; font-size:10px; height:24px; line-height:1; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '2.6')" title="Chuyển phiếu sang bước 2.6">
                         Chuyển 2.6
                     </button>
                 `;
 
                 actionHtml = `
                     <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                        <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Tiền kiểm lại</button>
+                        ${renderPrecheckBtnHtml(t.phone, t.incident_time, t.prechecked_at || t.updated_at)}
                         <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; display:inline-flex; align-items:center; gap:3px;" onclick="openTtsNewTicketDetail('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this)" title="Mở trang chi tiết phiếu trên TTS Mới">
                             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
                             Mở TTS
                         </button>
-                        <button class="btn-close-green" style="padding:5px 10px; font-size:11px; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '2.6')" title="Chuyển phiếu sang bước 2.6 để đóng trên mạng lưới">
+                        <button class="btn-move-2-6" style="padding:5px 10px; font-size:11px; ${reopenCount > 0 ? 'background:#ea580c; border-color:#c2410c;' : ''}" onclick="closeTtsNewTicketApi('${escapeHtml(cleanTicketCode)}', '${t.phone}', '${t.incident_time}', this, ${reopenCount}, '2.6')" title="Chuyển phiếu sang bước 2.6 để đóng trên mạng lưới">
                             Chuyển 2.6
                         </button>
                         ${extraClose51Btn}
@@ -1493,22 +2360,22 @@ function renderTicketsTable(force = false) {
                 ? `<span class="badge-status badge-yellow" style="font-size:10px; padding:2px 6px; font-weight:700; margin-bottom:2px;">CHƯA ĐÓNG</span>`
                 : '';
             if (isOtherPakh) {
-                // Thoại / SMS TTS Cũ:
+                // Thoại / SMS / Gói cước / PA Khác TTS Cũ:
                 compactActionHtml = `
-                    <button class="btn-manual-orange" style="padding:2px 6px; font-size:10px; height:24px; line-height:1;" onclick="manualCloseTtsOldTicket('${t.phone}', '${escapeHtml(cleanTicketCode)}', this)" title="Mở Xử lý sự cố trên TTS Cũ để đóng thủ công">
-                        Đóng thủ công
+                    <button class="btn-close-green" style="padding:2px 7px; font-size:10px; height:24px; line-height:1;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu TTS Cũ">
+                        Đóng phiếu
                     </button>
                 `;
                 actionHtml = `
                     <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                        <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Tiền kiểm lại</button>
+                        ${renderPrecheckBtnHtml(t.phone, t.incident_time, t.prechecked_at || t.updated_at)}
                         <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; display:inline-flex; align-items:center; gap:3px;" onclick="manualCloseTtsOldTicket('${t.phone}', '${escapeHtml(cleanTicketCode)}', this)" title="Mở trang Xử lý sự cố TTS Cũ">
                             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
                             Mở TTS Cũ
                         </button>
-                        <button class="btn-manual-orange" style="padding:5px 12px; font-size:11.5px;" onclick="manualCloseTtsOldTicket('${t.phone}', '${escapeHtml(cleanTicketCode)}', this)" title="Chuyển sang trang Xử lý sự cố trên TTS Cũ để đóng thủ công">
-                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
-                            Đóng thủ công
+                        <button class="btn-close-green" style="padding:5px 12px; font-size:11.5px;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu ngay">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                            Đóng phiếu
                         </button>
                     </div>
                 `;
@@ -1516,26 +2383,20 @@ function renderTicketsTable(force = false) {
                 // Mobile Internet TTS Cũ:
                 compactActionHtml = `
                     <button class="btn-close-green" style="padding:2px 7px; font-size:10px; height:24px; line-height:1;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu TTS Cũ">
-                        ${t.can_close ? 'Đóng phiếu' : 'Đóng'}
+                        Đóng phiếu
                     </button>
                 `;
                 actionHtml = `
                     <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                        <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff;" onclick="precheckSingleTicket('${t.phone}', '${t.incident_time}', this)" title="Tiền kiểm tra lại Core tức thì">⚡ Tiền kiểm lại</button>
+                        ${renderPrecheckBtnHtml(t.phone, t.incident_time, t.prechecked_at || t.updated_at)}
                         <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; display:inline-flex; align-items:center; gap:3px;" onclick="manualCloseTtsOldTicket('${t.phone}', '${escapeHtml(cleanTicketCode)}', this)" title="Mở trang Xử lý sự cố TTS Cũ">
                             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
                             Mở TTS Cũ
                         </button>
-                        ${t.can_close ? `
-                            <button class="btn-close-green" style="padding:5px 12px; font-size:11.5px;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu ngay">
-                                <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                                Đóng phiếu
-                            </button>
-                        ` : `
-                            <button class="btn-close-green" style="padding:5px 12px; font-size:11.5px;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="KTV kiểm tra ý kiến phân tích & phương án rồi bấm để đóng thủ công qua API">
-                                Đóng thủ công
-                            </button>
-                        `}
+                        <button class="btn-close-green" style="padding:5px 12px; font-size:11.5px;" onclick="closeTtsOldApiTicket('${t.phone}', '${t.incident_time}', this)" title="Bấm để đóng phiếu ngay">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                            Đóng phiếu
+                        </button>
                     </div>
                 `;
             }
@@ -1551,15 +2412,58 @@ function renderTicketsTable(force = false) {
             t.ai_summary.includes('Gói cước sử dụng:') ||
             t.ai_summary.toLowerCase().includes('tình trạng')
         );
+
+        // Parse dữ liệu CEM để phục vụ đối soát địa bàn và hiển thị
+        let rawCemIncident = (t.cem_data_incident || '').trim();
+        let rawCemRecent = (t.cem_data_recent || '').trim();
+        if (!rawCemIncident && !rawCemRecent && t.cem_data && t.cem_data !== '--') {
+            const rawCem = t.cem_data.trim();
+            if (rawCem.includes('[TIẾP NHẬN]') && rawCem.includes('[GẦN NHẤT]')) {
+                const parts = rawCem.split('[GẦN NHẤT]');
+                rawCemIncident = parts[0].replace('[TIẾP NHẬN]', '').trim();
+                rawCemRecent = (parts[1] || '').trim();
+            } else {
+                rawCemRecent = rawCem;
+                rawCemIncident = 'Chưa quét theo ngày tiếp nhận (Bấm Tiền kiểm lại)';
+            }
+        }
+
+        const boundaryObj = (t.source === 'tts_new' && t.ticket_id) ? ttsNewTicketBoundaryCache[Number(t.ticket_id)] : null;
+        const wardLocation = boundaryObj?.display_text || (t.source === 'tts_new' ? '' : (t.ward || '').trim());
+        const wardAudit = evaluateTicketWardStatus(t, ticketKey, rawCemIncident);
+        const wardBadgeHtml = wardAudit.badgeHtml;
+        const compactWardBadgeHtml = `<div id="compact-ward-badge-${ticketKey}" style="margin-bottom:${wardAudit.compactBadge ? '3px' : '0'}; line-height:1.2; display:${wardAudit.compactBadge ? 'block' : 'none'};">${wardAudit.compactBadge || ''}</div>`;
+
+        const ccosProcessingHtml = t.processing_content ? `
+            <details style="margin-top:5px; font-size:10.5px; border-top:1px dashed #cbd5e1; padding-top:4px;">
+                <summary style="cursor:pointer; color:#0d9488; font-weight:600;">Xem nội dung xử lý CCOS</summary>
+                <div style="margin-top:4px; max-height:90px; overflow-y:auto; color:#0f766e; font-style:normal; line-height:1.35; background:#f0fdfa; padding:4px 6px; border-radius:4px; border:1px solid #ccfbf1; font-family:'JetBrains Mono', Consolas, monospace; font-size:10.5px; white-space:pre-wrap;">${escapeHtml(t.processing_content)}</div>
+            </details>
+        ` : '';
+
         if (hasStructuredSummary) {
             const cleanSummaryText = t.ai_summary.replace(/\[?AI\]?[:\-\s]*/gi, '').trim();
             const lines = cleanSummaryText.split('\n').map(l => l.trim().replace(/^\[?AI\]?[:\-\s]*/gi, '')).filter(l => l.length > 0);
-            compactSummaryTooltip = lines.join(' | ');
-            compactSummaryHtml = escapeHtml(lines.join(' • '));
+            compactSummaryTooltip = (wardLocation ? `[${wardLocation}] ` : '') + lines.join(' | ');
+            const summaryText = lines.join(' • ');
+            compactSummaryHtml = `
+                <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding:1px 0;">
+                    ${compactWardBadgeHtml}
+                    <div class="compact-ellipsis" style="font-size:11px; color:#1e293b; line-height:1.35; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(compactSummaryTooltip)}">
+                        ${escapeHtml(summaryText)}
+                    </div>
+                </div>
+            `;
             aiSummaryHtml = `
                         <div style="font-size:11.5px; line-height:1.45;">
-                            <div style="display:inline-flex; align-items:center; gap:4px; margin-bottom:6px; font-size:10.5px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:2px 8px; border-radius:4px;">
-                                Tóm Tắt Nội Dung
+                            ${wardBadgeHtml}
+                            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                                <div style="display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:2px 8px; border-radius:4px;">
+                                    Tóm Tắt Nội Dung
+                                </div>
+                                <button type="button" onclick="openAiTeachModal(event, '${escapeHtml(t.phone || '')}', '${escapeHtml(t.incident_time || '')}', ${t.ticket_id || 0})" style="display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:600; color:#0284c7; background:#ffffff; border:1px solid #bae6fd; padding:1px 6px; border-radius:4px; cursor:pointer; transition:all 0.15s;" title="Chỉnh sửa & Lưu làm mẫu cho AI học theo" onmouseover="this.style.background='#e0f2fe'" onmouseout="this.style.background='#ffffff'">
+                                    Dạy AI
+                                </button>
                             </div>
                             ${lines.map(line => {
                 const colonIdx = line.indexOf(':');
@@ -1576,14 +2480,75 @@ function renderTicketsTable(force = false) {
                                     <div style="margin-top:4px; max-height:85px; overflow-y:auto; color:#64748b; font-style:italic; line-height:1.35; background:#f8fafc; padding:4px 6px; border-radius:4px; border:1px solid #e2e8f0;">${escapeHtml(t.ticket_content)}</div>
                                 </details>
                             ` : ''}
+                            ${ccosProcessingHtml}
                         </div>
                     `;
         } else {
             const content = t.ticket_content || (t.ai_summary && t.ai_summary !== 'null' ? t.ai_summary : '');
             if (content) {
-                compactSummaryTooltip = content;
-                compactSummaryHtml = escapeHtml(content.replace(/\n/g, ' '));
-                aiSummaryHtml = `<div style="font-size:11.5px; color:#1e293b; line-height:1.45; word-break:break-word;">${escapeHtml(content)}</div>`;
+                compactSummaryTooltip = (wardLocation ? `[${wardLocation}] ` : '') + content;
+                const summaryText = content.replace(/\n/g, ' ');
+                compactSummaryHtml = `
+                    <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding:1px 0;">
+                        ${compactWardBadgeHtml}
+                        <div class="compact-ellipsis" style="font-size:11px; color:#1e293b; line-height:1.35; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(compactSummaryTooltip)}">
+                            ${escapeHtml(summaryText)}
+                        </div>
+                    </div>
+                `;
+                aiSummaryHtml = `
+                    <div style="font-size:11.5px; color:#1e293b; line-height:1.45; word-break:break-word;">
+                        ${wardBadgeHtml}
+                        ${escapeHtml(content)}
+                        <div style="margin-top:4px;">
+                            <button type="button" onclick="openAiTeachModal(event, '${escapeHtml(t.phone || '')}', '${escapeHtml(t.incident_time || '')}', ${t.ticket_id || 0})" style="display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:600; color:#0284c7; background:#ffffff; border:1px solid #bae6fd; padding:1px 6px; border-radius:4px; cursor:pointer;" title="Tạo mẫu chuẩn 6 mục cho AI học">
+                                Dạy AI
+                            </button>
+                        </div>
+                        ${ccosProcessingHtml}
+                    </div>`;
+            } else if (ccosProcessingHtml) {
+                aiSummaryHtml = `<div style="font-size:11.5px; color:#1e293b; line-height:1.45;">${wardBadgeHtml}${ccosProcessingHtml}</div>`;
+            }
+        }
+
+        // Bóc tách thông tin File đính kèm từ CCOS (đặc biệt cho PAKH Cuộc gọi TTS Mới)
+        const isCallService = (currentService === 'call' || currentService === 'voice' || (t.package_title && (t.package_title.toLowerCase().includes('cuộc gọi') || t.package_title.toLowerCase().includes('thoại'))));
+        let ccosAttachmentHtml = '';
+        let ccosData = null;
+        if (t.ccos_attachments) {
+            try {
+                ccosData = typeof t.ccos_attachments === 'string' ? JSON.parse(t.ccos_attachments) : t.ccos_attachments;
+            } catch (e) {
+                ccosData = null;
+            }
+        }
+        if (isCallService || ccosData) {
+            if (ccosData && ccosData.has_file && Array.isArray(ccosData.files) && ccosData.files.length > 0) {
+                ccosAttachmentHtml = `
+                    <div style="margin-top:8px; padding:7px 10px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; font-size:11.5px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <span style="font-weight:700; color:#1e40af; display:inline-flex; align-items:center; gap:4px;">
+                                📎 File đính kèm CCOS ${ccosData.kn_code ? `(${escapeHtml(ccosData.kn_code)})` : ''}:
+                            </span>
+                            <span style="font-size:10px; color:#1d4ed8; background:#dbeafe; padding:1px 6px; border-radius:3px; font-weight:700;">${ccosData.files.length} file</span>
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                            ${ccosData.files.map(f => `
+                                <a href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7; font-weight:600; text-decoration:underline; word-break:break-all; display:inline-flex; align-items:center; gap:4px;" title="Bấm để tải/xem file trên CCOS">
+                                    📄 ${escapeHtml(f.name)} <span style="font-size:10.5px; color:#64748b;">↗</span>
+                                </a>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+                compactSummaryHtml = `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-weight:700; font-size:9.5px; padding:1px 5px; border-radius:3px; margin-right:4px;" title="Có ${ccosData.files.length} file đính kèm trên CCOS">📎 File (${ccosData.files.length})</span>` + compactSummaryHtml;
+            } else {
+                ccosAttachmentHtml = `
+                    <div style="margin-top:8px; padding:5px 8px; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:4px; font-size:11px; color:#64748b; display:inline-flex; align-items:center; gap:5px;">
+                        📎 File đính kèm: <span style="font-style:italic;">Không có file đính kèm</span>
+                    </div>
+                `;
             }
         }
 
@@ -1630,6 +2595,90 @@ function renderTicketsTable(force = false) {
             } else {
                 incTimeHtml = `<span style="color:#b45309; font-weight:700; font-size:11px;">${escapeHtml(t.incident_time)}</span>`;
             }
+        }
+
+        function refineBtoolsWithSapc(btoolsStr, sapcItems, ticketObj) {
+            if (!btoolsStr) return btoolsStr;
+
+            let validSapcNames = [];
+            if (sapcItems && Array.isArray(sapcItems)) {
+                validSapcNames = sapcItems
+                    .map(item => (item.name || '').toUpperCase().trim())
+                    .filter(n => n && !n.includes('PAYGO') && n !== 'M0' && !n.includes('KHÔNG CÓ GÓI'));
+            }
+
+            // Nếu SAPC chưa có gói, trích xuất gói từ ai_summary hoặc ticket_content của phiếu
+            if (validSapcNames.length === 0 && ticketObj) {
+                const aiSum = ticketObj.ai_summary || '';
+                const mAi = aiSum.match(/1\.\s*Gói\s*cước\s*sử\s*dụng\s*:\s*([^\n\r]+)/i);
+                if (mAi) {
+                    const v = mAi[1].trim();
+                    const vLow = v.toLowerCase();
+                    if (v && !vLow.includes('không đề cập') && !vLow.includes('không có') && !vLow.includes('chưa kiểm tra') && !vLow.includes('chưa đăng ký') && !vLow.includes('m0') && !vLow.includes('paygo')) {
+                        validSapcNames.push(v.toUpperCase());
+                    }
+                }
+                if (validSapcNames.length === 0 && ticketObj.ticket_content) {
+                    const mTc = ticketObj.ticket_content.match(/(?:dùng gói|gói cước|gói)\s*[:=]\s*([A-Za-z0-9_]+)/i);
+                    if (mTc) {
+                        const v = mTc[1].trim();
+                        if (v && !['không', 'm0', 'paygo'].includes(v.toLowerCase())) {
+                            validSapcNames.push(v.toUpperCase());
+                        }
+                    }
+                }
+            }
+            
+            if (validSapcNames.length === 0) {
+                return btoolsStr;
+            }
+
+            return btoolsStr.replace(/([A-Za-z0-9_]+)\s*\(([^)]+)\)(\s*\(max\s*[^)]+\))?/g, (fullMatch, groupName, innerContent, maxPart) => {
+                if (!innerContent.includes(',') && !innerContent.includes('...')) {
+                    return fullMatch;
+                }
+                const candidates = innerContent.split(/[,;/]/)
+                    .map(c => c.replace(/[\.\.\.\(\)]/g, '').trim())
+                    .filter(c => c.length >= 2 && !['GÓI', 'DATA', 'NGÀY', 'TUẦN', 'THÁNG'].includes(c.toUpperCase()))
+                    .sort((a, b) => b.length - a.length);
+
+                let matched = null;
+                for (const cand of candidates) {
+                    const candUpper = cand.toUpperCase();
+                    for (const sName of validSapcNames) {
+                        if (sName.includes(candUpper)) {
+                            matched = cand;
+                            break;
+                        }
+                        const sCore = sName.replace(/^(MI_|DC_|KM_|D_)/, '');
+                        if (sCore.includes(candUpper) || sCore.startsWith(candUpper)) {
+                            matched = cand;
+                            break;
+                        }
+                    }
+                    if (matched) break;
+                }
+
+                // Nếu không khớp candidate con, kiểm tra tên nhóm (VD: BIG khớp với BIGKM_6GBN)
+                if (!matched && groupName) {
+                    const grpUpper = groupName.toUpperCase();
+                    for (const sName of validSapcNames) {
+                        const sCore = sName.replace(/^(MI_|DC_|KM_|D_)/, '');
+                        if (sCore.startsWith(grpUpper) || sName.includes(grpUpper)) {
+                            matched = sCore;
+                            break;
+                        }
+                    }
+                    if (!matched && validSapcNames.length === 1) {
+                        matched = validSapcNames[0].replace(/^(MI_|DC_|KM_|D_)/, '');
+                    }
+                }
+
+                if (matched) {
+                    return matched + (maxPart || '');
+                }
+                return fullMatch;
+            });
         }
 
         let pkgHtml = '--';
@@ -1742,12 +2791,13 @@ function renderTicketsTable(force = false) {
             let gridHtml = '';
             if (radioVal || hssVal || ipVal || namVal || sapcItems.length > 0 || btoolsLines.length > 0) {
                 const hssDigits = (hssVal || '').replace(/\D/g, '');
-                const isStrangeHss = hssDigits.length >= 3 || hssVal.includes('PROFILE LẠ');
+                const isStrangeHss = (hssDigits.length >= 3 && ((ipVal || '').startsWith('113.') || (ipVal || '').startsWith('172.') || (ipVal || '').startsWith('192.168.'))) || hssVal.includes('PROFILE LẠ');
                 gridHtml = `
                             <div class="telecom-diag-grid">
                                 <div class="diag-metric-item">
                                     <span class="diag-metric-label">RADIO STATUS</span>
-                                    <span class="diag-metric-val val-radio">${escapeHtml(radioVal || '--')}</span>
+                                    <span class="diag-metric-val val-radio" id="val-radio-${ticketKey}">${renderRadioStatus(radioVal, ticketKey, t.phone)}</span>
+                                    <div id="radio-loc-${ticketKey}" class="radio-location-text">${renderRadioLocation(t.phone, ticketKey, t.incident_time)}</div>
                                 </div>
                                 <div class="diag-metric-item">
                                     <span class="diag-metric-label">HSS PROFILE</span>
@@ -1788,7 +2838,7 @@ function renderTicketsTable(force = false) {
                     : `<span style="background:#dcfce7; color:#15803d; border:1px solid #86efac; font-size:11px; padding:3px 8px; border-radius:4px; display:inline-block; font-weight:700;">NAM: 0 (MỞ DỊCH VỤ)</span>`;
 
                 const hssDigits = (hssVal || '').replace(/\D/g, '');
-                const isStrangeHss = hssDigits.length >= 3 || hssVal.includes('PROFILE LẠ');
+                const isStrangeHss = (hssDigits.length >= 3 && ((ipVal || '').startsWith('113.') || (ipVal || '').startsWith('172.') || (ipVal || '').startsWith('192.168.'))) || hssVal.includes('PROFILE LẠ');
                 let hssBadge = '';
                 if (isStrangeHss) {
                     hssBadge = `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:11px; padding:2px 7px; border-radius:4px; display:inline-block; font-weight:700;" title="Cảnh báo HSS Profile lạ: có thể lỗi cấu hình hoặc chưa kích hoạt VoLTE đúng cách">⚠️ HSS: ${escapeHtml(hssVal)} (PROFILE LẠ)</span>`;
@@ -1843,13 +2893,14 @@ function renderTicketsTable(force = false) {
                 }
                 compactProfileHtml = cParts.join(' | ');
             } else {
+                let refinedBtoolsText = btoolsLines.length > 0 ? refineBtoolsWithSapc(btoolsLines.join(' '), sapcItems, t) : '';
                 let btoolsHtml = `
                     <div style="font-size:10.5px; line-height:1.4; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; margin-top:4px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
                             <strong style="color:#b45309; font-size:10px; text-transform:uppercase; letter-spacing:0.03em;">Data Usage (BTools):</strong>
                             <a href="${btoolsUrl}" target="_blank" style="font-size:10.5px; color:#b45309; font-weight:700; text-decoration:none;" title="Tra cứu BTools cho thuê bao ${t.phone}">Xem BTools ↗</a>
                         </div>
-                        <span style="color:#334155;">${btoolsLines.length > 0 ? escapeHtml(btoolsLines.join(' ')) : '<span style="color:#94a3b8; font-style:italic;">Chưa có dữ liệu btools hoặc không phát sinh</span>'}</span>
+                        <span style="color:#334155;">${refinedBtoolsText ? escapeHtml(refinedBtoolsText) : '<span style="color:#94a3b8; font-style:italic;">Chưa có dữ liệu btools hoặc không phát sinh</span>'}</span>
                     </div>
                 `;
 
@@ -1859,12 +2910,20 @@ function renderTicketsTable(force = false) {
                 let cParts = [];
                 if (raw.includes('Radio:')) {
                     const m = raw.match(/Radio:\s*([^\|\n\\]+)/);
-                    if (m) cParts.push(`<span style="color:#0369a1; font-weight:700; font-family:'JetBrains Mono', monospace;">Radio: ${escapeHtml(m[1].trim())}</span>`);
+                    if (m) {
+                        const rText = m[1].trim();
+                        const pInfo = cellInfoClientCache[t.phone] || {};
+                        const pLocStr = pInfo.location_str || pInfo.ward || '';
+                        const pWardVal = pInfo.ward || pLocStr;
+                        const quickBtn = pWardVal ? ` <button type="button" onclick="quickApplyWardFromCell('${escapeHtml(t.phone)}', '${escapeHtml(t.incident_time || '')}', '${escapeHtml(ticketKey)}', '${escapeHtml(pWardVal)}', '${escapeHtml(pInfo.province || '')}', this, event)" style="background:transparent; border:none; cursor:pointer; font-size:10px; padding:0; line-height:1; vertical-align:middle;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(pWardVal)}) vào Tóm tắt Nội dung">⬆️</button>` : '';
+                        cParts.push(`<span style="color:#0369a1; font-weight:700; font-family:'JetBrains Mono', monospace;">Radio: <span id="compact-radio-${ticketKey}">${formatRadioCellHtml(rText, pInfo.cell_name)}</span><span id="compact-radio-loc-${ticketKey}" style="color:#475569; font-weight:500; font-family:inherit;">${pLocStr ? ` (${escapeHtml(pLocStr)})` : ''}</span>${quickBtn}</span>`);
+                    }
                 }
                 if (hssVal || raw.includes('HSS:')) {
                     const targetHss = hssVal || (raw.match(/HSS:\s*([^\|\n\\]+)/) ? raw.match(/HSS:\s*([^\|\n\\]+)/)[1].trim() : '');
                     const hssDigits = targetHss.replace(/\D/g, '');
-                    if (hssDigits.length >= 3 || targetHss.includes('PROFILE LẠ')) {
+                    const isStrangeHssTag = (hssDigits.length >= 3 && ((ipVal || '').startsWith('113.') || (ipVal || '').startsWith('172.') || (ipVal || '').startsWith('192.168.'))) || targetHss.includes('PROFILE LẠ');
+                    if (isStrangeHssTag) {
                         cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">HSS: ${escapeHtml(targetHss)} (PROFILE LẠ)</span>`);
                     }
                 }
@@ -1887,6 +2946,7 @@ function renderTicketsTable(force = false) {
 
         // Kiểm tra phát hiện app VPN / 1.1.1.1
         let vpnAppName = null;
+        const isVpnStatus = (t.status || '').includes('VPN') || (t.status || '').includes('1.1.1.1');
         const vpnKeywords = [
             '1.1.1.1', 'cloudflare', 'warp', 'vpn', 'expressvpn', 'nordvpn', 'openvpn',
             'wireguard', 'betternet', 'turbo vpn', 'supervpn', 'surfshark', 'psiphon',
@@ -1904,27 +2964,56 @@ function renderTicketsTable(force = false) {
                 break;
             }
         }
+        // Luôn hiển thị cảnh báo đỏ VPN khi phát hiện ứng dụng VPN/Cloudflare để KTV lưu ý
+        const showVpnAlert = Boolean(vpnAppName || isVpnStatus);
 
-        let cemHtml = '--';
-        if (t.cem_data && t.cem_data !== '--') {
-            const lines = t.cem_data.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-            let hasVpnWarningInLines = false;
-            let renderedLines = lines.map(line => {
+        // rawCemIncident và rawCemRecent đã được tính toán ở phần trên phục vụ đối soát địa bàn
+        if (!rawCemIncident && !rawCemRecent && t.cem_data && t.cem_data !== '--') {
+            const rawCem = t.cem_data.trim();
+            if (rawCem.includes('[TIẾP NHẬN]') && rawCem.includes('[GẦN NHẤT]')) {
+                const parts = rawCem.split('[GẦN NHẤT]');
+                rawCemIncident = parts[0].replace('[TIẾP NHẬN]', '').trim();
+                rawCemRecent = (parts[1] || '').trim();
+            } else {
+                rawCemRecent = rawCem;
+                rawCemIncident = 'Chưa quét theo ngày tiếp nhận (Bấm Tiền kiểm lại)';
+            }
+        }
+
+        function formatCemBlock(rawText, isIncident) {
+            if (!rawText || rawText === '--' || rawText === 'null') {
+                return '<div style="color:#94a3b8; font-style:italic;">Không có dữ liệu</div>';
+            }
+            const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            let rendered = lines.map(line => {
                 if (line.includes('CẢNH BÁO VPN') || line.includes('⚠️') || line.toLowerCase().includes('vpn') || line.includes('1.1.1.1')) {
-                    hasVpnWarningInLines = true;
-                    return `<div style="margin-top:4px; padding:3px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:4px; font-weight:700; font-size:10.5px; display:inline-block;">⚠️ ${escapeHtml(line.replace(/^⚠️\s*/, ''))}</div>`;
+                    if (showVpnAlert) {
+                        return `<div style="margin-top:3px; padding:2px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:3px; font-weight:700; font-size:10px;">CẢNH BÁO VPN: ${escapeHtml(line.replace(/^[⚠️\s*]+/, '').replace(/^CẢNH BÁO VPN:\s*/i, ''))}</div>`;
+                    }
+                    return `<div style="margin-top:2px; color:#64748b; font-size:10px;">${escapeHtml(line.replace(/^[⚠️ℹ️\s*]+/, ''))}</div>`;
+                }
+                if (line.startsWith('•')) {
+                    return `<div style="margin-top:2px; font-family:'JetBrains Mono', monospace; font-weight:600; color:#0f172a;">${escapeHtml(line)}</div>`;
+                }
+                if (line.startsWith('(') && line.endsWith('):')) {
+                    return `<div style="margin-top:2px; font-weight:700; color:#0284c7;">${escapeHtml(line)}</div>`;
                 }
                 return `<div style="margin-top:2px;">${escapeHtml(line)}</div>`;
             });
-
-            // Nếu phát hiện app VPN nhưng trong cem_data chưa có dòng cảnh báo thì tự động bổ sung ngay sau phần Cell
-            if (vpnAppName && !hasVpnWarningInLines) {
-                renderedLines.push(`<div style="margin-top:4px; padding:3px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:4px; font-weight:700; font-size:10.5px; display:inline-block;">⚠️ CẢNH BÁO VPN: Phát hiện thiết bị có dùng app ${escapeHtml(vpnAppName)}</div>`);
+            if (!isIncident && showVpnAlert && vpnAppName && !rawText.includes('VPN')) {
+                rendered.push(`<div style="margin-top:3px; padding:2px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:3px; font-weight:700; font-size:10px;">CẢNH BÁO VPN: Phát hiện thiết bị có app ${escapeHtml(vpnAppName)}</div>`);
             }
+            return rendered.join('');
+        }
 
-            cemHtml = `<div style="font-size:10.5px; line-height:1.35; color:#334155;">${renderedLines.join('')}</div>`;
-        } else if (vpnAppName) {
-            cemHtml = `<div style="font-size:10.5px; line-height:1.35; color:#334155;"><div style="margin-top:2px; padding:3px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:4px; font-weight:700; font-size:10.5px; display:inline-block;">⚠️ CẢNH BÁO VPN: Phát hiện thiết bị có dùng app ${escapeHtml(vpnAppName)}</div></div>`;
+        const cemIncidentHtml = formatCemBlock(rawCemIncident, true);
+        const cemRecentHtml = formatCemBlock(rawCemRecent, false);
+
+        let incidentDateDisplay = '--';
+        if (t.incident_time) {
+            incidentDateDisplay = String(t.incident_time).trim().split(' ')[0];
+        } else if (t.created_time) {
+            incidentDateDisplay = String(t.created_time).trim().split(' ')[0];
         }
 
         let displayStatus = (t.status || '--').trim();
@@ -2131,9 +3220,16 @@ function renderTicketsTable(force = false) {
                         </td>
                         ` : ''}
                         <td style="vertical-align:middle; text-align:center; padding:2px 4px; white-space:nowrap;">
-                            <span style="font-family:'JetBrains Mono', monospace; font-weight:700; font-size:11.5px; color:#0f172a; letter-spacing:0.2px;">
-                                ${escapeHtml(t.phone)}
-                            </span>
+                            <div style="display:inline-flex; align-items:center; justify-content:center; gap:3px;">
+                                <span style="font-family:'JetBrains Mono', monospace; font-weight:700; font-size:11.5px; color:#0f172a; letter-spacing:0.2px;">
+                                    ${escapeHtml(t.phone)}
+                                </span>
+                                ${isSmsTicket ? `
+                                <button type="button" onclick="openSmscCdrModal('${t.phone}', event)" style="background:transparent; border:none; color:#0d9488; cursor:pointer; padding:2px; display:inline-flex; align-items:center; border-radius:3px; transition:all 0.15s ease;" onmouseover="this.style.background='#ccfbf1'" onmouseout="this.style.background='transparent'" title="Tra cứu SMSC CDR cho số ${t.phone}">
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                                </button>
+                                ` : ''}
+                            </div>
                         </td>
                         <td style="vertical-align:middle; text-align:center; padding:2px 3px;">
                             ${compactPakhTypeHtml}
@@ -2152,27 +3248,25 @@ function renderTicketsTable(force = false) {
                         <td style="vertical-align:middle; padding:2px 4px;">
                             <div class="compact-ellipsis" style="font-size:10px; color:#475569;" title="${escapeHtml(t.cem_data || '--')}">
                                 ${(() => {
-                let cleanCellText = '--';
-                if (t.cem_data && t.cem_data !== '--' && !t.cem_data.startsWith('Không có dữ liệu')) {
-                    const cParts = t.cem_data.split('\n')
-                        .map(l => l.trim())
-                        .filter(l => l.length > 0 && !l.includes('CẢNH BÁO VPN') && !l.toLowerCase().includes('vpn'));
-                    if (cParts.length > 0) cleanCellText = cParts.join(' ');
-                }
-                const cellSpan = cleanCellText !== '--'
-                    ? `<span style="font-family:'JetBrains Mono', monospace; font-weight:600; color:#0f172a;">${escapeHtml(cleanCellText)}</span>`
-                    : `<span style="color:#94a3b8; font-family:'JetBrains Mono', monospace;">--</span>`;
-                const vpnBadge = vpnAppName
-                    ? `<span style="display:inline-block; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:3px; font-weight:700; font-size:9.5px; padding:0 5px; margin-left:3px;" title="Cảnh báo đỏ: Thiết bị có cài đặt/dùng app VPN (${escapeHtml(vpnAppName)})">⚠️ VPN: ${escapeHtml(vpnAppName)}</span>`
-                    : '';
-                return cellSpan + ' ' + vpnBadge;
-            })()}
+                                    let cleanCellText = '--';
+                                    if (t.cem_data && t.cem_data !== '--' && !t.cem_data.startsWith('Không có dữ liệu')) {
+                                        const cParts = t.cem_data.split('\n')
+                                            .map(l => l.trim())
+                                            .filter(l => l.length > 0 && !l.includes('CẢNH BÁO VPN') && !l.toLowerCase().includes('vpn'));
+                                        if (cParts.length > 0) cleanCellText = cParts.join(' ');
+                                    }
+                                    const cellSpan = cleanCellText !== '--'
+                                        ? `<span style="font-family:'JetBrains Mono', monospace; font-weight:600; color:#0f172a;">${escapeHtml(cleanCellText)}</span>`
+                                        : `<span style="color:#94a3b8; font-family:'JetBrains Mono', monospace;">--</span>`;
+                                    const vpnBadge = vpnAppName
+                                        ? `<span style="display:inline-block; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:3px; font-weight:700; font-size:9.5px; padding:0 5px; margin-left:3px;" title="Cảnh báo: Thiết bị có cài đặt/dùng app VPN (${escapeHtml(vpnAppName)})">⚠️ VPN: ${escapeHtml(vpnAppName)}</span>`
+                                        : '';
+                                    return cellSpan + (vpnBadge ? ' ' + vpnBadge : '');
+                                })()}
                             </div>
                         </td>
                         <td style="vertical-align:middle; padding:2px 4px;">
-                            <div class="compact-ellipsis" style="font-size:11px; color:#1e293b; line-height:1.4;" title="${escapeHtml(compactSummaryTooltip)}">
-                                ${compactSummaryHtml}
-                            </div>
+                            ${(currentTableTab === 'da_dong') ? formatClosedTimeDisplay(t.closed_at || t.updated_at, t.closed_by, t.ticket_status) : compactSummaryHtml}
                         </td>
                         ${(() => {
                             let displayComment = (t.comment !== null && t.comment !== undefined) ? t.comment : '';
@@ -2206,8 +3300,9 @@ function renderTicketsTable(force = false) {
                                         <span>TÓM TẮT NỘI DUNG & PHẢN ÁNH GỐC</span>
                                         <span style="font-size:10px; color:#64748b; font-family:'JetBrains Mono', monospace;">${escapeHtml(t.package_title || '')}</span>
                                     </div>
-                                    <div style="flex:1; overflow-y:auto; max-height:230px;">
+                                    <div style="flex:1; overflow-y:auto; max-height:290px;">
                                         ${aiSummaryHtml}
+                                        ${ccosAttachmentHtml}
                                     </div>
                                 </div>
 
@@ -2215,20 +3310,47 @@ function renderTicketsTable(force = false) {
                                 <div class="detail-card">
                                     <div class="detail-card-title">
                                         <span>PROFILE & DỮ LIỆU CEM</span>
-                                        <a href="http://10.155.42.218:8080/" target="_blank" style="font-size:10.5px; color:#005baa; font-weight:700; text-decoration:none;" title="Mở cổng tra cứu SAPC (10.155.42.218:8080)">SAPC ↗</a>
+                                        <div style="display:flex; align-items:center; gap:8px;">
+                                            ${isSmsTicket ? `<button type="button" onclick="openSmscCdrModal('${t.phone}', event)" style="background:#f0fdfa; border:1px solid #99f6e4; color:#0d9488; font-size:10.5px; font-weight:700; border-radius:4px; padding:1px 6px; cursor:pointer;" title="Tra cứu nhật ký tin nhắn SMSC CDR">SMSC CDR ↗</button>` : ''}
+                                            <a href="http://10.155.42.218/checkall#" target="_blank" style="font-size:10.5px; color:#005baa; font-weight:700; text-decoration:none;" title="Mở cổng tra cứu SAPC (10.155.42.218/checkall#)">SAPC ↗</a>
+                                        </div>
                                     </div>
-                                    <div style="flex:1; overflow-y:auto; max-height:230px; font-size:11px; line-height:1.4;">
+                                    <div style="flex:1; overflow-y:auto; max-height:290px; font-size:11px; line-height:1.4;">
                                         <div style="margin-bottom:8px;">${pkgHtml}</div>
-                                        ${(t.cem_data && t.cem_data !== '--') || vpnAppName ? `
+                                        ${(t.cem_data && t.cem_data !== '--') || (showVpnAlert && vpnAppName) ? `
                                              <div style="border-top:1px dashed #cbd5e1; padding-top:6px; margin-top:6px;">
-                                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                                                      <div style="display:flex; align-items:center; gap:6px;">
                                                          <strong style="color:#0f172a; font-size:11px;">Dữ liệu CEM:</strong>
                                                          <a href="https://cem.vnptmedia.vn/" target="_blank" style="font-size:10.5px; color:#0284c7; font-weight:700; text-decoration:none;" title="Mở cổng CEM (cem.vnptmedia.vn)">CEM ↗</a>
                                                      </div>
-                                                     ${vpnAppName ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; font-weight:700; font-size:9.5px; padding:1px 6px; border-radius:3px;">⚠️ CẢNH BÁO VPN: ${escapeHtml(vpnAppName)}</span>` : ''}
+                                                     ${showVpnAlert && vpnAppName ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; font-weight:700; font-size:9.5px; padding:1px 6px; border-radius:3px;">CẢNH BÁO VPN: ${escapeHtml(vpnAppName)}</span>` : ''}
                                                  </div>
-                                                 ${cemHtml}
+                                                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+                                                     <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; display:flex; flex-direction:column; justify-content:space-between;">
+                                                         <div>
+                                                             <div style="font-weight:700; font-size:10.5px; color:#0369a1; border-bottom:1px solid #e2e8f0; padding-bottom:3px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
+                                                                 <span>NGÀY TIẾP NHẬN</span>
+                                                                 <span style="font-size:10px; font-weight:600; color:#475569;">${escapeHtml(incidentDateDisplay)}</span>
+                                                             </div>
+                                                             <div style="font-size:10.5px; line-height:1.35; color:#334155;">
+                                                                 ${cemIncidentHtml}
+                                                             </div>
+                                                         </div>
+                                                         <div id="cem-incident-loc-${ticketKey}">
+                                                             ${renderCemIncidentLocation(ticketKey, rawCemIncident, t.phone, t.incident_time)}
+                                                         </div>
+                                                     </div>
+                                                     <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px;">
+                                                         <div style="font-weight:700; font-size:10.5px; color:#059669; border-bottom:1px solid #e2e8f0; padding-bottom:3px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
+                                                             <span>GẦN NHẤT CÓ DATA</span>
+                                                             <span style="font-size:10px; font-weight:600; color:#475569;">5 ngày</span>
+                                                         </div>
+                                                         <div style="font-size:10.5px; line-height:1.35; color:#334155;">
+                                                             ${cemRecentHtml}
+                                                         </div>
+                                                     </div>
+                                                 </div>
                                              </div>
                                          ` : ''}
                                     </div>
@@ -2249,7 +3371,43 @@ function renderTicketsTable(force = false) {
                                                 if (!detailComment) detailComment = 'Chuyển 2.4';
                                                 if (!detailPlan) detailPlan = 'Chuyển 2.4';
                                             }
+
+                                            let currentCause = t.incident_cause || '';
+                                            if (!currentCause && isDataTicket) {
+                                                currentCause = getPredictedIncidentCause(t.status);
+                                            }
+
+                                            const groups = (window.TTS_INCIDENT_CAUSE_GROUPS && window.TTS_INCIDENT_CAUSE_GROUPS.length > 0)
+                                                ? window.TTS_INCIDENT_CAUSE_GROUPS
+                                                : [{ group: "Nguyên nhân phổ biến", items: TTS_INCIDENT_CAUSES.map((c, i) => ({ id: i, name: c })) }];
+
+                                            const totalCausesCount = groups.reduce((acc, g) => acc + (g.items ? g.items.length : 0), 0);
+                                            let causeOptionsHtml = `<option value="" ${!currentCause ? 'selected' : ''}>-- Chọn nguyên nhân sự cố (Full ${totalCausesCount} danh mục) --</option>`;
+                                            let hasMatchedCause = false;
+
+                                            groups.forEach(g => {
+                                                if (!g.items || g.items.length === 0) return;
+                                                causeOptionsHtml += `<optgroup label="${escapeHtml(g.group)}">`;
+                                                g.items.forEach(it => {
+                                                    const isSel = (currentCause && currentCause.trim().toLowerCase() === it.name.trim().toLowerCase()) ? 'selected' : '';
+                                                    if (isSel) hasMatchedCause = true;
+                                                    causeOptionsHtml += `<option value="${escapeHtml(it.name)}" ${isSel}>${escapeHtml(it.name)}</option>`;
+                                                });
+                                                causeOptionsHtml += `</optgroup>`;
+                                            });
+
+                                            if (currentCause && !hasMatchedCause) {
+                                                causeOptionsHtml = `<option value="${escapeHtml(currentCause)}" selected>📌 ${escapeHtml(currentCause)}</option>` + causeOptionsHtml;
+                                            }
+
                                             return `
+                                        <div style="display:flex; align-items:center; gap:6px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:5px; padding:3px 8px; margin-bottom:2px; min-width:0; width:100%; box-sizing:border-box;">
+                                            <span style="font-size:10.5px; font-weight:700; color:#475569; white-space:nowrap; flex-shrink:0;">Nguyên nhân:</span>
+                                            <select id="select-detail-cause-${ticketKey}" style="flex:1; min-width:0; width:100%; height:24px; padding:1px 6px; font-size:11px; font-weight:600; color:#0f172a; border-radius:4px; border:1px solid #cbd5e1; background:#ffffff; cursor:pointer; outline:none; text-overflow:ellipsis; overflow:hidden;" onchange="handleCauseChange('${ticketKey}', '${t.phone}', '${t.incident_time}', this.value)">
+                                                ${causeOptionsHtml}
+                                            </select>
+                                            <div id="save-cause-${ticketKey}" class="save-indicator" style="margin:0; font-size:9.5px; padding:1px 6px; white-space:nowrap; flex-shrink:0;">Đã lưu</div>
+                                        </div>
                                         <div>
                                             <div style="font-size:11px; font-weight:700; color:#334155; margin-bottom:3px; display:flex; justify-content:space-between;">
                                                 <span>Ý kiến phân tích (Cột 10):</span>
@@ -2273,7 +3431,7 @@ function renderTicketsTable(force = false) {
                                                     Phiếu mở lại ${reopenCount} lần (Yêu cầu KTV xử lý)
                                                 </div>
                                             ` : '<div></div>'}
-                                            <div style="display:flex; align-items:center; gap:6px; margin-left:auto;">
+                                            <div style="display:flex; align-items:center; gap:6px; margin-left:auto; flex-wrap:wrap;">
                                                 ${actionHtml}
                                             </div>
                                         </div>
@@ -2340,11 +3498,6 @@ function manualCloseTicket(btnElem, phone, incidentTime) {
 
 async function closeTtsOldApiTicket(phone, incidentTime, btnElem) {
     if (btnElem && btnElem.disabled) return;
-
-    if (currentService === 'voice_sms') {
-        alert("Phiếu thuộc loại PAKH khác (Thoại / SMS / Gói cước / CVQT), tuyệt đối không đóng qua API! Vui lòng bấm 'Đóng thủ công'.");
-        return;
-    }
 
     const session = getTtsAuthSession();
     if (!session || !session.token) {
@@ -2578,12 +3731,45 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
         if (!confirmed) return;
     }
 
+    // KIỂM TRA ĐIỀU KIỆN ĐỊA BÀN PHƯỜNG/XÃ KHI ĐÓNG 5.1 (CHUYỂN VNPT TỈNH / VTT ĐỊA BÀN)
+    let forceOverrideWard = false;
+    if (targetStep === '5.1') {
+        const t = (typeof cachedTickets !== 'undefined' && Array.isArray(cachedTickets))
+            ? cachedTickets.find(item => item.phone === phone && (!incidentTime || item.incident_time === incidentTime))
+            : null;
+        if (t) {
+            const ticketKey = (t.phone + '_' + (t.incident_time || t.ticket_code || '')).replace(/[^a-zA-Z0-9]/g, '_');
+            const wardAudit = (typeof auditWardLocation === 'function') ? auditWardLocation(t, ticketKey) : null;
+            if (wardAudit) {
+                let warnMsg = '';
+                if (wardAudit.status === 'NO_PROVINCE') {
+                    warnMsg = `CẢNH BÁO ĐỊA BÀN (BƯỚC 5.1):\n\nPhiếu ${ticketCode} (${phone}) CHƯA CẬP NHẬT TỈNH/TP trên TTS Mới!\n\nBạn có chắc chắn muốn bỏ qua cảnh báo và tiếp tục đóng chuyển bước 5.1 không?`;
+                } else if (wardAudit.status === 'NO_WARD') {
+                    warnMsg = `CẢNH BÁO ĐỊA BÀN (BƯỚC 5.1):\n\nPhiếu ${ticketCode} (${phone}) CHƯA CẬP NHẬT PHƯỜNG/XÃ trên TTS Mới!\n\nBạn có chắc chắn muốn bỏ qua cảnh báo và tiếp tục đóng chuyển bước 5.1 không?`;
+                } else if (wardAudit.status === 'MISMATCH') {
+                    warnMsg = `CẢNH BÁO ĐỊA BÀN (BƯỚC 5.1):\n\nĐịa bàn phiếu ${ticketCode} (${phone}) trên TTS Mới đang [SAI KHÁC so với check CEM & PROFILE Status]!\n\nThông tin Phường/Xã ghi nhận không trùng khớp với dữ liệu trạm khách hàng sử dụng thực tế.\n\nBạn có chắc chắn muốn bỏ qua cảnh báo và tiếp tục đóng chuyển bước 5.1 không?`;
+                } else if (wardAudit.status === 'LOADING_TTS') {
+                    alert(`Hệ thống đang tải dữ liệu Phường/Xã của phiếu ${ticketCode} từ TTS Mới. Vui lòng chờ 2-3 giây rồi bấm lại!`);
+                    return;
+                }
+
+                if (warnMsg) {
+                    const confirmed = confirm(warnMsg);
+                    if (!confirmed) {
+                        return;
+                    }
+                    forceOverrideWard = true;
+                }
+            }
+        }
+    }
+
     const session = getTtsAuthSession() || {};
     const ttsNewToken = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
     const ttsNewUser = (typeof getTtsNewAuthUser === 'function') ? getTtsNewAuthUser() : null;
 
     if (!ttsNewToken && !isSystemAdmin) {
-        alert("Bạn cần đồng bộ phiên TTS Mới (tts.vnptnet.vn) của mình trước khi thực hiện thao tác đóng phiếu!");
+        alert("Phiên làm việc TTS Mới (tts.vnptnet.vn) của bạn chưa kết nối hoặc ĐÃ HẾT HẠN.\n\nVui lòng bấm vào nút 'TTS (MỚI)' trên thanh công cụ (hoặc bật Chrome Extension) để đồng bộ phiên làm việc của bạn trước khi thực hiện!");
         openTtsNewModal();
         return;
     }
@@ -2603,6 +3789,17 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
         if (pInput && !actionPlanVal) actionPlanVal = pInput.value.trim();
     }
 
+    let incidentCauseVal = '';
+    const causeSel = row ? row.querySelector('select[id^="select-detail-cause-"]') : null;
+    if (causeSel && causeSel.value) {
+        incidentCauseVal = causeSel.value.trim();
+    } else {
+        const anyCauseSel = document.querySelector(`select[id^="select-detail-cause-${phone}"]`);
+        if (anyCauseSel && anyCauseSel.value) {
+            incidentCauseVal = anyCauseSel.value.trim();
+        }
+    }
+
     const originalHtml = btnElem ? btnElem.innerHTML : '';
     if (btnElem) {
         btnElem.disabled = true;
@@ -2620,7 +3817,9 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
                 incident_time: incidentTime,
                 comment: commentVal,
                 action_plan: actionPlanVal,
+                incident_cause: incidentCauseVal,
                 force: (rCount > 0),
+                force_override_ward: forceOverrideWard,
                 target_step: targetStep || "",
                 token: ttsNewToken || "",
                 user_id: (ttsNewUser ? ttsNewUser.userId : null) || 0,
@@ -2634,6 +3833,10 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
             await loadTickets(true);
             await fetchStatus();
         } else {
+            if (data.message && (data.message.includes('401') || data.message.includes('hết hạn') || data.message.includes('Token invalid') || data.message.includes('UNAUTHORIZED'))) {
+                clearTtsNewAuthToken();
+                if (typeof openTtsNewModal === 'function') openTtsNewModal();
+            }
             alert(data.message || "Xử lý đóng phiếu TTS Mới thất bại.");
             if (btnElem) {
                 btnElem.disabled = false;
@@ -2656,7 +3859,7 @@ async function handleMoveToStep24(ticketCode, phone, ticketId, flowId, btnElem) 
 
     const ttsNewToken = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
     if (!ttsNewToken && !isSystemAdmin) {
-        alert("⚠️ Bạn chưa kết nối tài khoản TTS Mới. Vui lòng bấm vào nút 'TTS (MỚI)' trên thanh công cụ để đăng nhập trước khi chuyển bước!");
+        alert("⚠️ Phiên làm việc TTS Mới (tts.vnptnet.vn) của bạn chưa kết nối hoặc ĐÃ HẾT HẠN.\n\nVui lòng bấm vào nút 'TTS (MỚI)' trên thanh công cụ (hoặc bật Chrome Extension) để đồng bộ phiên làm việc của bạn trước khi chuyển bước!");
         if (typeof openTtsNewModal === 'function') openTtsNewModal();
         return;
     }
@@ -2710,6 +3913,10 @@ async function handleMoveToStep24(ticketCode, phone, ticketId, flowId, btnElem) 
             await loadTickets(true);
             await fetchStatus();
         } else {
+            if (data.message && (data.message.includes('401') || data.message.includes('hết hạn') || data.message.includes('Token invalid') || data.message.includes('UNAUTHORIZED'))) {
+                clearTtsNewAuthToken();
+                if (typeof openTtsNewModal === 'function') openTtsNewModal();
+            }
             alert("Lỗi chuyển bước: " + (data.message || "Không thể chuyển bước 2.4"));
             if (btnElem) {
                 btnElem.disabled = false;
@@ -2903,13 +4110,583 @@ async function updateTicket(phone, incidentTime, field, value) {
         });
         if (res.ok) {
             const cleanInc = (incidentTime || '').replace(/[^a-zA-Z0-9]/g, '_');
-            document.querySelectorAll(`[id^="save-${field === 'comment' ? 'comment' : 'plan'}-${phone}"]`).forEach(el => {
+            const saveIdPrefix = field === 'comment' ? 'comment' : (field === 'action_plan' ? 'plan' : 'cause');
+            document.querySelectorAll(`[id^="save-${saveIdPrefix}-${phone}"]`).forEach(el => {
                 el.style.display = 'block';
                 setTimeout(() => el.style.display = 'none', 1800);
             });
         }
     } catch (e) {
         console.error("Lỗi update ticket:", e);
+    }
+}
+
+// ==================== QUẢN LÝ ĐỊA BÀN SỰ CỐ (3 CẤP HÀNH CHÍNH) ====================
+let vnLocationsData = null;
+
+async function loadVietnamLocationsData() {
+    if (vnLocationsData && vnLocationsData.length > 0) return vnLocationsData;
+    try {
+        const res = await fetch('/static/js/vietnam_locations.json');
+        if (res.ok) {
+            vnLocationsData = await res.json();
+            return vnLocationsData;
+        }
+    } catch (e) {
+        console.error("Lỗi nạp danh mục địa giới hành chính:", e);
+    }
+    return [];
+}
+
+let ttsNewProvincesCache = null;
+let ttsNewWardsCache = {};
+
+async function loadTtsNewProvinces() {
+    if (ttsNewProvincesCache && ttsNewProvincesCache.length > 0) return ttsNewProvincesCache;
+    try {
+        const res = await fetch('/api/tts_new/locations/provinces');
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) {
+            ttsNewProvincesCache = data.data;
+            return ttsNewProvincesCache;
+        }
+    } catch (e) {
+        console.error("Lỗi tải danh mục Tỉnh/TP từ TTS Mới:", e);
+    }
+    return [];
+}
+
+async function loadTtsNewWards(provinceId) {
+    if (!provinceId) return [];
+    if (ttsNewWardsCache[provinceId]) return ttsNewWardsCache[provinceId];
+    try {
+        const res = await fetch(`/api/tts_new/locations/wards?province_id=${provinceId}`);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) {
+            ttsNewWardsCache[provinceId] = data.data;
+            return ttsNewWardsCache[provinceId];
+        }
+    } catch (e) {
+        console.error(`Lỗi tải danh mục Phường/Xã cho tỉnh ${provinceId}:`, e);
+    }
+    return [];
+}
+
+async function editTicketWard(event, phone, incidentTime, ticketKey) {
+    if (event) event.stopPropagation();
+    openEditWardModal(phone, incidentTime, ticketKey);
+}
+
+let currentProvinceWards = [];
+
+async function openEditWardModal(phone, incidentTime, ticketKey) {
+    const modal = document.getElementById('modalEditWard');
+    if (!modal) return;
+
+    const t = cachedTickets.find(item => item.phone === phone && (!incidentTime || item.incident_time === incidentTime));
+    
+    // Gán dữ liệu ẩn & hiển thị
+    document.getElementById('editWardPhone').value = phone || '';
+    document.getElementById('editWardIncidentTime').value = incidentTime || '';
+    document.getElementById('editWardTicketKey').value = ticketKey || '';
+    const elTid = document.getElementById('editWardTicketId');
+    if (elTid) elTid.value = (t && t.ticket_id) ? t.ticket_id : '';
+    
+    document.getElementById('editWardPhoneDisplay').innerText = phone || '--';
+    let cleanCode = (t && t.ticket_code) ? t.ticket_code.split('\n')[0].trim() : '--';
+    document.getElementById('editWardCodeDisplay').innerText = cleanCode;
+    
+    const rawContent = (t && (t.ticket_content || t.content)) ? (t.ticket_content || t.content) : 'Không có nội dung phản ánh';
+    document.getElementById('editWardRawContent').innerText = rawContent;
+
+    // Reset các ô chọn
+    const fieldSelect = document.getElementById('editWardFieldSelect');
+    if (fieldSelect) {
+        fieldSelect.innerHTML = '<option value="71" selected>Chất lượng mạng</option>';
+    }
+    const provSelect = document.getElementById('editWardProvinceSelect');
+    provSelect.innerHTML = '<option value="">-- Đang tải danh sách Tỉnh/TP từ TTS Mới... --</option>';
+    document.getElementById('editWardWardSelect').innerHTML = '<option value="">-- Chọn Phường / Xã --</option>';
+    document.getElementById('filterWardSearch').value = '';
+    document.getElementById('editWardDetailInput').value = '';
+    document.getElementById('editWardPreviewText').innerText = '--';
+
+    // Nạp danh mục Lĩnh vực từ OneOSS TTS Mới (mặc định Chất lượng mạng)
+    if (fieldSelect) {
+        try {
+            fetch('/api/tts_new/fields').then(r => r.json()).then(fData => {
+                if (fData && fData.data && fData.data.length > 0) {
+                    fieldSelect.innerHTML = '';
+                    fData.data.forEach(f => {
+                        const opt = document.createElement('option');
+                        opt.value = f.id;
+                        opt.text = f.name;
+                        if (f.id === 71) opt.selected = true;
+                        fieldSelect.appendChild(opt);
+                    });
+                    if (knownBoundary && knownBoundary.field_id) {
+                        fieldSelect.value = knownBoundary.field_id;
+                    }
+                }
+            }).catch(() => {});
+        } catch (e) {}
+    }
+
+    // Nạp dữ liệu Tỉnh/TP chuẩn sau sáp nhập từ OneOSS TTS Mới
+    const provinces = await loadTtsNewProvinces();
+    provSelect.innerHTML = '<option value="">-- Chọn Tỉnh / Thành phố --</option>';
+    
+    provinces.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.text = p.name;
+        opt.setAttribute('data-code', p.code || '');
+        provSelect.appendChild(opt);
+    });
+
+    // Ưu tiên nạp đúng Tỉnh/TP và Phường/Xã đang được lưu trên TTS Mới (do VNP chọn)
+    const ticketId = (t && t.ticket_id) ? Number(t.ticket_id) : 0;
+    let knownBoundary = ticketId && ttsNewTicketBoundaryCache[ticketId] ? ttsNewTicketBoundaryCache[ticketId] : null;
+    if (!knownBoundary && ticketId && t.source === 'tts_new') {
+        try {
+            const bRes = await fetch(`/api/tts_new/ticket_boundary/${ticketId}`);
+            if (bRes.ok) {
+                const bData = await bRes.json();
+                if (bData && bData.success) {
+                    knownBoundary = bData;
+                    ttsNewTicketBoundaryCache[ticketId] = bData;
+                    if (fieldSelect && bData.field_id) {
+                        fieldSelect.value = bData.field_id;
+                    }
+                }
+            }
+        } catch (e) {
+            // im lặng
+        }
+    }
+
+    if (knownBoundary && knownBoundary.province_id) {
+        provSelect.value = knownBoundary.province_id;
+        await populateWardsForProvinceId(knownBoundary.province_id, knownBoundary.ward_name);
+        if (knownBoundary.ward_id) {
+            document.getElementById('editWardWardSelect').value = knownBoundary.ward_id;
+        }
+    } else {
+        // Fallback: Tự động nhận diện Tỉnh/TP từ gợi ý
+        const currentWardStr = (t && t.ward) ? t.ward : '';
+        const textToMatch = (currentWardStr + ' ' + rawContent).toLowerCase();
+
+        let matchedProv = null;
+        if (provinces && provinces.length > 0) {
+            // Ưu tiên khớp tên tỉnh
+            for (const p of provinces) {
+                const pNameClean = (p.name || '').toLowerCase().replace('tỉnh ', '').replace('thành phố ', '').replace('tp ', '').replace('tp.', '').trim();
+                if (pNameClean && textToMatch.includes(pNameClean)) {
+                    matchedProv = p;
+                    break;
+                }
+            }
+            // Trường hợp đặc biệt TP.HCM
+            if (!matchedProv && (textToMatch.includes('tphcm') || textToMatch.includes('tp.hcm') || textToMatch.includes('tp hcm') || textToMatch.includes('hcm') || textToMatch.includes('sài gòn'))) {
+                matchedProv = provinces.find(p => (p.name || '').toLowerCase().includes('hồ chí minh') || p.code === 'HCM');
+            }
+            // Trường hợp Hà Nội
+            if (!matchedProv && (textToMatch.includes('hà nội') || textToMatch.includes('ha noi') || textToMatch.includes('hni'))) {
+                matchedProv = provinces.find(p => (p.name || '').toLowerCase().includes('hà nội') || p.code === 'HNI');
+            }
+
+            if (matchedProv) {
+                provSelect.value = matchedProv.id;
+                await populateWardsForProvinceId(matchedProv.id, currentWardStr || rawContent);
+            }
+        }
+    }
+
+    updateWardPreview();
+    modal.style.display = 'flex';
+}
+
+async function populateWardsForProvinceId(provinceId, textHint = '') {
+    const wardSelect = document.getElementById('editWardWardSelect');
+    wardSelect.innerHTML = '<option value="">-- Đang tải danh mục Phường/Xã chuẩn sáp nhập... --</option>';
+    currentProvinceWards = [];
+
+    if (!provinceId) {
+        wardSelect.innerHTML = '<option value="">-- Chọn Phường / Xã --</option>';
+        return;
+    }
+
+    const wards = await loadTtsNewWards(provinceId);
+    wardSelect.innerHTML = '<option value="">-- Chọn Phường / Xã --</option>';
+    currentProvinceWards = wards || [];
+
+    let foundOption = null;
+    const cleanHint = (textHint || '').toLowerCase().trim();
+
+    currentProvinceWards.forEach(w => {
+        const opt = document.createElement('option');
+        opt.value = w.id;
+        opt.text = w.name;
+        opt.setAttribute('data-name', w.name);
+        opt.setAttribute('data-code', w.code || '');
+        wardSelect.appendChild(opt);
+
+        if (!foundOption && cleanHint) {
+            const wClean = (w.name || '').toLowerCase().replace('phường ', '').replace('xã ', '').replace('thị trấn ', '').trim();
+            if (wClean && (cleanHint.includes(wClean) || wClean.includes(cleanHint))) {
+                foundOption = opt;
+            }
+        }
+    });
+
+    if (foundOption) {
+        wardSelect.value = foundOption.value;
+    }
+}
+
+function filterWardOptions(keyword) {
+    const wardSelect = document.getElementById('editWardWardSelect');
+    const kw = (keyword || '').toLowerCase().trim();
+
+    if (!kw) {
+        wardSelect.innerHTML = '<option value="">-- Chọn Phường / Xã --</option>';
+        currentProvinceWards.forEach(w => {
+            const opt = document.createElement('option');
+            opt.value = w.id;
+            opt.text = w.name;
+            opt.setAttribute('data-name', w.name);
+            wardSelect.appendChild(opt);
+        });
+        updateWardPreview();
+        return;
+    }
+
+    wardSelect.innerHTML = '<option value="">-- Chọn Phường / Xã --</option>';
+    const matched = currentProvinceWards.filter(item => 
+        (item.name || '').toLowerCase().includes(kw) || 
+        (item.code || '').toLowerCase().includes(kw)
+    );
+
+    matched.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.id;
+        opt.text = item.name;
+        opt.setAttribute('data-name', item.name);
+        wardSelect.appendChild(opt);
+    });
+
+    if (matched.length > 0) {
+        wardSelect.value = matched[0].id;
+        updateWardPreview();
+    }
+}
+
+async function onWardProvinceChange() {
+    const pId = document.getElementById('editWardProvinceSelect').value;
+    document.getElementById('filterWardSearch').value = '';
+    await populateWardsForProvinceId(pId);
+    updateWardPreview();
+}
+
+function onWardWardChange() {
+    updateWardPreview();
+}
+
+function updateWardPreview() {
+    const pSelect = document.getElementById('editWardProvinceSelect');
+    const wSelect = document.getElementById('editWardWardSelect');
+    const detail = (document.getElementById('editWardDetailInput').value || '').trim();
+
+    const pText = pSelect.selectedIndex > 0 ? pSelect.options[pSelect.selectedIndex].text : '';
+    const wText = wSelect.selectedIndex > 0 ? wSelect.options[wSelect.selectedIndex].text : '';
+
+    let outParts = [];
+    if (detail) outParts.push(detail);
+    if (wText) outParts.push(wText);
+    if (pText) outParts.push(pText);
+
+    const fullStr = outParts.join(', ');
+    document.getElementById('editWardPreviewText').innerText = fullStr || '--';
+    return fullStr;
+}
+
+function closeEditWardModal() {
+    const modal = document.getElementById('modalEditWard');
+    if (modal) modal.style.display = 'none';
+}
+
+async function submitEditWard() {
+    const phone = document.getElementById('editWardPhone').value;
+    const incidentTime = document.getElementById('editWardIncidentTime').value;
+    const ticketKey = document.getElementById('editWardTicketKey').value;
+    const ticketId = document.getElementById('editWardTicketId')?.value;
+    const pSelect = document.getElementById('editWardProvinceSelect');
+    const wSelect = document.getElementById('editWardWardSelect');
+    const fSelect = document.getElementById('editWardFieldSelect');
+    const detailInput = (document.getElementById('editWardDetailInput').value || '').trim();
+
+    const provinceId = pSelect.value;
+    const wardId = wSelect.value;
+    const fieldId = fSelect ? fSelect.value : 71;
+    const finalAddress = updateWardPreview();
+
+    if (!provinceId || !wardId) {
+        alert("Vui lòng chọn Tỉnh/Thành phố và Phường/Xã!");
+        return;
+    }
+
+    const btn = document.getElementById('btnSubmitEditWard');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = 'Đang lưu & đồng bộ...';
+    }
+
+    try {
+        const ttsNewToken = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+        const payload = {
+            phone: phone,
+            incident_time: incidentTime,
+            ticket_key: ticketKey,
+            ticket_id: ticketId ? parseInt(ticketId) : null,
+            province_id: parseInt(provinceId),
+            ward_id: parseInt(wardId),
+            field_id: parseInt(fieldId || 71),
+            province_name: pSelect.selectedIndex > 0 ? pSelect.options[pSelect.selectedIndex].text : '',
+            ward_name: wSelect.selectedIndex > 0 ? wSelect.options[wSelect.selectedIndex].text : '',
+            ward: finalAddress,
+            address: detailInput || finalAddress,
+            token: ttsNewToken
+        };
+
+        const res = await fetch('/api/tickets/update_ward', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            const provName = pSelect.selectedIndex > 0 ? pSelect.options[pSelect.selectedIndex].text : '';
+            const wardName = wSelect.selectedIndex > 0 ? wSelect.options[wSelect.selectedIndex].text : '';
+            if (ticketId) {
+                ttsNewTicketBoundaryCache[parseInt(ticketId)] = {
+                    success: true,
+                    ticket_id: parseInt(ticketId),
+                    province_id: parseInt(provinceId),
+                    province_name: provName,
+                    ward_id: parseInt(wardId),
+                    ward_name: wardName,
+                    display_text: `${wardName}, ${provName}`
+                };
+            }
+            const t = cachedTickets.find(item => item.phone === phone && (!incidentTime || item.incident_time === incidentTime));
+            if (t) {
+                t.ward = finalAddress;
+                t.province_id = parseInt(provinceId);
+                t.ward_id = parseInt(wardId);
+                t.province = provName;
+                if (t.ai_summary && t.ai_summary.includes('5. Khu vực xảy ra lỗi:')) {
+                    t.ai_summary = t.ai_summary.replace(/5\.\s*Khu vực xảy ra lỗi:[^\n]*/g, `5. Khu vực xảy ra lỗi: Tại 1 khu vực (${finalAddress})`);
+                }
+            }
+            closeEditWardModal();
+            updateAllWardAudits();
+            lastTicketsSignature = "";
+            renderTicketsTable(true);
+            alert(data.message || "Đã lưu và đồng bộ lên TTS Mới thành công!");
+        } else {
+            alert(data.message || "Không thể lưu địa bàn phản ánh. Vui lòng thử lại!");
+        }
+    } catch (e) {
+        console.error("Lỗi submitEditWard:", e);
+        alert("Đã xảy ra lỗi khi kết nối tới máy chủ.");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = 'Lưu & Đồng Bộ Lên TTS Mới';
+        }
+    }
+}
+
+// =========================================================================
+// CẬP NHẬT PHƯỜNG XÃ NHANH TỪ CELL (RADIO STATUS / CEM) SANG TÓM TẮT & TTS MỚI
+// =========================================================================
+async function quickApplyWardFromCell(phone, incidentTime, ticketKey, rawWard, rawProvince, btnElem, event) {
+    if (event && event.stopPropagation) {
+        event.stopPropagation();
+    }
+
+    let t = null;
+    if (ticketKey && typeof cachedTickets !== 'undefined') {
+        t = cachedTickets.find((item, idx) => {
+            const key = (item.phone + '_' + (item.incident_time || item.ticket_code || idx)).replace(/[^a-zA-Z0-9]/g, '_');
+            return key === ticketKey || item.phone === phone;
+        });
+    }
+    if (!t && phone && typeof cachedTickets !== 'undefined') {
+        t = cachedTickets.find(item => item.phone === phone && (!incidentTime || item.incident_time === incidentTime));
+    }
+
+    const cleanPhone = phone || (t ? t.phone : '');
+    const cleanIncTime = incidentTime || (t ? t.incident_time : '');
+    const ticketId = (t && t.ticket_id) ? parseInt(t.ticket_id) : null;
+
+    if (!cleanPhone && !ticketId) {
+        alert("Không xác định được phiếu để cập nhật.");
+        return;
+    }
+
+    let origBtnHtml = '';
+    if (btnElem) {
+        origBtnHtml = btnElem.innerHTML;
+        btnElem.disabled = true;
+        btnElem.innerHTML = '⏳';
+        btnElem.style.opacity = '0.7';
+    }
+
+    try {
+        let wardStr = (rawWard || '').trim();
+        let provStr = (rawProvince || '').trim();
+
+        if (wardStr.includes(',') && !provStr) {
+            const parts = wardStr.split(',').map(p => p.trim());
+            wardStr = parts[0];
+            provStr = parts[parts.length - 1];
+        }
+
+        const provinces = await loadTtsNewProvinces();
+        let matchedProv = null;
+        let matchedWard = null;
+
+        const provClean = provStr.toLowerCase().replace(/^(tỉnh|thành phố|tp\.|tp)\s+/i, '').trim();
+        const provNorm = normalizeLocationString(provStr);
+
+        if (provinces && provinces.length > 0 && provNorm) {
+            matchedProv = provinces.find(p => {
+                if (p.code && p.code.toLowerCase() === provClean) return true;
+                const pNorm = normalizeLocationString(p.name);
+                return pNorm === provNorm || pNorm.includes(provNorm) || provNorm.includes(pNorm);
+            });
+            if (!matchedProv) {
+                if (provNorm.includes('ho chi minh') || provNorm.includes('hcm') || provNorm.includes('sai gon')) {
+                    matchedProv = provinces.find(p => (p.name || '').toLowerCase().includes('hồ chí minh') || p.code === 'HCM');
+                } else if (provNorm.includes('ha noi') || provNorm.includes('hni')) {
+                    matchedProv = provinces.find(p => (p.name || '').toLowerCase().includes('hà nội') || p.code === 'HNI');
+                }
+            }
+        }
+
+        if (!matchedProv && t) {
+            const curPId = t.province_id || (ticketId && ttsNewTicketBoundaryCache[ticketId] ? ttsNewTicketBoundaryCache[ticketId].province_id : null);
+            if (curPId && provinces) {
+                matchedProv = provinces.find(p => p.id === curPId);
+            }
+        }
+
+        const wardNorm = normalizeLocationString(wardStr);
+        if (matchedProv && wardNorm) {
+            const wards = await loadTtsNewWards(matchedProv.id);
+            if (wards && wards.length > 0) {
+                matchedWard = wards.find(w => {
+                    const wNorm = normalizeLocationString(w.name);
+                    return wNorm === wardNorm || wNorm.includes(wardNorm) || wardNorm.includes(wNorm);
+                });
+            }
+        }
+
+        const finalProvName = matchedProv ? matchedProv.name : provStr;
+        const finalWardName = matchedWard ? matchedWard.name : wardStr;
+        const finalDisplayAddress = finalProvName ? `${finalWardName}, ${finalProvName}` : finalWardName;
+
+        const ttsNewToken = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+        const payload = {
+            phone: cleanPhone,
+            incident_time: cleanIncTime,
+            ticket_key: ticketKey || (t ? t.ticket_code : ''),
+            ticket_id: ticketId,
+            province_id: matchedProv ? parseInt(matchedProv.id) : null,
+            ward_id: matchedWard ? parseInt(matchedWard.id) : null,
+            field_id: 71, // Chất lượng mạng
+            province_name: finalProvName,
+            ward_name: finalWardName,
+            ward: finalDisplayAddress,
+            address: finalDisplayAddress,
+            token: ttsNewToken
+        };
+
+        const res = await fetch('/api/tickets/update_ward', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const resData = await res.json();
+
+        if (t) {
+            t.ward = finalDisplayAddress;
+            if (matchedProv) {
+                t.province_id = parseInt(matchedProv.id);
+                t.province_name = finalProvName;
+                t.province = finalProvName;
+            }
+            if (matchedWard) {
+                t.ward_id = parseInt(matchedWard.id);
+                t.ward_name = finalWardName;
+            }
+
+            if (t.ai_summary) {
+                let updatedSummary = t.ai_summary;
+                if (/5\.\s*khu vực(?: xảy ra lỗi)?\s*:[^\n]*/i.test(updatedSummary)) {
+                    updatedSummary = updatedSummary.replace(/5\.\s*khu vực(?: xảy ra lỗi)?\s*:[^\n]*/gi, `5. Khu vực xảy ra lỗi: Chỉ ở 1 khu vực (${finalDisplayAddress})`);
+                } else {
+                    updatedSummary += `\n5. Khu vực xảy ra lỗi: Chỉ ở 1 khu vực (${finalDisplayAddress})`;
+                }
+                t.ai_summary = updatedSummary;
+
+                fetch('/api/tickets/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        phone: cleanPhone,
+                        incident_time: cleanIncTime,
+                        field: 'ai_summary',
+                        value: updatedSummary
+                    })
+                }).catch(() => {});
+            }
+
+            if (ticketId) {
+                ttsNewTicketBoundaryCache[ticketId] = {
+                    success: true,
+                    ticket_id: ticketId,
+                    province_id: matchedProv ? parseInt(matchedProv.id) : null,
+                    province_name: finalProvName,
+                    ward_id: matchedWard ? parseInt(matchedWard.id) : null,
+                    ward_name: finalWardName,
+                    display_text: finalDisplayAddress
+                };
+            }
+        }
+
+        updateAllWardAudits();
+        lastTicketsSignature = "";
+        renderTicketsTable(true);
+
+        if (btnElem) {
+            btnElem.innerHTML = '✅';
+            setTimeout(() => {
+                btnElem.disabled = false;
+                btnElem.innerHTML = origBtnHtml || '⬆️';
+                btnElem.style.opacity = '1';
+            }, 1800);
+        }
+
+    } catch (err) {
+        console.error("Lỗi quickApplyWardFromCell:", err);
+        alert("Lỗi khi cập nhật nhanh phường xã: " + err.message);
+        if (btnElem) {
+            btnElem.disabled = false;
+            btnElem.innerHTML = origBtnHtml || '⬆️';
+            btnElem.style.opacity = '1';
+        }
     }
 }
 
@@ -3006,7 +4783,7 @@ function getSelectedScopes() {
     if (document.getElementById('chkScopeNewOther')?.checked) scopes.push('tts_new_other');
     if (document.getElementById('chkScopeNewVoice')?.checked) scopes.push('tts_new_voice');
     if (scopes.length === 0) {
-        return ['tts_old_data', 'tts_new_data', 'tts_new_call', 'tts_new_sms', 'tts_new_other'];
+        return ['tts_old_data', 'tts_old_voice', 'tts_new_data', 'tts_new_call', 'tts_new_sms', 'tts_new_other'];
     }
     return scopes;
 }
@@ -3123,18 +4900,12 @@ async function triggerManualScan() {
         btnRefresh.classList.add('spinning');
     }
     const scopes = getSelectedScopes();
-    const chkAutoClose = document.getElementById('chkAutoCloseUnified');
-    const autoClose = isSystemAdmin ? (chkAutoClose ? chkAutoClose.checked : false) : false;
-    const autoCloseMode = autoClose ? 'all' : 'none';
-
     try {
         const res = await fetch('/api/run-now', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                scan_scopes: scopes,
-                auto_close: autoClose,
-                auto_close_mode: autoCloseMode
+                scan_scopes: scopes
             })
         });
         const data = await res.json();
@@ -3202,7 +4973,11 @@ async function recheckCurrentModule(btn) {
     }
 
     try {
-        const res = await fetch(endpoint, { method: 'POST' });
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force: true, force_recheck: true })
+        });
         const data = await res.json();
         console.log(`[Tiền kiểm lại ${moduleLabel}]:`, data);
     } catch (e) {
@@ -3284,21 +5059,7 @@ function clearTtsAuthSession() {
     applyUserSessionState();
     const welcomeModal = document.getElementById('welcomeTtsModal');
     if (welcomeModal) {
-        welcomeModal.style.display = 'flex';
-        const uInp = document.getElementById('loginTtsUsername');
-        if (uInp) {
-            uInp.value = '';
-            uInp.focus();
-        }
-        const pInp = document.getElementById('loginTtsPassword');
-        if (pInp) pInp.value = '';
-        const msg = document.getElementById('loginTtsStatusMsg');
-        if (msg) msg.style.display = 'none';
-        const btn = document.getElementById('btnDirectLoginSubmit');
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = '<span>ĐĂNG NHẬP</span>';
-        }
+        welcomeModal.style.display = 'none';
     }
 }
 
@@ -3327,6 +5088,17 @@ function getTtsNewAuthToken() {
         let tok = localStorage.getItem('ttsnew_auth_token') || '';
         if (!tok) return '';
         tok = tok.trim();
+        // Tự động kiểm tra thời hạn exp của Token JWT
+        const parsed = parseJwt(tok);
+        if (parsed && parsed.exp) {
+            const nowSec = Math.floor(Date.now() / 1000);
+            if (parsed.exp <= (nowSec + 10)) {
+                console.warn("[TTS New Auth] Token trong localStorage đã hết hạn exp:", parsed.exp, "hiện tại:", nowSec);
+                localStorage.removeItem('ttsnew_auth_token');
+                localStorage.removeItem('ttsnew_auth_user');
+                return '';
+            }
+        }
         if (tok && !tok.startsWith('Bearer ')) {
             tok = 'Bearer ' + tok;
         }
@@ -3452,6 +5224,86 @@ function openConnectModal() {
 function closeConnectModal() {
     closeWelcomeTtsModal();
 }
+
+function toggleSapcPopup(event) {
+    if (event) event.stopPropagation();
+    const modal = document.getElementById('modalSapcSync');
+    if (!modal) return;
+    if (modal.style.display === 'block') {
+        closeSapcModal();
+    } else {
+        closeWelcomeTtsModal();
+        closeTtsNewModal();
+        modal.style.display = 'block';
+        checkSapcPopupStatus();
+    }
+}
+
+function closeSapcModal() {
+    const m = document.getElementById('modalSapcSync');
+    if (m) m.style.display = 'none';
+}
+
+async function checkSapcPopupStatus() {
+    const box = document.getElementById('sapcStatusBox');
+    if (!box) return;
+    box.style.background = '#f1f5f9';
+    box.style.color = '#334155';
+    box.innerText = 'Đang kiểm tra kết nối SAPC...';
+    try {
+        const res = await fetch('/api/services/status');
+        const data = await res.json();
+        const isOk = !!(data && data.sapc);
+        if (isOk) {
+            box.style.background = '#dcfce7';
+            box.style.color = '#166534';
+            box.style.borderColor = '#86efac';
+            box.innerText = 'Đã kết nối thành công tới hệ thống SAPC (10.155.42.218)';
+        } else {
+            box.style.background = '#fee2e2';
+            box.style.color = '#991b1b';
+            box.style.borderColor = '#fca5a5';
+            box.innerText = 'Chưa kết nối hoặc phiên SAPC đã hết hạn. Hãy mở SAPC trên Chrome hoặc dán cookie bên dưới.';
+        }
+    } catch (e) {
+        box.innerText = 'Lỗi kiểm tra: ' + e.message;
+    }
+}
+
+async function saveSapcCookieManual() {
+    const inp = document.getElementById('inputSapcCookie');
+    const val = (inp ? inp.value : '').trim();
+    if (!val) {
+        alert('Vui lòng nhập hoặc dán chuỗi Cookie SAPC (.AspNet.ApplicationCookie)');
+        return;
+    }
+    const box = document.getElementById('sapcStatusBox');
+    if (box) {
+        box.style.background = '#f1f5f9';
+        box.style.color = '#334155';
+        box.innerText = 'Đang lưu và xác thực cookie...';
+    }
+    try {
+        const res = await fetch('/api/sapc/cookie', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookie: val })
+        });
+        const d = await res.json();
+        if (d && d.success) {
+            if (inp) inp.value = '';
+            checkSapcPopupStatus();
+            updateServicesStatus();
+            alert(d.message || 'Đã lưu Cookie SAPC!');
+        } else {
+            alert('Lỗi: ' + (d ? d.message : 'Không lưu được cookie'));
+            checkSapcPopupStatus();
+        }
+    } catch (e) {
+        alert('Lỗi gửi yêu cầu: ' + e.message);
+    }
+}
+
 
 async function syncServerTokenQuick() {
     try {
@@ -3746,8 +5598,7 @@ function applyUserSessionState() {
     document.body.classList.remove('is-unauthenticated');
 
     if (!session || !session.token) {
-        // CHƯA ĐĂNG NHẬP TTS CŨ: HIỆN NÚT NHẮC TRÊN HEADER, KHÔNG TỰ BẬT POPUP KHÓA
-        if (unauthBtn) unauthBtn.style.display = 'inline-flex';
+        if (unauthBtn) unauthBtn.style.display = 'none';
         if (authPill) authPill.style.display = 'none';
         if (welcomeModal) welcomeModal.style.display = 'none';
     } else {
@@ -3925,6 +5776,10 @@ document.addEventListener('click', function (e) {
             isLiveLogOpen = false;
         }
     }
+    const wt = document.getElementById('wrapperTtsNew');
+    if (wt && !wt.contains(e.target)) closeTtsNewModal();
+    const wccos = document.getElementById('wrapperCcos');
+    if (wccos && !wccos.contains(e.target)) closeCcosModal();
 });
 
 async function updateServicesStatus() {
@@ -3935,54 +5790,191 @@ async function updateServicesStatus() {
     const dotSapc = document.getElementById('dotSapc');
 
     try {
-        const res = await fetch('/api/services/status');
+        const session = (typeof getTtsAuthSession === 'function') ? getTtsAuthSession() : null;
+        const clientOldTok = (session && session.token) ? session.token : '';
+        const clientTtsNewTok = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+
+        const params = new URLSearchParams();
+        if (clientOldTok) params.set('tts_old_token', clientOldTok);
+        if (clientTtsNewTok) params.set('tts_new_token', clientTtsNewTok);
+
+        const url = '/api/services/status' + (params.toString() ? '?' + params.toString() : '');
+        const res = await fetch(url);
         const data = await res.json();
         const svcs = (data && data.services) ? data.services : {};
 
-        // 1. TTS Cũ (Cá nhân KTV)
-        const session = (typeof getTtsAuthSession === 'function') ? getTtsAuthSession() : null;
-        const isTtsOldActive = !!(session && session.token) || (isSystemAdmin && svcs.tts_old);
+        // 1. TTS Cũ (Cá nhân KTV) - Chỉ xanh khi backend gọi thử API OneOSS thành công
+        const isTtsOldActive = !!svcs.tts_old;
         if (dotTtsOld) {
             dotTtsOld.className = 'svc-status-dot ' + (isTtsOldActive ? 'active' : 'inactive');
             dotTtsOld.style.backgroundColor = isTtsOldActive ? '#16a34a' : '#ef4444';
         }
+        const pillTtsOld = document.getElementById('svcBtnTtsOld');
+        if (pillTtsOld) {
+            if (isTtsOldActive) {
+                pillTtsOld.title = 'TTS (cũ): Đang kết nối tốt';
+            } else if (clientOldTok) {
+                pillTtsOld.title = 'TTS (cũ): Phiên đã hết hạn (401) hoặc chưa xác thực - Click để đăng nhập/đồng bộ lại';
+            } else {
+                pillTtsOld.title = 'TTS (cũ): Chưa đăng nhập - Click để đăng nhập';
+            }
+        }
 
-        // 2. TTS Mới (Cá nhân KTV)
-        const clientTtsNewTok = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
-        const isTtsNewActive = !!clientTtsNewTok || (isSystemAdmin && svcs.tts_new);
+        // 2. TTS Mới (Cá nhân KTV) - Chỉ xanh khi backend gọi thử API TTS Mới thành công
+        const isTtsNewActive = !!svcs.tts_new;
         if (dotTtsNew) {
             dotTtsNew.className = 'svc-status-dot ' + (isTtsNewActive ? 'active' : 'inactive');
             dotTtsNew.style.backgroundColor = isTtsNewActive ? '#16a34a' : '#ef4444';
         }
+        const pillTtsNew = document.getElementById('svcBtnTtsNew');
+        if (pillTtsNew) {
+            if (isTtsNewActive) {
+                pillTtsNew.title = 'TTS (mới): Đang kết nối tốt';
+            } else if (clientTtsNewTok) {
+                pillTtsNew.title = 'TTS (mới): Phiên đã hết hạn (401) - Click để đồng bộ lại';
+            } else {
+                pillTtsNew.title = 'TTS (mới): Chưa đăng nhập - Click để đồng bộ';
+            }
+        }
 
-        // 3. BTools (Chỉ cần xanh và đỏ, khi rê chuột hiển thị Connected/Disconnected)
+        // 3. BTools (Chỉ cần xanh và đỏ, khi rê chuột hiển thị trạng thái kết nối)
         const isBtoolsActive = !!svcs.btools;
         if (dotBtools) {
             dotBtools.className = 'svc-status-dot ' + (isBtoolsActive ? 'active' : 'inactive');
             dotBtools.style.backgroundColor = isBtoolsActive ? '#16a34a' : '#ef4444';
             const pillBtools = document.getElementById('svcBtnBtools');
-            if (pillBtools) pillBtools.title = isBtoolsActive ? 'Connected' : 'Disconnected';
+            if (pillBtools) pillBtools.title = isBtoolsActive ? 'BTools: Connected (Click để mở trang 10.159.21.241)' : 'BTools: Disconnected (Chưa kết nối)';
         }
 
-        // 4. CEM (Chỉ cần xanh và đỏ, khi rê chuột hiển thị Connected/Disconnected)
+        // 4. CEM (Chỉ cần xanh và đỏ, khi rê chuột hiển thị trạng thái kết nối)
         const isCemActive = !!svcs.cem;
         if (dotCem) {
             dotCem.className = 'svc-status-dot ' + (isCemActive ? 'active' : 'inactive');
             dotCem.style.backgroundColor = isCemActive ? '#16a34a' : '#ef4444';
             const pillCem = document.getElementById('svcPillCem');
-            if (pillCem) pillCem.title = isCemActive ? 'Connected' : 'Disconnected';
+            if (pillCem) pillCem.title = isCemActive ? 'CEM: Connected (Click để mở trang cem.vnptmedia.vn)' : 'CEM: Disconnected (Chưa kết nối)';
         }
 
-        // 5. SAPC (Chỉ cần xanh và đỏ, khi rê chuột hiển thị Connected/Disconnected)
+        // 5. SAPC (Chỉ cần xanh và đỏ, khi rê chuột hiển thị trạng thái kết nối)
         const isSapcActive = !!svcs.sapc;
         if (dotSapc) {
             dotSapc.className = 'svc-status-dot ' + (isSapcActive ? 'active' : 'inactive');
             dotSapc.style.backgroundColor = isSapcActive ? '#16a34a' : '#ef4444';
             const pillSapc = document.getElementById('svcPillSapc');
-            if (pillSapc) pillSapc.title = isSapcActive ? 'Connected' : 'Disconnected';
+            if (pillSapc) pillSapc.title = isSapcActive ? 'SAPC: Connected (Click để mở trang tra cứu)' : 'SAPC: Disconnected (Chưa kết nối)';
+        }
+
+        // 6. CCOS (Tự động reset và làm mới theo phiên truy cập)
+        const dotCcos = document.getElementById('dotCcos');
+        const pillCcos = document.getElementById('svcBtnCcos');
+        let isCcosActive = false;
+        try {
+            const rCcos = await fetch('/api/ccos/status');
+            const dCcos = await rCcos.json();
+            isCcosActive = !!(dCcos && dCcos.connected);
+        } catch (e) {}
+        if (dotCcos) {
+            dotCcos.className = 'svc-status-dot ' + (isCcosActive ? 'active' : 'inactive');
+            dotCcos.style.backgroundColor = isCcosActive ? '#16a34a' : '#ef4444';
+        }
+        if (pillCcos) {
+            pillCcos.title = isCcosActive ? 'CCOS: Connected (Phiên đang hoạt động)' : 'CCOS: Disconnected (Chưa có cookie / hết hạn phiên)';
         }
     } catch (e) {
         console.warn('Lỗi kiểm tra trạng thái dịch vụ:', e);
+    }
+}
+
+// ==========================================
+// QUẢN LÝ POPUP CCOS
+// ==========================================
+function toggleCcosPopup(event) {
+    if (event) event.stopPropagation();
+    const m = document.getElementById('modalCcosSync');
+    if (!m) return;
+    if (m.style.display === 'block') {
+        closeCcosModal();
+    } else {
+        closeTtsNewModal();
+        closeBtoolsModal();
+        closeCemModal();
+        openCcosModal();
+    }
+}
+
+async function openCcosModal() {
+    const m = document.getElementById('modalCcosSync');
+    if (!m) return;
+    m.style.display = 'block';
+    const bannerText = document.getElementById('ccosStatusText');
+    const bannerDot = document.getElementById('ccosStatusDot');
+    if (bannerText) bannerText.innerText = 'Đang kiểm tra kết nối CCOS...';
+
+    try {
+        const res = await fetch('/api/ccos/status');
+        const data = await res.json();
+        if (data && data.connected) {
+            if (bannerDot) {
+                bannerDot.className = 'svc-status-dot active';
+                bannerDot.style.backgroundColor = '#16a34a';
+            }
+            if (bannerText) bannerText.innerHTML = '<b style="color:#16a34a;">✅ Đã kết nối CCOS (Session đang hoạt động)</b>';
+        } else {
+            if (bannerDot) {
+                bannerDot.className = 'svc-status-dot inactive';
+                bannerDot.style.backgroundColor = '#ef4444';
+            }
+            if (bannerText) bannerText.innerHTML = '<span style="color:#dc2626;">❌ Chưa có cookie hoặc phiên đã hết hạn</span>';
+        }
+    } catch (e) {
+        if (bannerText) bannerText.innerText = 'Lỗi kết nối máy chủ Precheck';
+    }
+}
+
+function closeCcosModal() {
+    const m = document.getElementById('modalCcosSync');
+    if (m) m.style.display = 'none';
+}
+
+async function handleManualCcosCookieSubmit(event) {
+    if (event) event.preventDefault();
+    const inp = document.getElementById('manualCcosCookieInput');
+    const msg = document.getElementById('manualCcosMsg');
+    const btn = document.getElementById('btnSaveCcosCookie');
+    if (!inp || !inp.value.trim()) return;
+
+    if (btn) { btn.disabled = true; btn.innerText = 'Đang lưu & test...'; }
+    if (msg) { msg.style.display = 'none'; }
+
+    try {
+        const res = await fetch('/api/ccos/update-cookie', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookie: inp.value.trim() })
+        });
+        const data = await res.json();
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = data.success ? '#dcfce7' : '#fee2e2';
+            msg.style.color = data.success ? '#166534' : '#991b1b';
+            msg.innerText = data.message || (data.success ? 'Thành công!' : 'Thất bại');
+        }
+        if (data.success) {
+            inp.value = '';
+            setTimeout(() => {
+                openCcosModal();
+                updateServicesStatus();
+            }, 800);
+        }
+    } catch (e) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fee2e2';
+            msg.style.color = '#991b1b';
+            msg.innerText = 'Lỗi gửi yêu cầu: ' + e;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'LƯU & TEST KẾT NỐI'; }
     }
 }
 
@@ -4034,6 +6026,10 @@ function closeTtsNewModal() {
     const m = document.getElementById('modalTtsNewSync');
     if (m) m.style.display = 'none';
 }
+
+// Stub functions for BTools & CEM modals (modals removed per user request)
+function closeBtoolsModal() {}
+function closeCemModal() {}
 
 function logoutTtsNewSession() {
     clearTtsNewAuthToken();
@@ -4241,3 +6237,839 @@ document.addEventListener('click', function (e) {
         closeTtsNewModal();
     }
 });
+
+// ==========================================
+// TÍCH HỢP TRA CỨU NHẬT KÝ TIN NHẮN SMSC (CDR)
+// ==========================================
+
+function ensureSmscCdrHeaders() {
+    const table = document.getElementById('cdrResultsTable');
+    if (!table) return;
+    table.style.minWidth = '1600px';
+    const thead = table.querySelector('thead');
+    if (thead) {
+        thead.innerHTML = `
+            <tr style="white-space:nowrap; background:#f1f5f9; color:#1e293b;">
+                <th style="padding:8px 8px; width:42px; text-align:center;">STT</th>
+                <th style="padding:8px 8px; width:58px; text-align:center;">Site</th>
+                <th style="padding:8px 10px; min-width:120px;">Calling Number</th>
+                <th style="padding:8px 10px; min-width:120px;">Called Number</th>
+                <th style="padding:8px 10px; min-width:145px;">Delivery Time</th>
+                <th style="padding:8px 10px; min-width:160px;">Originating MSC Address</th>
+                <th style="padding:8px 10px; min-width:160px;">Destination MSC Address</th>
+                <th style="padding:8px 10px; min-width:155px;">Message Submission Time</th>
+                <th style="padding:8px 10px; min-width:130px;">Call Reference</th>
+                <th style="padding:8px 10px; width:95px; text-align:center;">Message Length</th>
+                <th style="padding:8px 10px; width:110px; text-align:center;">Number Of Attempts</th>
+                <th style="padding:8px 10px; width:125px; text-align:center;">Mapped Network Error</th>
+                <th style="padding:8px 10px; width:95px; text-align:center;">Message Status</th>
+                <th style="padding:8px 10px; width:130px; text-align:center;">Cause For Termination</th>
+                <th style="padding:8px 12px; min-width:240px;">Termination Cause Information</th>
+            </tr>
+        `;
+    }
+}
+
+function openSmscCdrModal(phone, event) {
+    if (event) event.stopPropagation();
+    const modal = document.getElementById('modalSmscCdr');
+    if (!modal) return;
+    modal.style.display = 'flex';
+
+    // Đảm bảo khung mở rộng tối đa theo màn hình (96vw)
+    const innerBox = modal.querySelector('div') || document.getElementById('modalSmscCdrInner');
+    if (innerBox) {
+        innerBox.style.width = '96vw';
+        innerBox.style.maxWidth = '1850px';
+    }
+    ensureSmscCdrHeaders();
+
+    const input = document.getElementById('cdrPhoneInput');
+    if (phone && input) {
+        let cleanPhone = String(phone).trim().replace(/\D/g, '');
+        if (cleanPhone.startsWith('0')) cleanPhone = '84' + cleanPhone.slice(1);
+        input.value = cleanPhone;
+        executeSmscCdrQuery();
+    } else if (input) {
+        input.focus();
+    }
+}
+
+function closeSmscCdrModal() {
+    const modal = document.getElementById('modalSmscCdr');
+    if (modal) modal.style.display = 'none';
+}
+
+function setCdrTimePreset(val, btn) {
+    const hiddenInp = document.getElementById('cdrHoursSelect');
+    if (hiddenInp) hiddenInp.value = val;
+
+    document.querySelectorAll('.cdr-time-btn').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+
+    toggleCdrDateInputs(val);
+}
+
+function toggleCdrDateInputs(val) {
+    const box = document.getElementById('cdrCustomDateBox');
+    if (!box) return;
+    if (val === 'custom') {
+        box.style.display = 'flex';
+        const fromInp = document.getElementById('cdrFromDate');
+        const toInp = document.getElementById('cdrToDate');
+        const now = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+        const past = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const pastStr = `${past.getFullYear()}-${pad(past.getMonth() + 1)}-${pad(past.getDate())}`;
+        if (fromInp && !fromInp.value) fromInp.value = pastStr;
+        if (toInp && !toInp.value) toInp.value = todayStr;
+    } else {
+        box.style.display = 'none';
+    }
+}
+
+// Lắng nghe phím ESC để đóng Modal SMSC CDR
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('modalSmscCdr');
+        if (modal && modal.style.display !== 'none') {
+            closeSmscCdrModal();
+        }
+    }
+});
+
+// Biến lưu trạng thái bảng tra cứu CDR
+let cdrFilterFailedOnly = false;
+let lastCdrRecords = [];
+let lastCdrPhone = '';
+let cdrCurrentPage = 1;
+let cdrPageSize = 50; // 'all' hoặc số lượng dòng trên 1 trang
+
+function isCdrRecordFailed(r) {
+    if (!r) return false;
+    if (r.status_type === 'failed') return true;
+    const desc = String(r.status_desc || '').toLowerCase();
+    if (desc.includes('thất bại') || desc.includes('lỗi') || desc.includes('failed') || desc.includes('rejected')) return true;
+    const code = String(r.status_code || '').trim();
+    if (code && !['8', '0', '1', '2', '3'].includes(code)) return true;
+    const resCode = String(r.termination_cause || r.result_code || '').trim();
+    if (resCode && !['0', '0000', '100c', '100C', '4108', '--', ''].includes(resCode)) return true;
+    return false;
+}
+
+function isCdrRecordPending(r) {
+    if (!r) return false;
+    if (r.status_type === 'pending') return true;
+    const desc = String(r.status_desc || '').toLowerCase();
+    if (desc.includes('chờ') || desc.includes('thử lại') || desc.includes('expired')) return true;
+    const code = String(r.status_code || '').trim();
+    if (['1', '2', '3'].includes(code)) return true;
+    return false;
+}
+
+function toggleOnlyFailedCdr(btn) {
+    cdrFilterFailedOnly = !cdrFilterFailedOnly;
+    cdrCurrentPage = 1;
+    const btnElem = btn || document.getElementById('btnFilterFailedOnly');
+    const failedCount = lastCdrRecords.filter(isCdrRecordFailed).length;
+    if (btnElem) {
+        if (cdrFilterFailedOnly) {
+            btnElem.style.background = '#dc2626';
+            btnElem.style.color = '#ffffff';
+            btnElem.style.borderColor = '#b91c1c';
+            btnElem.innerHTML = `<span>Đang lọc tin lỗi:</span> <span style="background:#ffffff; color:#dc2626; padding:1px 6px; border-radius:10px; font-size:10px; font-weight:800;">${failedCount}</span> <span style="font-size:10px; opacity:0.85;">(Bấm để xem tất cả)</span>`;
+        } else {
+            btnElem.style.background = '#fee2e2';
+            btnElem.style.color = '#b91c1c';
+            btnElem.style.borderColor = '#fca5a5';
+            btnElem.innerHTML = `<span>Chỉ xem tin lỗi:</span> <span id="badgeFailedCount" style="background:#dc2626; color:#ffffff; padding:1px 6px; border-radius:10px; font-size:10px; font-weight:800;">${failedCount}</span>`;
+        }
+    }
+    renderCdrTable();
+}
+
+function changeCdrPageSize(newVal) {
+    cdrPageSize = (newVal === 'all') ? 'all' : (parseInt(newVal, 10) || 50);
+    cdrCurrentPage = 1;
+    renderCdrTable();
+}
+
+function changeCdrPage(delta) {
+    cdrCurrentPage += delta;
+    renderCdrTable();
+}
+
+function goToCdrPage(page) {
+    const displayRecords = cdrFilterFailedOnly
+        ? lastCdrRecords.filter(isCdrRecordFailed)
+        : lastCdrRecords;
+    const totalRecords = displayRecords.length;
+    const pageSizeNum = (cdrPageSize === 'all') ? totalRecords : (parseInt(cdrPageSize, 10) || 50);
+    const totalPages = Math.max(1, Math.ceil(totalRecords / (pageSizeNum || 1)));
+
+    if (page === 'last') {
+        cdrCurrentPage = totalPages;
+    } else {
+        cdrCurrentPage = parseInt(page, 10) || 1;
+    }
+    renderCdrTable();
+}
+
+function renderCdrTable() {
+    const tableBody = document.getElementById('cdrTableBody');
+    const emptyState = document.getElementById('cdrEmptyState');
+    const resultsTable = document.getElementById('cdrResultsTable');
+    const paginationBox = document.getElementById('cdrPaginationBox');
+    const pageInfo = document.getElementById('cdrPageInfo');
+    const btnFirst = document.getElementById('btnCdrFirstPage');
+    const btnPrev = document.getElementById('btnCdrPrevPage');
+    const btnNext = document.getElementById('btnCdrNextPage');
+    const btnLast = document.getElementById('btnCdrLastPage');
+
+    if (!tableBody) return;
+
+    const displayRecords = cdrFilterFailedOnly
+        ? lastCdrRecords.filter(isCdrRecordFailed)
+        : lastCdrRecords;
+
+    const totalRecords = displayRecords.length;
+
+    if (totalRecords === 0) {
+        if (emptyState) {
+            emptyState.style.display = 'block';
+            emptyState.innerHTML = cdrFilterFailedOnly
+                ? `<div style="color:#15803d; font-weight:700; padding:10px;">Không có tin nhắn lỗi nào trong ${lastCdrRecords.length} bản ghi CDR!</div>`
+                : `Không có bản ghi nào.`;
+        }
+        if (resultsTable) resultsTable.style.display = 'none';
+        if (paginationBox) paginationBox.style.display = 'none';
+        return;
+    }
+
+    if (emptyState) emptyState.style.display = 'none';
+    if (resultsTable) resultsTable.style.display = 'table';
+
+    // Xử lý phân trang
+    let pageRecords = displayRecords;
+    let startIndex = 0;
+    let totalPages = 1;
+
+    if (cdrPageSize !== 'all') {
+        const pageSizeNum = parseInt(cdrPageSize, 10) || 50;
+        totalPages = Math.max(1, Math.ceil(totalRecords / pageSizeNum));
+        if (cdrCurrentPage > totalPages) cdrCurrentPage = totalPages;
+        if (cdrCurrentPage < 1) cdrCurrentPage = 1;
+
+        startIndex = (cdrCurrentPage - 1) * pageSizeNum;
+        pageRecords = displayRecords.slice(startIndex, startIndex + pageSizeNum);
+    } else {
+        cdrCurrentPage = 1;
+        totalPages = 1;
+    }
+
+    if (paginationBox) {
+        paginationBox.style.display = 'flex';
+        if (pageInfo) {
+            const endIdx = Math.min(startIndex + pageRecords.length, totalRecords);
+            pageInfo.innerText = `Trang ${cdrCurrentPage} / ${totalPages} (${startIndex + 1}-${endIdx} / ${totalRecords})`;
+        }
+        if (btnFirst) btnFirst.disabled = (cdrCurrentPage <= 1);
+        if (btnPrev) btnPrev.disabled = (cdrCurrentPage <= 1);
+        if (btnNext) btnNext.disabled = (cdrCurrentPage >= totalPages);
+        if (btnLast) btnLast.disabled = (cdrCurrentPage >= totalPages);
+    }
+
+    const isPhoneMatch = (numStr, target) => {
+        if (!numStr || !target) return false;
+        const c1 = String(numStr).replace(/\D/g, '');
+        const c2 = String(target).replace(/\D/g, '');
+        if (!c1 || !c2) return false;
+        return (c1 === c2 || c1.endsWith(c2) || c2.endsWith(c1));
+    };
+
+    tableBody.innerHTML = pageRecords.map((r, localIdx) => {
+        const globalIdx = startIndex + localIdx;
+        const isFailed = isCdrRecordFailed(r);
+        const isPending = !isFailed && isCdrRecordPending(r);
+
+        let rowBg = 'transparent';
+        let rowHoverBg = '#f8fafc';
+        let borderLeft = '4px solid transparent';
+        let sttHtml = `<span style="color:#64748b; font-size:10.5px;">${globalIdx + 1}</span>`;
+
+        if (isFailed) {
+            rowBg = '#fff1f2';
+            rowHoverBg = '#ffe4e6';
+            borderLeft = '4px solid #ef4444';
+            sttHtml = `<span style="color:#dc2626; font-weight:800; font-size:10.5px;">${globalIdx + 1}</span>`;
+        } else if (isPending) {
+            rowBg = '#fffbeb';
+            rowHoverBg = '#fef3c7';
+            borderLeft = '4px solid #f59e0b';
+            sttHtml = `<span style="color:#d97706; font-weight:800; font-size:10.5px;">${globalIdx + 1}</span>`;
+        }
+
+        const padVal = (val, len) => {
+            if (val === null || val === undefined || val === '' || val === '--') return '--';
+            const num = parseInt(val, 10);
+            return isNaN(num) ? String(val) : String(num).padStart(len, '0');
+        };
+
+        const siteUpper = String(r.site || 'HCM').toUpperCase();
+        const siteBadge = siteUpper === 'HNI'
+            ? `<span style="background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; font-weight:800; font-size:9.5px; padding:1px 5px; border-radius:3px;">HNI</span>`
+            : `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-weight:800; font-size:9.5px; padding:1px 5px; border-radius:3px;">HCM</span>`;
+
+        const isTargetCalling = isPhoneMatch(r.calling_number, lastCdrPhone);
+        const isTargetCalled = isPhoneMatch(r.called_number, lastCdrPhone);
+
+        const attemptsVal = r.attempts || 1;
+        const attemptsPadded = padVal(attemptsVal, 3);
+        const attemptsHtml = attemptsVal > 1
+            ? `<b style="color:#dc2626; font-weight:800;">${escapeHtml(attemptsPadded)}</b>`
+            : `<span style="color:#334155;">${escapeHtml(attemptsPadded)}</span>`;
+
+        const msgLen = padVal(r.message_length, 4);
+
+        const netErr = String(r.mapped_network_err || '0').trim();
+        const netErrHtml = (netErr !== '--' && netErr !== '0')
+            ? `<span style="background:#fef2f2; color:#b91c1c; border:1px solid #fca5a5; padding:1px 5px; border-radius:3px; font-weight:700; font-size:10.5px;">${escapeHtml(netErr)}</span>`
+            : `<span style="color:#334155;">${escapeHtml(netErr)}</span>`;
+
+        const statusCode = r.status_code ? String(r.status_code).trim() : '2';
+        const statusHtml = isFailed
+            ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; padding:1px 5px; border-radius:3px; font-weight:800; font-size:10.5px;">${escapeHtml(statusCode)}</span>`
+            : `<span style="color:#334155; font-weight:600;">${escapeHtml(statusCode)}</span>`;
+
+        const termCause = String(r.termination_cause || r.result_code || '100C').trim();
+        const termCauseHtml = (isFailed && termCause !== '100C' && termCause !== '--')
+            ? `<span style="color:#dc2626; font-weight:800;">${escapeHtml(termCause)}</span>`
+            : `<span style="color:#334155; font-weight:500;">${escapeHtml(termCause)}</span>`;
+
+        const termInfo = String(r.termination_cause_info || 'Message Delivery Successful').trim();
+        const termInfoBox = `
+            <div style="display:inline-flex; align-items:center; justify-content:space-between; background:#ffffff; border:1px solid #cbd5e1; border-radius:4px; padding:3px 10px; font-size:11px; color:#334155; width:230px; box-sizing:border-box; box-shadow:inset 0 1px 2px rgba(0,0,0,0.03);">
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-right:8px;" title="${escapeHtml(termInfo)}">${escapeHtml(termInfo)}</span>
+                <span style="font-size:8px; color:#64748b; flex-shrink:0;">▼</span>
+            </div>
+        `;
+
+        return `
+            <tr style="background:${rowBg}; border-left:${borderLeft}; border-bottom:1px solid #e2e8f0; transition:background 0.15s ease; white-space:nowrap;" onmouseover="this.style.background='${rowHoverBg}'" onmouseout="this.style.background='${rowBg}'">
+                <td style="padding:6px 8px; text-align:center;">${sttHtml}</td>
+                <td style="padding:6px 8px; text-align:center;">${siteBadge}</td>
+                <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; font-weight:${isTargetCalling ? '800' : '500'}; color:${isTargetCalling ? '#0f766e' : '#334155'};">${escapeHtml(r.calling_number || '--')}</td>
+                <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; font-weight:${isTargetCalled ? '800' : '500'}; color:${isTargetCalled ? '#0f766e' : '#334155'};">${escapeHtml(r.called_number || '--')}</td>
+                <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; color:#334155;">${escapeHtml(r.delivery_time || '--')}</td>
+                <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; color:#475569;">${escapeHtml(r.originating_msc || '--')}</td>
+                <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; color:#475569;">${escapeHtml(r.destination_msc || '--')}</td>
+                <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; color:#334155;">${escapeHtml(r.submission_time || '--')}</td>
+                <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; color:#475569;">${escapeHtml(r.call_reference || '--')}</td>
+                <td style="padding:6px 10px; text-align:center; font-family:'JetBrains Mono', monospace; font-size:11px; color:#334155;">${escapeHtml(msgLen)}</td>
+                <td style="padding:6px 10px; text-align:center; font-family:'JetBrains Mono', monospace; font-size:11px;">${attemptsHtml}</td>
+                <td style="padding:6px 10px; text-align:center; font-family:'JetBrains Mono', monospace; font-size:11px;">${netErrHtml}</td>
+                <td style="padding:6px 10px; text-align:center; font-family:'JetBrains Mono', monospace; font-size:11px;">${statusHtml}</td>
+                <td style="padding:6px 10px; text-align:center; font-family:'JetBrains Mono', monospace; font-size:11px;">${termCauseHtml}</td>
+                <td style="padding:4px 10px; vertical-align:middle;">${termInfoBox}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function executeSmscCdrQuery() {
+    const phoneInput = document.getElementById('cdrPhoneInput');
+    const dirSelect = document.getElementById('cdrDirectionSelect');
+    const hoursSelect = document.getElementById('cdrHoursSelect');
+    const limitSelect = document.getElementById('cdrLimitSelect');
+
+    const spinner = document.getElementById('cdrLoadingSpinner');
+    const emptyState = document.getElementById('cdrEmptyState');
+    const resultsTable = document.getElementById('cdrResultsTable');
+    const tableBody = document.getElementById('cdrTableBody');
+    const kpiSection = document.getElementById('cdrKpiSection');
+    const summaryText = document.getElementById('cdrQuerySummaryText');
+    const sourceDot = document.getElementById('cdrSourceDot');
+    const sourceText = document.getElementById('cdrSourceText');
+    const btnSubmit = document.getElementById('btnExecuteCdrQuery');
+
+    const rawPhone = phoneInput ? phoneInput.value.trim() : '';
+    let cleanPhone = rawPhone.replace(/\D/g, '');
+    if (!cleanPhone) {
+        alert('Vui lòng nhập số thuê bao cần tra cứu CDR!');
+        if (phoneInput) phoneInput.focus();
+        return;
+    }
+    if (cleanPhone.startsWith('0')) cleanPhone = '84' + cleanPhone.slice(1);
+    if (phoneInput) phoneInput.value = cleanPhone;
+
+    const direction = dirSelect ? dirSelect.value : 'both';
+    const limit = limitSelect ? parseInt(limitSelect.value, 10) || 50 : 50;
+
+    let isCustom = (hoursSelect && hoursSelect.value === 'custom');
+    let fromDateVal = '';
+    let toDateVal = '';
+    let hours = 24;
+    let timeRangeDesc = '';
+
+    if (isCustom) {
+        const fromInp = document.getElementById('cdrFromDate');
+        const toInp = document.getElementById('cdrToDate');
+        fromDateVal = fromInp ? fromInp.value.trim() : '';
+        toDateVal = toInp ? toInp.value.trim() : '';
+        if (!fromDateVal || !toDateVal) {
+            alert('Vui lòng chọn đầy đủ Từ ngày và Đến ngày!');
+            return;
+        }
+        if (fromDateVal > toDateVal) {
+            alert('Từ ngày không thể lớn hơn Đến ngày!');
+            return;
+        }
+        timeRangeDesc = `từ ${fromDateVal} đến ${toDateVal}`;
+    } else {
+        hours = hoursSelect ? parseInt(hoursSelect.value, 10) || 24 : 24;
+        if (hours === 168) timeRangeDesc = '1 tuần qua';
+        else if (hours === 720) timeRangeDesc = '1 tháng qua';
+        else timeRangeDesc = `${hours}h qua`;
+    }
+
+    // UI Loading state
+    if (spinner) spinner.style.display = 'block';
+    if (emptyState) emptyState.style.display = 'none';
+    if (resultsTable) resultsTable.style.display = 'none';
+    if (btnSubmit) {
+        btnSubmit.disabled = true;
+        btnSubmit.style.opacity = '0.65';
+    }
+    if (sourceText) sourceText.innerText = 'Đang truy vấn...';
+    if (sourceDot) sourceDot.style.background = '#f59e0b';
+
+    try {
+        let queryUrl = `/api/cdr/sms?phone=${encodeURIComponent(cleanPhone)}&direction=${encodeURIComponent(direction)}&limit=${limit}`;
+        if (isCustom) {
+            queryUrl += `&from_date=${encodeURIComponent(fromDateVal)}&to_date=${encodeURIComponent(toDateVal)}`;
+        } else {
+            queryUrl += `&hours=${hours}`;
+        }
+        const res = await fetch(queryUrl);
+        const data = await res.json();
+
+        if (spinner) spinner.style.display = 'none';
+        if (btnSubmit) {
+            btnSubmit.disabled = false;
+            btnSubmit.style.opacity = '1';
+        }
+
+        if (!data.success) {
+            if (emptyState) {
+                emptyState.style.display = 'block';
+                emptyState.innerHTML = `<div style="color:#dc2626; font-weight:700;">⚠️ Tra cứu thất bại: ${escapeHtml(data.error || 'Lỗi không xác định')}</div>`;
+            }
+            if (sourceText) sourceText.innerText = 'Lỗi kết nối';
+            if (sourceDot) sourceDot.style.background = '#ef4444';
+            return;
+        }
+
+        // Cập nhật nguồn dữ liệu (Elastic hay VHKT Bridge)
+        const sourceLabel = data.source === 'elastic_direct' ? 'Elasticsearch trực tiếp' : (data.source === 'vhkt_bridge' ? 'Cầu VHKT SFTP' : data.source);
+        if (sourceText) sourceText.innerText = `Nguồn: ${sourceLabel}`;
+        if (sourceDot) sourceDot.style.background = '#10b981';
+
+        const records = data.records || [];
+        lastCdrRecords = records;
+        lastCdrPhone = cleanPhone;
+        cdrFilterFailedOnly = false;
+        cdrCurrentPage = 1;
+
+        // Reset nút lọc tin lỗi
+        const btnFilter = document.getElementById('btnFilterFailedOnly');
+        if (btnFilter) {
+            btnFilter.style.background = '#fee2e2';
+            btnFilter.style.color = '#b91c1c';
+            btnFilter.style.borderColor = '#fca5a5';
+            btnFilter.innerHTML = `<span>Chỉ xem tin lỗi:</span> <span id="badgeFailedCount" style="background:#dc2626; color:#ffffff; padding:1px 6px; border-radius:10px; font-size:10px; font-weight:800;">0</span>`;
+        }
+
+        const total = records.length;
+        const moCount = records.filter(r => String(r.direction || '').toUpperCase().includes('MO')).length;
+        const mtCount = records.filter(r => String(r.direction || '').toUpperCase().includes('MT')).length;
+        const failedCount = records.filter(isCdrRecordFailed).length;
+        const successCount = records.filter(r => !isCdrRecordFailed(r) && !isCdrRecordPending(r)).length;
+        const successRate = total > 0 ? Math.round((successCount / total) * 100) : 0;
+
+        const kpiTotal = document.getElementById('kpiTotalCdr');
+        const kpiMo = document.getElementById('kpiMoCdr');
+        const kpiMt = document.getElementById('kpiMtCdr');
+        const kpiSuccess = document.getElementById('kpiSuccessCdr');
+        const kpiFailed = document.getElementById('kpiFailedCdr');
+        const badgeFailed = document.getElementById('badgeFailedCount');
+        const boxFilter = document.getElementById('boxFilterFailed');
+        const kpiSection = document.getElementById('cdrKpiSection');
+        const summaryText = document.getElementById('cdrQuerySummaryText');
+
+        if (kpiTotal) kpiTotal.innerText = total.toLocaleString();
+        if (kpiMo) kpiMo.innerText = moCount.toLocaleString();
+        if (kpiMt) kpiMt.innerText = mtCount.toLocaleString();
+        if (kpiSuccess) kpiSuccess.innerText = `${successRate}% (${successCount}/${total})`;
+        if (kpiFailed) kpiFailed.innerText = failedCount.toLocaleString();
+        if (badgeFailed) badgeFailed.innerText = failedCount;
+        if (boxFilter) boxFilter.style.display = failedCount > 0 ? 'block' : 'none';
+        if (kpiSection) kpiSection.style.display = 'grid';
+
+        if (summaryText) {
+            const failedNotice = failedCount > 0 ? `, <span style="color:#dc2626; font-weight:700;">(Phát hiện ${failedCount} tin nhắn lỗi)</span>` : '';
+            summaryText.innerHTML = `Tìm thấy <b>${total}</b> bản ghi CDR cho thuê bao <b>${escapeHtml(cleanPhone)}</b> (${escapeHtml(timeRangeDesc)}, Hệ thống: ${escapeHtml(sourceLabel)})${failedNotice}.`;
+        }
+
+        if (total === 0) {
+            if (emptyState) {
+                emptyState.style.display = 'block';
+                emptyState.innerHTML = `Không có bản ghi tin nhắn SMSC nào phát sinh cho thuê bao <b>${escapeHtml(cleanPhone)}</b> trong khoảng ${escapeHtml(timeRangeDesc)}.`;
+            }
+            if (resultsTable) resultsTable.style.display = 'none';
+            return;
+        }
+
+        renderCdrTable();
+
+    } catch (err) {
+        if (spinner) spinner.style.display = 'none';
+        if (btnSubmit) {
+            btnSubmit.disabled = false;
+            btnSubmit.style.opacity = '1';
+        }
+        if (emptyState) {
+            emptyState.style.display = 'block';
+            emptyState.innerHTML = `<div style="color:#dc2626; font-weight:700;">⚠️ Lỗi kết nối API: ${escapeHtml(err.message)}</div>`;
+        }
+        if (sourceText) sourceText.innerText = 'Lỗi truy vấn';
+        if (sourceDot) sourceDot.style.background = '#ef4444';
+    }
+}
+
+
+// ==============================================================================
+// TÍNH NĂNG CHỈNH SỬA TÓM TẮT & HUẤN LUYỆN AI (FEW-SHOT LEARNING)
+// ==============================================================================
+function openAiTeachModal(event, phone, incidentTime, ticketId) {
+    if (event && event.stopPropagation) {
+        event.stopPropagation();
+    }
+    const modal = document.getElementById('modalAiTeach');
+    if (!modal) {
+        console.error('Không tìm thấy element modalAiTeach!');
+        return;
+    }
+
+    let t = null;
+    if (typeof cachedTickets !== 'undefined' && Array.isArray(cachedTickets)) {
+        t = cachedTickets.find(x => (ticketId && x.ticket_id == ticketId) || (x.phone == phone && (!incidentTime || x.incident_time == incidentTime)));
+    }
+    if (!t && typeof ticketsData !== 'undefined' && Array.isArray(ticketsData)) {
+        t = ticketsData.find(x => (ticketId && x.ticket_id == ticketId) || (x.phone == phone && (!incidentTime || x.incident_time == incidentTime)));
+    }
+
+    const rawContent = (t && t.ticket_content) ? t.ticket_content : '';
+    const packageTitle = (t && t.package_title) ? t.package_title : '';
+    let summary = (t && t.ai_summary) ? t.ai_summary : '';
+
+    if (!summary || summary === 'null' || summary.trim() === '') {
+        summary = `1. Gói cước sử dụng: ${packageTitle || 'Không đề cập'}\n2. Tình trạng truy cập: Không vào được mạng (toàn bộ)\n3. Tình trạng dung lượng: Không đề cập\n4. Thiết bị sử dụng: Không đề cập\n5. Khu vực xảy ra lỗi: Không đề cập\n6. Tóm tắt thông tin khác: Không có thông tin hành động phụ.`;
+    }
+
+    const elTicketId = document.getElementById('aiTeachTicketId');
+    const elPhone = document.getElementById('aiTeachPhone');
+    const elIncidentTime = document.getElementById('aiTeachIncidentTime');
+    const elPackageTitle = document.getElementById('aiTeachPackageTitle');
+    if (elTicketId) elTicketId.value = ticketId || '';
+    if (elPhone) elPhone.value = phone || '';
+    if (elIncidentTime) elIncidentTime.value = incidentTime || '';
+    if (elPackageTitle) elPackageTitle.value = packageTitle || '';
+
+    const elPhoneDisplay = document.getElementById('aiTeachPhoneDisplay');
+    const elPackageDisplay = document.getElementById('aiTeachPackageDisplay');
+    const elRawContent = document.getElementById('aiTeachRawContent');
+    if (elPhoneDisplay) elPhoneDisplay.innerText = phone || '--';
+    if (elPackageDisplay) elPackageDisplay.innerText = packageTitle || '--';
+    if (elRawContent) elRawContent.innerText = rawContent || '(Không có nội dung phản ánh gốc)';
+
+    // Điền dữ liệu vào form chuẩn hóa 6 mục
+    parseAiTeachSummaryToForm(summary.replace(/\[?AI\]?[:\-\s]*/gi, '').trim(), packageTitle);
+
+    // Mặc định luôn hiện chế độ Form có Dropdown
+    const formBox = document.getElementById('aiTeachFormContainer');
+    const textBox = document.getElementById('aiTeachTextContainer');
+    const btnToggle = document.getElementById('btnToggleAiTeachView');
+    if (formBox) formBox.style.display = 'block';
+    if (textBox) textBox.style.display = 'none';
+    if (btnToggle) btnToggle.innerText = 'Xem dạng văn bản 6 dòng';
+
+    updateAiTeachPreview();
+    modal.style.display = 'flex';
+}
+
+function parseAiTeachSummaryToForm(summaryText, packageTitle) {
+    let pkg = packageTitle || 'Không đề cập';
+    let access = 'Không vào được mạng (toàn bộ)';
+    let appDetail = '';
+    let data = 'Không đề cập';
+    let device = 'Không đề cập';
+    let area = 'Không đề cập';
+    let areaDetail = '';
+    let other = 'Không có thông tin hành động phụ.';
+
+    const lines = (summaryText || '').split('\n');
+    for (const line of lines) {
+        const trimmed = line.trim();
+        const m1 = trimmed.match(/^1\.\s*gói cước(?: sử dụng)?\s*:\s*(.+)$/i);
+        if (m1) pkg = m1[1].trim();
+
+        const m2 = trimmed.match(/^2\.\s*tình trạng truy cập\s*:\s*(.+)$/i);
+        if (m2) {
+            const rawAccess = m2[1].trim();
+            const lowerAccess = rawAccess.toLowerCase();
+            if (lowerAccess.includes('lỗi ứng dụng') || lowerAccess.includes('ứng dụng cụ thể')) {
+                access = 'Lỗi ứng dụng cụ thể';
+                const subMatch = rawAccess.match(/(?:lỗi ứng dụng(?:\s+cụ thể)?\s*:\s*)(.+)/i);
+                appDetail = subMatch ? subMatch[1].trim() : rawAccess;
+            } else if (lowerAccess.includes('chậm') || lowerAccess.includes('chập chờn')) {
+                access = 'Truy cập chậm, chập chờn';
+            } else if (lowerAccess.includes('mau hết') || lowerAccess.includes('hao data') || lowerAccess.includes('nhanh hết')) {
+                access = 'Phản ánh mau hết dung lượng / Hao data nhanh';
+            } else if (lowerAccess.includes('không vào') || lowerAccess.includes('không được') || lowerAccess.includes('mất kết nối')) {
+                access = 'Không vào được mạng (toàn bộ)';
+            } else if (lowerAccess.includes('không đề cập')) {
+                access = 'Không đề cập';
+            } else {
+                access = 'Không vào được mạng (toàn bộ)';
+            }
+        }
+
+        const m3 = trimmed.match(/^3\.\s*tình trạng dung lượng\s*:\s*(.+)$/i);
+        if (m3) data = m3[1].trim();
+
+        const m4 = trimmed.match(/^4\.\s*thiết bị(?: sử dụng)?\s*:\s*(.+)$/i);
+        if (m4) device = m4[1].trim();
+
+        const m5 = trimmed.match(/^5\.\s*khu vực(?: xảy ra lỗi)?\s*:\s*(.+)$/i);
+        if (m5) {
+            const rawArea = m5[1].trim();
+            const lowerArea = rawArea.toLowerCase();
+            if (lowerArea.includes('đi nhiều nơi') || lowerArea.includes('di chuyển') || lowerArea.includes('nhiều khu vực')) {
+                area = 'Đi nhiều nơi bị lỗi';
+                areaDetail = '';
+            } else if (lowerArea.startsWith('chỉ ở 1 khu vực') || lowerArea.startsWith('tại 1 khu vực') || lowerArea.startsWith('ở 1 khu vực') || lowerArea.includes('1 khu vực')) {
+                area = 'Chỉ ở 1 khu vực';
+                const subLoc = rawArea.match(/\(([^)]+)\)/);
+                areaDetail = subLoc ? subLoc[1].trim() : '';
+            } else if (lowerArea.includes('không đề cập')) {
+                area = 'Không đề cập';
+                areaDetail = '';
+            } else {
+                area = 'Chỉ ở 1 khu vực';
+                areaDetail = rawArea;
+            }
+        }
+
+        const m6 = trimmed.match(/^6\.\s*tóm tắt thông tin khác\s*:\s*(.+)$/i);
+        if (m6) other = m6[1].trim();
+    }
+
+    const elPkg = document.getElementById('aiTeachPkg');
+    if (elPkg) elPkg.value = pkg;
+
+    const elAccess = document.getElementById('aiTeachAccessStatus');
+    if (elAccess) elAccess.value = access;
+    const elAppDetail = document.getElementById('aiTeachAppDetail');
+    if (elAppDetail) elAppDetail.value = appDetail;
+    handleAiTeachAccessChange();
+
+    const elData = document.getElementById('aiTeachDataStatus');
+    if (elData) elData.value = data;
+
+    const elDevice = document.getElementById('aiTeachDevice');
+    if (elDevice) elDevice.value = device;
+
+    const elArea = document.getElementById('aiTeachAreaStatus');
+    if (elArea) elArea.value = area;
+    const elAreaDetail = document.getElementById('aiTeachAreaDetail');
+    if (elAreaDetail) elAreaDetail.value = areaDetail;
+    handleAiTeachAreaChange();
+
+    const elOther = document.getElementById('aiTeachOtherInfo');
+    if (elOther) elOther.value = other;
+}
+
+function handleAiTeachAccessChange() {
+    const sel = document.getElementById('aiTeachAccessStatus');
+    const appBox = document.getElementById('aiTeachAppContainer');
+    if (sel && appBox) {
+        appBox.style.display = (sel.value === 'Lỗi ứng dụng cụ thể') ? 'block' : 'none';
+    }
+    updateAiTeachPreview();
+}
+
+function handleAiTeachAreaChange() {
+    const sel = document.getElementById('aiTeachAreaStatus');
+    const areaBox = document.getElementById('aiTeachAreaDetailContainer');
+    if (sel && areaBox) {
+        areaBox.style.display = (sel.value === 'Chỉ ở 1 khu vực') ? 'block' : 'none';
+    }
+    updateAiTeachPreview();
+}
+
+function buildAiTeachSummary() {
+    const elPkg = document.getElementById('aiTeachPkg');
+    const elAccess = document.getElementById('aiTeachAccessStatus');
+    const elAppDetail = document.getElementById('aiTeachAppDetail');
+    const elData = document.getElementById('aiTeachDataStatus');
+    const elDevice = document.getElementById('aiTeachDevice');
+    const elArea = document.getElementById('aiTeachAreaStatus');
+    const elAreaDetail = document.getElementById('aiTeachAreaDetail');
+    const elOther = document.getElementById('aiTeachOtherInfo');
+
+    const pkg = (elPkg && elPkg.value.trim()) ? elPkg.value.trim() : 'Không đề cập';
+    
+    let access = 'Không vào được mạng (toàn bộ)';
+    if (elAccess) {
+        if (elAccess.value === 'Lỗi ứng dụng cụ thể') {
+            const detail = (elAppDetail && elAppDetail.value.trim()) ? elAppDetail.value.trim() : '';
+            access = detail ? `Lỗi ứng dụng cụ thể: ${detail}` : 'Lỗi ứng dụng cụ thể';
+        } else {
+            access = elAccess.value;
+        }
+    }
+
+    const data = (elData && elData.value.trim()) ? elData.value.trim() : 'Không đề cập';
+    const device = (elDevice && elDevice.value.trim()) ? elDevice.value.trim() : 'Không đề cập';
+
+    let area = 'Không đề cập';
+    if (elArea) {
+        if (elArea.value === 'Chỉ ở 1 khu vực') {
+            const loc = (elAreaDetail && elAreaDetail.value.trim()) ? elAreaDetail.value.trim() : '';
+            area = loc ? `Chỉ ở 1 khu vực (${loc})` : 'Chỉ ở 1 khu vực';
+        } else {
+            area = elArea.value;
+        }
+    }
+
+    const other = (elOther && elOther.value.trim()) ? elOther.value.trim() : 'Không có thông tin hành động phụ.';
+
+    return `1. Gói cước sử dụng: ${pkg}\n2. Tình trạng truy cập: ${access}\n3. Tình trạng dung lượng: ${data}\n4. Thiết bị sử dụng: ${device}\n5. Khu vực xảy ra lỗi: ${area}\n6. Tóm tắt thông tin khác: ${other}`;
+}
+
+function updateAiTeachPreview() {
+    const summary = buildAiTeachSummary();
+    const previewEl = document.getElementById('aiTeachSummaryPreview');
+    const textInput = document.getElementById('aiTeachSummaryInput');
+    if (previewEl) previewEl.innerText = summary;
+    if (textInput && document.getElementById('aiTeachTextContainer').style.display !== 'block') {
+        textInput.value = summary;
+    }
+}
+
+function toggleAiTeachViewMode() {
+    const formBox = document.getElementById('aiTeachFormContainer');
+    const textBox = document.getElementById('aiTeachTextContainer');
+    const btn = document.getElementById('btnToggleAiTeachView');
+    if (!formBox || !textBox) return;
+
+    if (formBox.style.display === 'none') {
+        // Chuyển sang Form
+        formBox.style.display = 'block';
+        textBox.style.display = 'none';
+        if (btn) btn.innerText = 'Xem dạng văn bản 6 dòng';
+        const txt = document.getElementById('aiTeachSummaryInput').value;
+        parseAiTeachSummaryToForm(txt, document.getElementById('aiTeachPackageTitle').value);
+        updateAiTeachPreview();
+    } else {
+        // Chuyển sang Textarea
+        formBox.style.display = 'none';
+        textBox.style.display = 'block';
+        if (btn) btn.innerText = 'Chuyển sang form chọn nhanh';
+        const summary = buildAiTeachSummary();
+        document.getElementById('aiTeachSummaryInput').value = summary;
+        updateAiTeachPreview();
+    }
+}
+
+function parseAiTeachTextToForm() {
+    const txt = document.getElementById('aiTeachSummaryInput').value;
+    const previewEl = document.getElementById('aiTeachSummaryPreview');
+    if (previewEl) previewEl.innerText = txt;
+}
+
+function closeAiTeachModal() {
+    const modal = document.getElementById('modalAiTeach');
+    if (modal) modal.style.display = 'none';
+}
+
+async function submitAiTeachFeedback() {
+    const ticketId = document.getElementById('aiTeachTicketId').value;
+    const phone = document.getElementById('aiTeachPhone').value;
+    const incidentTime = document.getElementById('aiTeachIncidentTime') ? document.getElementById('aiTeachIncidentTime').value : '';
+    const packageTitle = document.getElementById('aiTeachPackageTitle').value;
+    const rawContent = document.getElementById('aiTeachRawContent').innerText;
+    
+    // Nếu đang ở Text mode thì lấy từ textarea, nếu đang ở Form mode thì lấy từ buildAiTeachSummary
+    const textBox = document.getElementById('aiTeachTextContainer');
+    let summaryInput = '';
+    if (textBox && textBox.style.display === 'block') {
+        summaryInput = document.getElementById('aiTeachSummaryInput').value.trim();
+    } else {
+        summaryInput = buildAiTeachSummary().trim();
+    }
+
+    const btn = document.getElementById('btnSubmitAiTeach');
+
+    if (!summaryInput) {
+        alert('Vui lòng thiết lập nội dung tóm tắt 6 mục chuẩn!');
+        return;
+    }
+
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = 'Đang lưu dữ liệu...';
+        }
+
+        const res = await fetch('/api/tickets/save-ai-feedback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ticket_id: ticketId ? parseInt(ticketId) : null,
+                phone: phone,
+                package_title: packageTitle,
+                ticket_content: rawContent,
+                summary_content: summaryInput,
+                verified_by: 'KTV'
+            })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+            closeAiTeachModal();
+            // Cập nhật ngay trong cache dữ liệu bảng phía client
+            if (typeof cachedTickets !== 'undefined' && Array.isArray(cachedTickets)) {
+                const item = cachedTickets.find(x => (ticketId && x.ticket_id == ticketId) || (x.phone == phone && (!incidentTime || x.incident_time == incidentTime)));
+                if (item) {
+                    item.ai_summary = summaryInput;
+                }
+            }
+            if (typeof renderTicketsTable === 'function') {
+                renderTicketsTable(true);
+            }
+            alert(data.message || 'Đã lưu mẫu chuẩn thành công! Qwen 2.5 sẽ học theo mẫu này.');
+        } else {
+            alert('Lỗi khi lưu: ' + (data.error || 'Không xác định'));
+        }
+    } catch (err) {
+        alert('Lỗi kết nối máy chủ: ' + err.message);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = 'Lưu Mẫu Chuẩn & Dạy AI';
+        }
+    }
+}
+

@@ -48,12 +48,22 @@ temp.txt
 scratch_*
 ttsnew_token_cache.json
 tts_old_token_cache.json
+tts_old_token_cache-*.json
 cem_auth_cache.json
 btools_cookie.json
 lan_sessions.json
 sapccheck/cookies.json
+sapccheck/sapc_cookies.json
+ccos_cookie_cache.json
 cookies.json
 screenshot_*.png
+
+# Temporary reports
+BAO_CAO_LOI_LUONG_TTS_MOI_ONEOSS.docx
+
+# Large AI models
+models/
+*.gguf
 
 # OS / editor artifacts
 .DS_Store

@@ -69,25 +69,44 @@ def get_cached_token() -> str:
         except Exception:
             pass
 
-    # 2. Fallback: Đọc token còn hạn mới nhất từ lan_sessions.json
+    # 2. Đọc từ sessions (kết hợp file lan_sessions.json và ACTIVE_LAN_SESSIONS in-memory)
+    sessions = {}
     lan_file = BASE_DIR / "lan_sessions.json"
     if lan_file.exists():
         try:
             with open(lan_file, "r", encoding="utf-8") as f:
                 sessions = json.load(f)
-            # Sắp xếp các session theo ttsnew_timestamp giảm dần
-            sorted_sessions = sorted(
-                sessions.values(),
-                key=lambda s: s.get("ttsnew_timestamp", 0),
-                reverse=True
-            )
-            for s in sorted_sessions:
-                tok = (s.get("ttsnew_token") or "").strip()
-                if tok and _is_jwt_valid(tok):
-                    save_cached_token(tok)
-                    return tok
         except Exception:
             pass
+
+    try:
+        from services.session_manager import ACTIVE_LAN_SESSIONS
+        merged = dict(sessions)
+        merged.update(ACTIVE_LAN_SESSIONS)
+    except Exception:
+        merged = sessions
+
+    # 2a. Ưu tiên token của chính máy chủ local (127.0.0.1, localhost, ::1)
+    for local_key in ("127.0.0.1", "localhost", "::1"):
+        s = merged.get(local_key)
+        if s and isinstance(s, dict):
+            tok = (s.get("ttsnew_token") or "").strip()
+            if tok and _is_jwt_valid(tok):
+                return tok
+
+    # 2b. Fallback: Nếu máy chủ local chưa login hoặc hết hạn, tìm phiên của BẤT KỲ KTV LAN nào đang hoạt động
+    # Giúp máy chủ tự động quét và đồng bộ phiếu vào DB chung mà không ép Admin phải mở trình duyệt
+    valid_candidates = []
+    for ip, s in merged.items():
+        if isinstance(s, dict):
+            tok = (s.get("ttsnew_token") or "").strip()
+            ts = s.get("ttsnew_timestamp", 0)
+            if tok and _is_jwt_valid(tok):
+                valid_candidates.append((ts, tok, ip))
+
+    if valid_candidates:
+        valid_candidates.sort(key=lambda x: x[0], reverse=True)
+        return valid_candidates[0][1]
 
     return ""
 
@@ -237,6 +256,7 @@ except Exception:
         "TẮT THIẾT BỊ NHIỀU NGÀY": "Do thiết bị đầu cuối",
         "LỖI THIẾT BỊ / SIM TREO DATA": "Do thiết bị đầu cuối",
         "LỖI DO GÓI CƯỚC": "Lỗi do gói cước",
+        "LỖI GÓI CƯỚC": "Lỗi do gói cước",
         "LỖI GÓI CƯỚC - SAI SERVICE ID": "Lỗi do gói cước",
         "LỖI GÓI HOME / NGHẼN BĂNG THÔNG": "Lỗi do gói cước",
         "NGHI NGỜ LỖI GÓI CƯỚC": "Lỗi do gói cước",
@@ -252,6 +272,15 @@ NGUYEN_NHAN_TO_INCIDENT_CAUSE_ID = {
     "lỗi profile thuê bao": 2040,
     "lỗi do vnpt-vinaphone khai báo dịch vụ cho khách hàng": 2143,
 }
+try:
+    _cat_file = BASE_DIR / "incident_causes_catalog.json"
+    if _cat_file.exists():
+        with open(_cat_file, "r", encoding="utf-8") as _f:
+            _loaded_map = json.load(_f).get("id_map", {})
+            if _loaded_map:
+                NGUYEN_NHAN_TO_INCIDENT_CAUSE_ID.update(_loaded_map)
+except Exception:
+    pass
 
 def get_ttsnew_incident_cause(status_or_reason: str) -> tuple:
     """
@@ -393,7 +422,8 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
         # Chuẩn hóa SĐT về dạng 84xxxxxxxxx
         phone = normalize_phone_number(raw_phone)
 
-        # Lấy THÔNG TIN MỞ LẠI TTS (reopenCount, lastReopenedDate)
+        # Lấy THÔNG TIN TICKET CHI TIẾT TỪ get-ticket-info (reopenCount, lastReopenedDate, processingContent)
+        processing_content = ""
         try:
             resp_info = make_api_request(url_info, token, timeout=8)
             info_data = resp_info.get("data") or {}
@@ -404,6 +434,7 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
                 lrd = info_data.get("lastReopenedDate")
                 if lrd:
                     last_reopened_date = str(lrd).strip()
+                processing_content = str(info_data.get("processingContent") or "").strip()
         except Exception:
             pass
 
@@ -426,6 +457,7 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "source": "tts_new",
             "reopen_count": reopen_count,
             "last_reopened_date": last_reopened_date,
+            "processing_content": processing_content,
         }
     except Exception as e:
         raw_fb = str(it.get("subscriberNumber") or it.get("customerPhone") or "").strip()
@@ -448,6 +480,7 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "source": "tts_new",
             "reopen_count": reopen_count,
             "last_reopened_date": last_reopened_date,
+            "processing_content": "",
             "error": str(e),
         }
 
@@ -476,7 +509,9 @@ def get_ttsnew_tickets_for_precheck(driver=None, max_workers: int = 8, service_t
     """
     token = extract_token_from_browser(driver)
     if not token:
-        raise ValueError("Không tìm thấy Bearer Token của TTS Mới. Hãy chắc chắn bạn đã đăng nhập https://tts.vnptnet.vn trên trình duyệt (Firefox, Chrome, Edge).")
+        from services.state import state
+        state.log("WARN", "ℹ️ Chưa có tài khoản nào đăng nhập TTS Mới (Admin hoặc KTV LAN). Tạm dừng quét TTS Mới.")
+        return ([], 0)
 
     try:
         raw_tickets = fetch_active_tickets(token, limit=1000)
@@ -484,7 +519,9 @@ def get_ttsnew_tickets_for_precheck(driver=None, max_workers: int = 8, service_t
         if he.code == 401:
             token = extract_token_from_browser(driver, force_refresh=True)
             if not token:
-                raise
+                from services.state import state
+                state.log("WARN", "⚠️ Token TTS Mới đã hết hạn. Vui lòng đăng nhập lại trên Dashboard hoặc trình duyệt.")
+                return ([], 0)
             raw_tickets = fetch_active_tickets(token, limit=1000)
         else:
             raise
@@ -543,7 +580,9 @@ def decode_jwt_user(tok_str: str) -> dict:
 def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
                                phone: str = "", ticket_code: str = "",
                                status: str = "", closing_content: str = "", 
-                               assign_content: str = "", target_step: str = "") -> dict:
+                               assign_content: str = "", target_step: str = "",
+                               incident_cause: str = "",
+                               force_override_ward: bool = False) -> dict:
     """
     Thực hiện xử lý phiếu trên hệ thống TTS Mới qua OneOSS REST API theo đúng quy trình 2 lần xuất hiện:
     - Lần 1 (Bước 2.4):
@@ -551,7 +590,7 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
       + Hướng Đóng 2.6: Chuyển sang bước "2.6 Đóng phiếu Trên TTS" (kèm clUnitId MSC/418).
     - Lần 2 (Bước 2.6 - "2.6 Đóng phiếu Trên TTS"):
       + Đóng phiếu dứt điểm qua API close-ticket.
-      + Nguyên nhân đóng phiếu: Mapped từ status trong database theo danh mục ClIncidentCause (giống TTS cũ).
+      + Nguyên nhân đóng phiếu: Ưu tiên lựa chọn của KTV (incident_cause), hoặc mapped từ status trong database theo danh mục ClIncidentCause.
       + Nội dung xử lý: Cột 10 (comment) + Cột 11 (action_plan) lấy từ database.
     """
     if not token or not str(token).strip():
@@ -576,30 +615,54 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
     }
 
     try:
-        # Nếu thiếu nội dung hoặc status, lấy trực tiếp từ database
-        if not status or not closing_content or not assign_content:
-            try:
-                from db_manager import get_db_connection
-                conn = get_db_connection()
+        # Nếu thiếu nội dung, status hoặc incident_cause, lấy trực tiếp từ database
+        db_cause = ""
+        try:
+            from db_manager import get_db_connection
+            conn = get_db_connection()
+            clean_c = str(ticket_code or "").split("\n")[0].strip()
+            row = None
+            if ticket_id:
                 row = conn.execute("""
-                    SELECT status, comment, action_plan 
+                    SELECT status, comment, action_plan, incident_cause
                     FROM tickets 
-                    WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
+                    WHERE ticket_id = ? AND source = 'tts_new'
                     ORDER BY updated_at DESC LIMIT 1
-                """, (ticket_id, f"{ticket_code}%", phone)).fetchone()
-                if row:
-                    if not status and row["status"]:
-                        status = str(row["status"]).strip()
-                    if not closing_content and row["comment"]:
-                        closing_content = str(row["comment"]).strip()
-                    if not assign_content and row["action_plan"]:
-                        assign_content = str(row["action_plan"]).strip()
-                conn.close()
-            except Exception:
-                pass
+                """, (ticket_id,)).fetchone()
+            if not row and clean_c:
+                row = conn.execute("""
+                    SELECT status, comment, action_plan, incident_cause
+                    FROM tickets 
+                    WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new'
+                    ORDER BY updated_at DESC LIMIT 1
+                """, (clean_c, f"{clean_c}%")).fetchone()
+            if not row and phone:
+                row = conn.execute("""
+                    SELECT status, comment, action_plan, incident_cause
+                    FROM tickets 
+                    WHERE phone = ? AND source = 'tts_new'
+                    ORDER BY updated_at DESC LIMIT 1
+                """, (phone,)).fetchone()
 
-        # Lấy nguyên nhân đóng phiếu (mapped từ status giống TTS cũ)
-        cause_id, cause_name = get_ttsnew_incident_cause(status)
+            if row:
+                if not status and row["status"]:
+                    status = str(row["status"]).strip()
+                if not closing_content and row["comment"]:
+                    closing_content = str(row["comment"]).strip()
+                if not assign_content and row["action_plan"]:
+                    assign_content = str(row["action_plan"]).strip()
+                if "incident_cause" in row.keys() and row["incident_cause"]:
+                    db_cause = str(row["incident_cause"]).strip()
+            conn.close()
+        except Exception:
+            pass
+
+        # Lấy nguyên nhân đóng phiếu (Ưu tiên KTV chọn -> DB -> mapped từ status)
+        target_cause = str(incident_cause or "").strip() or db_cause
+        if target_cause:
+            cause_id, cause_name = get_ttsnew_incident_cause(target_cause)
+        else:
+            cause_id, cause_name = get_ttsnew_incident_cause(status)
 
         # Nội dung xử lý (Cột 10 & Cột 11)
         c10 = str(closing_content or "").strip()
@@ -610,19 +673,35 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
 
         # Lấy thông tin bước hiện tại
         url_step = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={ticket_flow_id}"
-        res_step = requests.get(url_step, headers=headers, timeout=12).json()
-        if res_step.get("isError"):
-            return {"success": False, "message": res_step.get("message", "Lỗi lấy bước kế tiếp")}
+        res_step_raw = requests.get(url_step, headers=headers, timeout=12)
+        if res_step_raw.status_code == 401 or "AuthenticateFilter:Token invalid" in res_step_raw.text:
+            return {
+                "success": False, 
+                "message": f"❌ Phiên làm việc TTS Mới của KTV [{actor_name}] đã hết hạn hoặc không hợp lệ (401 Unauthorized). Vui lòng đăng nhập lại TTS Mới (hoặc dùng Extension) để cập nhật Token trước khi chuyển bước/đóng phiếu!"
+            }
+        if res_step_raw.status_code != 200:
+            return {"success": False, "message": f"❌ Lỗi OneOSS Gateway (HTTP {res_step_raw.status_code}): {res_step_raw.text[:200]}"}
 
-        step_data = res_step.get("data", {})
-        curr_node = step_data.get("currentNodes", [{}])[0]
-        curr_node_name = str(curr_node.get("name") or "")
-        next_node_list = step_data.get("nextNodeData", [])
+        res_step = res_step_raw.json()
+        if res_step.get("isError") or res_step.get("status") == "UNAUTHORIZED":
+            return {"success": False, "message": res_step.get("message", "Lỗi lấy bước kế tiếp từ TTS Mới")}
+
+        step_data = res_step.get("data") or {}
+        curr_nodes = step_data.get("currentNodes") or []
+        if not curr_nodes:
+            return {
+                "success": False,
+                "message": f"⚠️ Không tìm thấy bước xử lý hiện tại của phiếu (Flow ID: {ticket_flow_id}). Phiếu có thể đã được chuyển bước bởi KTV khác, hoặc tài khoản [{actor_name}] không có quyền xử lý luồng phiếu này!"
+            }
+
+        curr_node = curr_nodes[0]
+        curr_node_name = str(curr_node.get("name") or (curr_node.get("processData") or {}).get("stepName") or "")
+        curr_step_code = str((curr_node.get("processData") or {}).get("stepCode") or "")
+        next_node_list = step_data.get("nextNodeData") or []
 
         # =====================================================================
         # TRƯỜNG HỢP 0: Đang ở bước 2.3 -> Tự động chuyển sang bước 2.4
         # =====================================================================
-        curr_step_code = str((curr_node.get("processData") or {}).get("stepCode") or "")
         if "2.3" in curr_node_name or "2.3" in curr_step_code:
             return api_move_step_2_3_to_2_4(
                 token=token,
@@ -635,7 +714,7 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         # =====================================================================
         # TRƯỜNG HỢP 1: Đang ở bước "2.6 Đóng phiếu Trên TTS" (Lần 2 xuất hiện để đóng)
         # =====================================================================
-        if "2.6" in curr_node_name:
+        if "2.6" in curr_node_name or "2.6" in curr_step_code:
             url_close = "https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/close-ticket"
             form_id = curr_node.get("processData", {}).get("formId") if curr_node.get("processData") else None
             payload_close = {
@@ -649,19 +728,41 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
                 "columnJson": {},
                 "fileUpload": []
             }
-            res_c = requests.post(url_close, headers=headers, json=payload_close, timeout=15).json()
-            if res_c.get("isError"):
+            res_c_raw = requests.post(url_close, headers=headers, json=payload_close, timeout=15)
+            if res_c_raw.status_code == 401 or "AuthenticateFilter:Token invalid" in res_c_raw.text:
+                return {
+                    "success": False,
+                    "message": f"❌ Phiên làm việc TTS Mới của [{actor_name}] đã hết hạn (401 Unauthorized). Vui lòng đăng nhập lại TTS Mới!"
+                }
+            res_c = res_c_raw.json()
+            if res_c.get("isError") or res_c_raw.status_code != 200:
                 return {"success": False, "message": res_c.get("message", f"Lỗi đóng phiếu 2.6: {res_c.get('error')}")}
 
-            # Cập nhật DB trạng thái "Đã đóng" kèm tên KTV thực hiện
+            # Cập nhật DB trạng thái "Đã đóng" kèm tên KTV thực hiện và thời điểm đóng (UTC+7)
             try:
-                from db_manager import get_db_connection
+                from datetime import datetime, timezone, timedelta
+                ICT = timezone(timedelta(hours=7))
+                now_close_str = datetime.now(ICT).strftime("%Y-%m-%d %H:%M:%S")
                 conn = get_db_connection()
-                conn.execute("""
-                    UPDATE tickets 
-                    SET ticket_status = 'Đã đóng', closed_by = ?, updated_at = CURRENT_TIMESTAMP 
-                    WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
-                """, (actor_name, ticket_id, f"{ticket_code}%", phone))
+                clean_c = str(ticket_code or "").split("\n")[0].strip()
+                if ticket_id:
+                    conn.execute("""
+                        UPDATE tickets 
+                        SET ticket_status = 'Đã đóng', closed_by = ?, closed_at = ?, updated_at = CURRENT_TIMESTAMP 
+                        WHERE ticket_id = ? AND source = 'tts_new'
+                    """, (actor_name, now_close_str, ticket_id))
+                elif clean_c:
+                    conn.execute("""
+                        UPDATE tickets 
+                        SET ticket_status = 'Đã đóng', closed_by = ?, closed_at = ?, updated_at = CURRENT_TIMESTAMP 
+                        WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new'
+                    """, (actor_name, now_close_str, clean_c, f"{clean_c}%"))
+                elif phone:
+                    conn.execute("""
+                        UPDATE tickets 
+                        SET ticket_status = 'Đã đóng', closed_by = ?, closed_at = ?, updated_at = CURRENT_TIMESTAMP 
+                        WHERE phone = ? AND source = 'tts_new'
+                    """, (actor_name, now_close_str, phone))
                 conn.commit()
                 conn.close()
             except Exception:
@@ -694,10 +795,11 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         # =====================================================================
         # TRƯỜNG HỢP 2: Đang ở bước 2.4 (Lần đầu xuất hiện -> Chuyển sang 2.6 hoặc 5.1)
         # =====================================================================
-        if "2.4" not in curr_node_name:
+        if "2.4" not in curr_node_name and "2.4" not in curr_step_code:
+            step_display = curr_node_name or curr_step_code or "Không xác định"
             return {
                 "success": False,
-                "message": f"⚠️ Phiếu đang ở bước '{curr_node_name}', không phải bước 2.3, 2.4 hoặc 2.6. Hệ thống chỉ cho phép tự động xử lý khi phiếu ở bước 2.3 (sang 2.4), bước 2.4 (sang 2.6/5.1) hoặc bước 2.6 (đóng dứt điểm). Vui lòng xử lý thủ công trên web TTS!"
+                "message": f"⚠️ Phiếu đang ở bước '{step_display}', không phải bước 2.3, 2.4 hoặc 2.6. Hệ thống chỉ cho phép tự động xử lý khi phiếu ở bước 2.3 (sang 2.4), bước 2.4 (sang 2.6/5.1) hoặc bước 2.6 (đóng dứt điểm). Vui lòng xử lý thủ công trên web TTS!"
             }
 
         if target_step == "5.1":
@@ -706,16 +808,84 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
             is_step_5_1 = False
         else:
             resp_content = (assign_content or "").strip().lower()
-            is_step_5_1 = (
-                "nhờ tạo phiếu clm chuyển vtt xử lý" in resp_content or 
-                "nhờ tạo phiếu clm chuyển vtt" in resp_content or
-                "chuyển vtt xử lý" in resp_content or
-                "chuyển vtt" in resp_content or
-                "nhờ tạo phiếu clm chuyển kỹ thuật địa bàn" in resp_content
-            )
+            status_lower = (status or "").strip().lower()
+
+            # Nếu trạng thái là "theo dõi thêm" hoặc nội dung chỉ là hướng dẫn VNP tạo phiếu mới -> Luôn chuyển 2.6 (đóng 2.6)
+            if "theo dõi thêm" in status_lower or "theo doi them" in status_lower:
+                is_step_5_1 = False
+            elif "nếu khách hàng có vị trí cụ thể" in resp_content or "vnp tạo lại giúp phản ánh mới" in resp_content:
+                is_step_5_1 = False
+            else:
+                is_step_5_1 = (
+                    "chuyển kỹ thuật địa bàn vtt" in resp_content or
+                    "kỹ thuật địa bàn vtt" in resp_content or
+                    "chuyển kỹ thuật địa bàn" in resp_content or
+                    "vùng phủ sóng tại khu vực khách hàng phản ánh" in resp_content or
+                    "nhờ tạo phiếu clm chuyển vtt xử lý" in resp_content or 
+                    "nhờ tạo phiếu clm chuyển vtt" in resp_content or
+                    "chuyển vtt xử lý" in resp_content or
+                    "chuyển vtt" in resp_content or
+                    "nhờ tạo phiếu clm chuyển kỹ thuật địa bàn" in resp_content
+                )
 
         chosen_node = None
         if is_step_5_1:
+            try:
+                from db_manager import validate_ttsnew_ward_for_51
+                can_51, ward_err = validate_ttsnew_ward_for_51(ticket_id=ticket_id, phone=phone, ticket_code=ticket_code)
+                if not can_51:
+                    if force_override_ward:
+                        print(f"⚠️ [TTSNEW API] KTV xác nhận bỏ qua cảnh báo Phường/Xã cho phiếu {ticket_code or phone}: {ward_err}")
+                    else:
+                        return {
+                            "success": False,
+                            "blocked_by_ward": True,
+                            "message": f"⛔ KHÔNG ĐƯỢC PHÉP ĐÓNG 5.1: Phiếu {ticket_code or phone} {ward_err}! Vui lòng cập nhật đúng Phường/Xã trên TTS Mới trước khi chuyển bước 5.1."
+                        }
+            except Exception as ex_audit:
+                print("Lỗi validate_ttsnew_ward_for_51:", ex_audit)
+
+            # TỰ ĐỘNG CHỌN LĨNH VỰC "CHẤT LƯỢNG MẠNG" (ID: 71) TRƯỚC KHI ĐÓNG 5.1
+            if ticket_id:
+                try:
+                    url_get_edit = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/Ticket/get-editable-ticket/{ticket_id}"
+                    r_get = requests.get(url_get_edit, headers=headers, timeout=8)
+                    if r_get.status_code == 200:
+                        d_edit = r_get.json().get("data", {})
+                        if d_edit and d_edit.get("clFieldId") != 71:
+                            payload_edit = {
+                                "id": ticket_id,
+                                "customerId": d_edit.get("customerId"),
+                                "customerName": d_edit.get("customerName") or "Khách hàng",
+                                "customerEmail": d_edit.get("customerEmail"),
+                                "customerPhone": d_edit.get("customerPhone"),
+                                "customerProvinceId": d_edit.get("customerProvinceId"),
+                                "customerWardId": d_edit.get("customerWardId"),
+                                "customerAddress": d_edit.get("customerAddress"),
+                                "subject": d_edit.get("title") or "PAKH",
+                                "incidentDate": None,
+                                "customerCompletionDate": None,
+                                "provinceId": d_edit.get("provinceId"),
+                                "wardId": d_edit.get("wardId"),
+                                "address": d_edit.get("address") or "Địa chỉ khách hàng",
+                                "clFieldId": 71,  # 71: Chất lượng mạng
+                                "clGeneralFieldId": d_edit.get("clGeneralFieldId"),
+                                "clSubfieldId": d_edit.get("clSubFieldId"),
+                                "clMemberLevelId": d_edit.get("clMemberLevelId"),
+                                "clPriorityLevelId": d_edit.get("clPriorityLevelId"),
+                                "clSatisfactionId": d_edit.get("clSatisfactionId"),
+                                "content": d_edit.get("content") or "Nội dung phản ánh",
+                                "processDefinitionId": d_edit.get("processDefinitionId"),
+                                "assignedUnitId": d_edit.get("assignedUnitId"),
+                                "assignedUnitName": d_edit.get("assignedUnitName")
+                            }
+                            url_put_draft = "https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/Ticket/update-draft-ticket"
+                            r_put = requests.put(url_put_draft, headers=headers, json=payload_edit, timeout=10)
+                            if r_put.status_code == 200 and not r_put.json().get("isError"):
+                                print(f"✅ [TTSNEW API] Đã tự động cập nhật Lĩnh vực -> 'Chất lượng mạng' (ID 71) cho phiếu {ticket_id}")
+                except Exception as ex_field:
+                    print(f"⚠️ [TTSNEW API] Lỗi cập nhật Lĩnh vực tự động trước khi đóng 5.1: {ex_field}")
+
             chosen_node = next((n for n in next_node_list if "5.1" in str(n.get("name", "")) or str((n.get("processData") or {}).get("stepCode", "")).startswith("5.1")), None)
             if not chosen_node:
                 chosen_node = next((n for n in next_node_list if "xây dựng pa" in str(n.get("name", "")).lower() or "phương án" in str(n.get("name", "")).lower()), None)
@@ -813,11 +983,20 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         }
 
         url_submit = "https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/ticket-processing"
-        post_res = requests.post(url_submit, headers=headers, json=payload, timeout=15).json()
-        if post_res.get("isError"):
+        post_res_raw = requests.post(url_submit, headers=headers, json=payload, timeout=15)
+        if post_res_raw.status_code == 401 or "AuthenticateFilter:Token invalid" in post_res_raw.text:
+            return {
+                "success": False,
+                "message": f"❌ Phiên làm việc TTS Mới của [{actor_name}] đã hết hạn (401 Unauthorized). Vui lòng đăng nhập lại TTS Mới!"
+            }
+        post_res = post_res_raw.json()
+        if post_res.get("isError") or post_res_raw.status_code != 200:
             return {"success": False, "message": post_res.get("message", f"Lỗi chuyển sang bước {next_step_name}")}
 
-        new_status = "Chuyển VTT" if is_step_5_1 else "Chờ đóng lần 2"
+        from datetime import datetime, timezone, timedelta
+        ICT = timezone(timedelta(hours=7))
+        now_close_str = datetime.now(ICT).strftime("%Y-%m-%d %H:%M:%S") if is_step_5_1 else None
+        new_status = "Đã đóng (5.1)" if is_step_5_1 else "Chờ đóng lần 2"
         clean_code = (ticket_code or "").split("\n")[0].strip()
         new_flow_id = None
         new_actual_step = next_step_name
@@ -842,27 +1021,58 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         try:
             from db_manager import get_db_connection
             conn = get_db_connection()
-            conn.execute("""
-                UPDATE tickets 
-                SET flow_id = COALESCE(?, flow_id),
-                    ticket_code = ?,
-                    ticket_status = ?, 
-                    closed_by = ?, 
-                    updated_at = CURRENT_TIMESTAMP 
-                WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
-            """, (new_flow_id, new_ticket_code_val, new_status, actor_name, ticket_id, f"{clean_code}%", phone))
+            if ticket_id:
+                conn.execute("""
+                    UPDATE tickets 
+                    SET flow_id = COALESCE(?, flow_id),
+                        ticket_code = ?,
+                        ticket_status = ?, 
+                        closed_by = ?, 
+                        closed_at = COALESCE(?, closed_at),
+                        updated_at = CURRENT_TIMESTAMP 
+                    WHERE ticket_id = ? AND source = 'tts_new'
+                """, (new_flow_id, new_ticket_code_val, new_status, actor_name, now_close_str, ticket_id))
+            elif clean_code:
+                conn.execute("""
+                    UPDATE tickets 
+                    SET flow_id = COALESCE(?, flow_id),
+                        ticket_code = ?,
+                        ticket_status = ?, 
+                        closed_by = ?, 
+                        closed_at = COALESCE(?, closed_at),
+                        updated_at = CURRENT_TIMESTAMP 
+                    WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new'
+                """, (new_flow_id, new_ticket_code_val, new_status, actor_name, now_close_str, clean_code, f"{clean_code}%"))
+            elif phone:
+                conn.execute("""
+                    UPDATE tickets 
+                    SET flow_id = COALESCE(?, flow_id),
+                        ticket_code = ?,
+                        ticket_status = ?, 
+                        closed_by = ?, 
+                        closed_at = COALESCE(?, closed_at),
+                        updated_at = CURRENT_TIMESTAMP 
+                    WHERE phone = ? AND source = 'tts_new'
+                """, (new_flow_id, new_ticket_code_val, new_status, actor_name, now_close_str, phone))
             conn.commit()
             conn.close()
         except Exception:
             pass
 
+        if is_step_5_1:
+            success_msg = f"✅ [{actor_name}] Đã hoàn tất đóng/chuyển phiếu {ticket_code or ticket_id} sang bước '{next_step_name}' (VNPT Tỉnh / VTT địa bàn xử lý) thành công!"
+            act_label = f"Đóng 5.1 ({next_step_name})"
+        else:
+            success_msg = f"✅ [{actor_name}] Đã chuyển phiếu {ticket_code or ticket_id} sang '{next_step_name}'. Phiếu sẽ xuất hiện lại ở bước 2.6 để đóng hoàn tất."
+            act_label = f"Chuyển bước '{next_step_name}'"
+
         return {
             "success": True,
             "round": 1,
             "step_name": next_step_name,
-            "action_label": f"Chuyển bước '{next_step_name}'",
+            "action_label": act_label,
             "actor": actor_name,
-            "message": f"✅ [{actor_name}] Đã chuyển phiếu {ticket_code or ticket_id} sang '{next_step_name}'. Phiếu sẽ xuất hiện lại ở bước 2.6 để đóng hoàn tất."
+            "message": success_msg
         }
     except Exception as e:
         return {"success": False, "message": str(e)}
@@ -903,15 +1113,31 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
     try:
         # 1. Lấy thông tin bước hiện tại và các bước tiếp theo khả dụng
         url_step = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={ticket_flow_id}"
-        res_step = requests.get(url_step, headers=headers, timeout=12).json()
-        if res_step.get("isError"):
+        res_step_raw = requests.get(url_step, headers=headers, timeout=12)
+        if res_step_raw.status_code == 401 or "AuthenticateFilter:Token invalid" in res_step_raw.text:
+            return {
+                "success": False, 
+                "message": f"❌ Phiên làm việc TTS Mới của KTV [{actor_name}] đã hết hạn hoặc không hợp lệ (401 Unauthorized). Vui lòng đăng nhập lại TTS Mới (hoặc dùng Extension) để cập nhật Token trước khi chuyển bước!"
+            }
+        if res_step_raw.status_code != 200:
+            return {"success": False, "message": f"❌ Lỗi OneOSS Gateway (HTTP {res_step_raw.status_code}): {res_step_raw.text[:200]}"}
+
+        res_step = res_step_raw.json()
+        if res_step.get("isError") or res_step.get("status") == "UNAUTHORIZED":
             return {"success": False, "message": res_step.get("message", "Lỗi lấy bước kế tiếp từ OneOSS Gateway")}
 
-        step_data = res_step.get("data", {})
-        curr_nodes = step_data.get("currentNodes", [])
-        curr_node = curr_nodes[0] if curr_nodes else {}
-        curr_node_name = str(curr_node.get("name") or "")
-        next_node_list = step_data.get("nextNodeData", [])
+        step_data = res_step.get("data") or {}
+        curr_nodes = step_data.get("currentNodes") or []
+        if not curr_nodes:
+            return {
+                "success": False,
+                "message": f"⚠️ Không tìm thấy bước xử lý hiện tại của phiếu (Flow ID: {ticket_flow_id}). Phiếu có thể đã được chuyển bước bởi KTV khác, hoặc tài khoản [{actor_name}] không có quyền xử lý luồng phiếu này!"
+            }
+
+        curr_node = curr_nodes[0]
+        curr_node_name = str(curr_node.get("name") or (curr_node.get("processData") or {}).get("stepName") or "")
+        curr_step_code = str((curr_node.get("processData") or {}).get("stepCode") or "")
+        next_node_list = step_data.get("nextNodeData") or []
 
         # Kiểm tra bước hiện tại
         if "2.3" not in curr_node_name and "2.3" not in str((curr_node.get("processData") or {}).get("stepCode", "")):
@@ -1025,8 +1251,14 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
         }
 
         url_submit = "https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/ticket-processing"
-        post_res = requests.post(url_submit, headers=headers, json=payload, timeout=15).json()
-        if post_res.get("isError"):
+        post_res_raw = requests.post(url_submit, headers=headers, json=payload, timeout=15)
+        if post_res_raw.status_code == 401 or "AuthenticateFilter:Token invalid" in post_res_raw.text:
+            return {
+                "success": False,
+                "message": f"❌ Phiên làm việc TTS Mới của [{actor_name}] đã hết hạn (401 Unauthorized). Vui lòng đăng nhập lại TTS Mới!"
+            }
+        post_res = post_res_raw.json()
+        if post_res.get("isError") or post_res_raw.status_code != 200:
             return {"success": False, "message": post_res.get("message", f"Lỗi từ hệ thống TTS khi chuyển sang bước {next_step_name}")}
 
         # 4. Tra cứu ngay flow mới trên TTS Mới để cập nhật trực tiếp DB theo thời gian thực (Live)
@@ -1055,15 +1287,36 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
         try:
             from db_manager import get_db_connection
             conn = get_db_connection()
-            conn.execute("""
-                UPDATE tickets 
-                SET flow_id = COALESCE(?, flow_id),
-                    ticket_code = ?,
-                    ticket_status = 'Chưa đóng', 
-                    closed_by = ?, 
-                    updated_at = CURRENT_TIMESTAMP 
-                WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
-            """, (new_flow_id, new_ticket_code_val, actor_name, ticket_id, f"{clean_code}%", phone))
+            if ticket_id:
+                conn.execute("""
+                    UPDATE tickets 
+                    SET flow_id = COALESCE(?, flow_id),
+                        ticket_code = ?,
+                        ticket_status = 'Chưa đóng', 
+                        closed_by = ?, 
+                        updated_at = CURRENT_TIMESTAMP 
+                    WHERE ticket_id = ? AND source = 'tts_new'
+                """, (new_flow_id, new_ticket_code_val, actor_name, ticket_id))
+            elif clean_code:
+                conn.execute("""
+                    UPDATE tickets 
+                    SET flow_id = COALESCE(?, flow_id),
+                        ticket_code = ?,
+                        ticket_status = 'Chưa đóng', 
+                        closed_by = ?, 
+                        updated_at = CURRENT_TIMESTAMP 
+                    WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new'
+                """, (new_flow_id, new_ticket_code_val, actor_name, clean_code, f"{clean_code}%"))
+            elif phone:
+                conn.execute("""
+                    UPDATE tickets 
+                    SET flow_id = COALESCE(?, flow_id),
+                        ticket_code = ?,
+                        ticket_status = 'Chưa đóng', 
+                        closed_by = ?, 
+                        updated_at = CURRENT_TIMESTAMP 
+                    WHERE phone = ? AND source = 'tts_new'
+                """, (new_flow_id, new_ticket_code_val, actor_name, phone))
             conn.commit()
             conn.close()
         except Exception:
@@ -1183,7 +1436,7 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
                 try:
                     conn.execute("""
                         UPDATE tickets 
-                        SET ticket_status = 'Đã đóng', updated_at = CURRENT_TIMESTAMP 
+                        SET ticket_status = 'Đã đóng', closed_at = COALESCE(closed_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP 
                         WHERE ticket_id = ? AND source = 'tts_new'
                     """, (row["ticket_id"],))
                     updated_count += 1

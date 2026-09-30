@@ -222,15 +222,20 @@ def get_vnpt_tickets(driver, service_type=None):
                 }
             }
 
-            var final_incident_time = incident_time || reception_time || grid_date;
-            var final_created_time = reception_time || incident_time || grid_date;
+            // Kiểm tra nhãn Phiếu mở lại (label.bg-red hoặc text 'Phiếu mở lại' trên dòng)
+            var is_reopened = !!(row.querySelector('label.bg-red, .label-danger, [class*="red"]') || 
+                                 (row.innerText || '').includes('Phiếu mở lại') ||
+                                 (row.innerHTML || '').includes('Phiếu mở lại'));
+            var reopen_count = is_reopened ? 1 : 0;
 
             data_rows.push({ 
                 "title": title, 
                 "phone": phone, 
                 "content": content,
                 "created_time": final_created_time,
-                "incident_time": final_incident_time
+                "incident_time": final_incident_time,
+                "is_reopened": is_reopened,
+                "reopen_count": reopen_count
             });
         }
 

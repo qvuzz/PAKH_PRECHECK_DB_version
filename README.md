@@ -1,144 +1,226 @@
-# 🛡️ VNPT TTS Precheck — Hệ Thống Tiền Kiểm Phản Ánh Khách Hàng
+# VNPT TTS Precheck — Hệ Thống Tiền Kiểm & Tự Động Hóa Xử Lý Phản Ánh Khách Hàng
 
-> **Nền tảng tự động hóa tiền kiểm tra, phân tích hạ tầng Core và đóng phiếu sự cố mạng di động VNPT / VinaPhone.**  
-> Hỗ trợ song song cả **Hệ thống TTS Cũ** (`tts.vnpt.vn`) và **Hệ thống TTS Mới** (`tts.vnptnet.vn`), tích hợp phân tích AI, tra cứu hạ tầng Core (HSS/HLR/Cell ID/SAPC), BTools và Dashboard điều hành tập trung.
-
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://python.org)
-[![VNPT](https://img.shields.io/badge/VNPT-Brand%20Blue-005baa)](https://vnpt.vn)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+Hệ thống phần mềm chuyên dụng hỗ trợ Khối Kỹ thuật Viễn thông VNPT / VinaPhone tự động hóa quy trình tiền kiểm tra hạ tầng mạng, đối soát thuê bao Core, phân tích nguyên nhân sự cố và đóng phiếu phản ánh khách hàng (PAKH) trên hệ thống OneOSS TTS Mới (`tts.vnptnet.vn`) và TTS Cũ (`tts.vnpt.vn`).
 
 ---
 
-## 📋 Mục Lục
+## 1. Tổng Quan Hệ Thống
 
-1. [Tổng quan hệ thống](#-tổng-quan-hệ-thống)
-2. [Các tính năng nổi bật](#-các-tính-năng-nổi-bật)
-3. [Kiến trúc phân tầng (Modular Architecture)](#-kiến-trúc-phân-tầng-modular-architecture)
-4. [Cấu trúc mã nguồn](#-cấu-trúc-mã-nguồn)
-5. [Quy trình tiền kiểm & Đóng phiếu](#-quy-trình-tiền-kiểm--đóng-phiếu)
-6. [Cài đặt & Khởi chạy](#-cài-đặt--khởi-chạy)
-7. [Chế độ đóng phiếu (Tự động vs Thủ công)](#-chế-độ-đóng-phiếu-tự-động-vs-thủ-công)
-8. [Bảo mật & Phân quyền](#-bảo-mật--phân-quyền)
+Mỗi ngày, hệ thống tiếp nhận khối lượng lớn các phản ánh từ khách hàng liên quan đến chất lượng dịch vụ di động:
+* **Dịch vụ Mobile Internet (Data)**: Mất mạng, truy cập chậm, chập chờn, không load được ứng dụng (Facebook, Youtube, TikTok...), lỗi gói cước, hạ băng thông...
+* **Dịch vụ Cuộc gọi (Voice)**: Không gọi đi/đến được, rớt cuộc gọi, nghẽn mạng, chất lượng thoại kém...
+* **Dịch vụ Tin nhắn (SMS)**: Không gửi/nhận được SMS, chậm trễ tin nhắn OTP, dịch vụ GTGT...
+* **Gói cước & Phản ánh khác**: Tra cứu chính sách gói cước, khiếu nại cước, lỗi roaming...
 
----
-
-## 🌐 Tổng Quan Hệ Thống
-
-**VNPT TTS Precheck** giải quyết bài toán xử lý hàng nghìn phiếu phản ánh sự cố mạng di động (Mobile Internet, Cuộc gọi, Tin nhắn SMS, Gói cước...) mỗi ngày bằng cách:
-* **Tự động trích xuất danh sách phiếu sự cố**: Cào giao diện qua Selenium (TTS Cũ) và gọi REST API ngầm siêu tốc (TTS Mới).
-* **Tiền kiểm tra tức thì hạ tầng Core**:
-  * Tra cứu thông tin hồ sơ thuê bao HSS/HLR (Radio 2G/3G/4G/5G, IP, trạng thái NAM/Khóa GPRS).
-  * Tra cứu trạm phát sóng (Cell ID / ECGI) phục vụ tại thời điểm xảy ra sự cố.
-  * Phân tích chính sách gói cước thực tế từ hệ thống SAPC.
-  * Trích xuất lịch sử phiên truy cập dữ liệu kỹ thuật từ BTools.
-* **Tóm tắt thông minh**:
-  * **Phiếu Mobile Internet**: Ứng dụng mô hình AI tóm tắt ngắn gọn 6 trường thông tin phản ánh cốt lõi.
-  * **Phiếu Thoại / SMS / Gói cước**: Giữ nguyên vẹn toàn bộ nội dung phản ánh gốc để nhân viên kỹ thuật nắm bắt chính xác hiện tượng.
-* **Tự động đóng phiếu chuẩn xác**: Áp dụng bộ 6 kịch bản chuẩn đoán và phân loại lỗi để tự động đóng phiếu đúng nguyên nhân, hoặc hỗ trợ mở tab chi tiết để đóng thủ công an toàn.
+**VNPT TTS Precheck** thay thế hoàn toàn thao tác tra cứu thủ công rời rạc trên nhiều hệ thống bằng quy trình tự động hóa tập trung:
+1. **Thu thập phiếu sự cố**: Tự động đồng bộ danh sách phiếu từ OneOSS TTS Mới (qua REST API) và TTS Cũ (34 TTP).
+2. **Tiền kiểm tra hạ tầng Core đa luồng**:
+   * **BTools (`10.159.21.241`)**: Khai thác lịch sử phiên 4G/5G, lưu lượng tải, nguyên nhân ngắt phiên (Cause Code: 300, 2042, 2043, 2045...), tốc độ bóp băng thông thực tế (kbps) và phân loại RAT (2G/3G/4G/5G).
+   * **SAPC Core (`10.155.42.218`)**: Tra cứu gói cước đang kích hoạt, ngày đăng ký, hạn sử dụng, trạng thái gói data thực tế.
+   * **Cell Location & HSS Profile (`10.155.42.218`)**: Tra cứu trạm phát sóng (Cell ID, eNodeB, ECGI), trạng thái hồ sơ HSS, cờ khóa cước NAM (0 = mở, 1 = khóa cước), địa chỉ IP gán cho thuê bao.
+   * **Hạ tầng sóng trạm CEM (`api-cem.vnptmedia.vn`)**: Phân tích chất lượng phát sóng 5 ngày gần nhất tại vị trí phản ánh, lịch sử sự cố trạm vô tuyến và thống kê Top ứng dụng tiêu thụ dữ liệu.
+   * **CCOS (`gqknccos.vnpt.vn`)**: Trích xuất chi tiết nội dung khiếu nại và file đính kèm biên bản kiểm tra hiện trường.
+3. **Phân tích chẩn đoán kỹ thuật**: Ứng dụng động cơ chẩn đoán theo kịch bản kỹ thuật (`scenarios_engine.py`) kết hợp mô hình AI (`ai_interpreter.py`) để đưa ra nhận định nguyên nhân sự cố và giải pháp xử lý.
+4. **Tự động đóng phiếu / Chuyển bước đa cấp**: Tự động chuyển bước quy trình xử lý PAKH trên OneOSS (2.3 -> 2.4 -> 2.6 -> Hoàn thành), tự động điền Lĩnh vực "Chất lượng mạng", chuẩn hóa Phường/Xã/Tỉnh và phân loại nguyên nhân theo danh mục chuẩn VNPT.
 
 ---
 
-## ✨ Các Tính Năng Nổi Bật
-
-| Nhóm chức năng | Chi tiết |
-|---|---|
-| 🏢 **Hệ Thống TTS Cũ** | Tự động đọc bảng phiếu, tiền kiểm tra hạ tầng Core & BTools, tự động click đóng phiếu qua Chrome CDP. |
-| ⚡ **Hệ Thống TTS Mới** | Tích hợp sâu REST API (`/ticket-mobile/search`, `/ticket-mobile/finish-ticket`), tự động trích xuất token đăng nhập từ trình duyệt, tiền kiểm hàng trăm phiếu chỉ trong vài giây. |
-| 📶 **Mobile Internet** | Đối soát dung lượng, chặn bóp băng thông, treo gói, lỗi sóng 4G/3G, tóm tắt AI chuyên sâu. |
-| 📞 **Thoại / SMS / Gói** | Quét riêng biệt danh mục sự cố ngoài Data (Gọi đi/đến, SMS, Spam, Khóa cước...), tra cứu HLR/HSS và Cell ID. |
-| 🎛️ **Dashboard Hiện Đại** | Giao diện chuẩn màu xanh VNPT (`#005baa`), phẳng, chuyên nghiệp, hiển thị Live Log thời gian thực, bộ lọc trạng thái và thống kê tự động. |
-| 🎯 **Đóng Thủ Công 1-Click** | Nút chuyển thẳng sang tab chi tiết phiếu (`chi-tiet-phieu-pakh`) trên TTS Mới, sẵn sàng để người dùng nghiệm thu và đóng phiếu. |
-| 📊 **Xuất Báo Cáo Excel** | Xuất bảng tổng hợp 12 cột chuẩn quy chuẩn VNPT kèm tô màu phân loại nhận định. |
-
----
-
-## 🏗️ Kiến Trúc Phân Tầng (Modular Architecture)
-
-Mã nguồn được tái cấu trúc thành các module độc lập, tách biệt rõ ràng giữa điều phối máy chủ, dịch vụ nghiệp vụ và giao diện người dùng:
+## 2. Kiến Trúc Phân Tầng Hệ Thống (System Architecture)
 
 ```
-PAKH_PRECHECK/
-├── dashboard.py                     # HTTP Server Router & Điều phối trung tâm (~500 dòng)
-├── templates/
-│   └── dashboard.html               # Giao diện Web HTML, CSS phẳng chuyên nghiệp & Client JS
-├── services/
-│   ├── __init__.py                  # Package marker
-│   ├── state.py                     # Singleton AutomationState quản lý tiến trình & logs
-│   ├── tts_old_data.py              # Logic tiền kiểm & chu kỳ quét Mobile Internet (TTS Cũ)
-│   ├── tts_old_voice.py             # Logic tiền kiểm & chu kỳ quét Thoại / SMS / Gói (TTS Cũ)
-│   ├── tts_new_data.py              # Logic gọi REST API & tiền kiểm Mobile Internet (TTS Mới)
-│   ├── tts_new_voice.py             # Logic gọi REST API & tiền kiểm Thoại / SMS / Gói (TTS Mới)
-│   └── automation_worker.py         # Worker luồng ngầm chạy chu kỳ quét tự động định kỳ
-├── ttsnew_api.py                    # Module giao tiếp REST API TTS Mới & trích xuất Bearer Token
-├── update_tts/                      # Bộ điều khiển đóng phiếu trên TTS Cũ
-├── sapccheck/                       # Module tra cứu SAPC và thông tin thuê bao
-└── open_dashboard.bat               # File khởi chạy 1-click cho người dùng Windows
+[ Trình duyệt KTV / Trình duyệt Chrome ]
+       │
+       ├── Giao diện SPA Dashboard (Port 1234)
+       │     ├── Realtime WebSocket Feed & Live Logs
+       │     ├── Bảng điều phối danh mục (Data, Cuộc gọi, SMS, Gói cước)
+       │     └── Drawer kiểm tra chi tiết & Modal cấu hình Auto-Close
+       │
+       └── Tiện ích mở rộng "VNPT Token Utilities"
+             └── Tự động trích xuất & đồng bộ Session/Cookie/Bearer Token
+                   ├── OneOSS TTS Mới (Bearer JWT)
+                   ├── OneOSS TTS Cũ (scnntttoken, XSRF)
+                   ├── SAPC Core (Cookie .AspNet.ApplicationCookie)
+                   ├── BTools (JSESSIONID)
+                   ├── CEM (Bearer API Key)
+                   └── CCOS (SessionDB, SESSIONID)
+       │
+[ FastAPI Gateway Server (Port 1234) ]
+       │
+       ├── Routers:
+       │     ├── routers/web.py          : Phục vụ SPA & Static Assets
+       │     ├── routers/auth.py         : Quản lý phiên làm việc & xác thực KTV
+       │     ├── routers/tickets.py      : Điều phối phiếu, API bảng, Precheck On-Demand
+       │     ├── routers/automation.py   : Cấu hình quy tắc đóng tự động & điều khiển Worker
+       │     ├── routers/integrations.py : Cổng tiếp nhận token & đồng bộ trạng thái ngoại vi
+       │     └── routers/cdr.py          : Tra cứu nhật ký bản tin SMSC/CDR
+       │
+       ├── Services & Business Logic:
+       │     ├── services/automation_worker.py : Luồng lập lịch quét định kỳ ngầm
+       │     ├── services/tts_new_data.py      : Engine tiền kiểm Data TTS Mới (8 Workers)
+       │     ├── services/tts_new_voice.py     : Engine tiền kiểm Thoại/SMS TTS Mới (8 Workers)
+       │     ├── services/tts_old_api_data.py  : Engine tiền kiểm Data TTS Cũ
+       │     ├── services/voice_precheck.py    : Tiền kiểm hồ sơ cuộc gọi & tin nhắn
+       │     └── services/state.py             : Quản lý trạng thái luồng & bộ nhớ tạm
+       │
+       ├── Core Diagnostic Engines:
+       │     ├── scenarios_engine.py     : Thuật toán nhận diện kịch bản lỗi BTools/SAPC
+       │     ├── diagnostic_scenarios.json: Cấu hình ma trận kịch bản chẩn đoán
+       │     ├── serviceid.json          : Từ điển gói cước & bảng mã bóp băng thông
+       │     ├── ai_interpreter.py       : Bóc tách thực thể & tóm tắt phản ánh bằng AI
+       │     └── report_bot.py           : Tổng hợp chứng cứ kỹ thuật & sinh mẫu kết luận
+       │
+       ├── Connectors & Clients:
+       │     ├── ttsnew_api.py           : REST API Client OneOSS TTS Mới
+       │     ├── tts_old_api.py          : REST API Client OneOSS TTS Cũ
+       │     ├── btools_manager.py       : Kết nối Chrome CDP & HTTP Crawler BTools
+       │     ├── sapccheck/              : Kết nối API SAPC Core & Tra cứu Cell HSS
+       │     ├── cem_client.py           : Kết nối API đo kiểm vô tuyến CEM
+       │     └── ccos_client.py          : Kết nối hệ thống khiếu nại CCOS
+       │
+       └── Persistence Layer:
+             └── db_manager.py -> tickets.db (SQLite: Lưu vết phiếu, cấu hình, lịch sử tiền kiểm)
 ```
 
 ---
 
-## 📁 Cấu Trúc Mã Nguồn Chi Tiết
+## 3. Bản Đồ Cấu Trúc Mã Nguồn
 
-* **`dashboard.py`**: Khởi chạy `ThreadingHTTPServer` cổng `1234`, tiếp nhận các yêu cầu API điều khiển (`/api/start`, `/api/stop`, `/api/run-now`, `/api/tickets`, `/api/ttsnew/open_detail`...).
-* **`templates/dashboard.html`**: Nạp giao diện người dùng động. Có thể chỉnh sửa giao diện mà không cần khởi động lại tiến trình Python.
-* **`services/tts_old_data.py` & `services/tts_old_voice.py`**: Tương tác với Chrome đang mở (cổng 9222), đọc DOM của `tts.vnpt.vn`, bóc tách dữ liệu và lưu vào cơ sở dữ liệu SQLite `tickets.db`.
-* **`services/tts_new_data.py` & `services/tts_new_voice.py`**: Gọi trực tiếp REST API `https://tts.vnptnet.vn` với Bearer Token được đọc tự động từ trình duyệt, phân loại danh sách phiếu Mobile Internet và ngoài Mobile Internet.
-* **`ai_interpreter.py`**: Tóm tắt phản ánh khách hàng bằng AI (Qwen/Groq hoặc Gemini) kèm cơ chế offline fallback (Fuzzy/NLP).
-* **`report_bot.py`**: Engine phân loại trạng thái theo 6 kịch bản chuẩn đoán và xuất báo cáo Excel định dạng chuẩn.
+| Đường dẫn / Tên file | Trọng trách chính trong dự án |
+| :--- | :--- |
+| **`dashboard.py`** | Điểm khởi động máy chủ FastAPI, quản lý tiến trình Uvicorn (Port 1234), khởi chạy Chrome Debugging và các Background Workers. |
+| **`db_manager.py`** | Quản lý cơ sở dữ liệu SQLite `tickets.db`: Lưu trữ phiếu, kết quả tiền kiểm, cấu hình Auto-Close, đồng bộ trạng thái xử lý. |
+| **`scenarios_engine.py`** | Thuật toán lõi nhận diện kịch bản sự cố từ dữ liệu BTools: Bóp băng thông theo gói, rớt 2G/3G, treo phiên quản trị `300`/`2042`, lỗi SIM/HSS. |
+| **`diagnostic_scenarios.json`** | Định nghĩa chi tiết các bước logic chẩn đoán tuần tự phục vụ phân loại nguyên nhân OneOSS. |
+| **`serviceid.json`** | Từ điển định danh gói cước data VNPT, bảng đối chiếu mã bóp băng thông (`10002` .. `10014`) và tốc độ tương ứng (kbps). |
+| **`report_bot.py`** | Tổng hợp chứng cứ kỹ thuật từ BTools, SAPC, CEM; sinh nội dung kết luận xử lý kỹ thuật và đề xuất mã nguyên nhân đóng phiếu. |
+| **`ai_interpreter.py`** | Bóc tách thực thể tự nhiên (NLP) và tóm tắt nội dung phản ánh khách hàng bằng AI hoặc Fuzzy Matcher offline. |
+| **`ttsnew_api.py`** | Khai thác REST API của hệ thống OneOSS TTS Mới: Tìm kiếm phiếu, nhận phiếu, chuyển bước 2.3/2.4/2.6 và hoàn tất phiếu. |
+| **`tts_old_api.py`** | Khai thác API hệ thống TTS Cũ (34 Tỉnh/Thành phố): Lấy danh sách phiếu và cập nhật kết quả xử lý. |
+| **`btools_manager.py`** | Kết nối Chrome Remote Debugging (cổng 9222), trích xuất cookie và thực hiện cào ngầm dữ liệu phiên BTools qua HTTP. |
+| **`cem_client.py`** | Giao tiếp API CEM: Đánh giá chất lượng sóng trạm vô tuyến 5 ngày gần nhất và trích xuất Top ứng dụng sử dụng. |
+| **`ccos_client.py`** | Khai thác API CCOS: Tra cứu thông tin phản ánh ban đầu và tải file đính kèm biên bản khảo sát hiện trường. |
+| **`sapccheck/`** | Phân hệ kết nối Core SAPC (`10.155.42.218`): Tra cứu gói cước, cờ NAM, Radio phục vụ, địa chỉ IP và HSS Profile. |
+| **`routers/`** | Phân tầng Router FastAPI: Phân chia rõ ràng giữa giao diện web, điều khiển tự động hóa, API phiếu và xác thực. |
+| **`services/`** | Các worker nền: Điều phối chu kỳ quét đa luồng, xử lý dữ liệu song song cho từng phân loại phiếu. |
+| **`templates/dashboard.html`** | Giao diện điều hành tập trung Single Page Application (SPA), tích hợp điều khiển và hiển thị thời gian thực. |
+| **`static/css/dashboard.css`** | Thiết kế phong cách VNPT hiện đại: Chuẩn nhận diện viễn thông, tối ưu không gian hiển thị thông tin kỹ thuật. |
+| **`static/js/dashboard.js`** | Xử lý logic phía client: WebSocket realtime feed, bộ lọc động, bảng dữ liệu, drawer chi tiết và modal xử lý. |
 
 ---
 
-## 🚀 Cài Đặt & Khởi Chạy
+## 4. Cơ Chế Xử Lý Đa Luồng & Tối Ưu Tốc Độ (High-Concurrency Engine)
 
-### 1. Yêu cầu tiên quyết
-- **Hệ điều hành**: Windows 10/11.
-- **Python**: Phiên bản 3.10 trở lên.
-- **Google Chrome**: Cài đặt sẵn trên máy.
+Hệ thống được thiết kế tối ưu hóa tốc độ xử lý I/O Network thông qua mô hình đa luồng 2 cấp:
 
-### 2. Cài đặt các thư viện cần thiết
+### 4.1. Đa luồng cấp danh sách (Batch-Level Concurrency)
+* **Mobile Internet (Data)**: Sử dụng `ThreadPoolExecutor(max_workers=8)` để xử lý đồng thời **8 thuê bao cùng lúc**.
+* **Cuộc gọi & Tin nhắn (Voice / SMS)**: Sử dụng `ThreadPoolExecutor(max_workers=8)` để xử lý song song danh sách phiếu thoại, giảm thời gian tiền kiểm toàn bộ danh sách 30 - 40 phiếu xuống dưới 10 giây.
+* **Tái sử dụng kết quả DB thông minh (DB Cache Reuse)**: Đối với các thuê bao đã có kết quả tiền kiểm hợp lệ trong chu kỳ gần nhất và không có yêu cầu ép quét lại (`force_recheck=False`), hệ thống tái sử dụng ngay kết quả từ SQLite trong **0.01 giây**, chỉ tập trung tài nguyên mạng vào các phiếu mới phát sinh.
+
+### 4.2. Đa luồng song song nội bộ từng thuê bao (Intra-Ticket Concurrency)
+Khi KTV kích hoạt tiền kiểm tra 1 số thuê bao cụ thể, hệ thống kích hoạt đồng thời 3 luồng con:
+* **Luồng 1 (Core SAPC & HSS)**: Truy vấn gói cước SAPC và thông tin trạm phát sóng Cell ID / cờ NAM.
+* **Luồng 2 (BTools)**: Cào lịch sử phiên truy cập dữ liệu 5 ngày qua HTTP.
+* **Luồng 3 (CEM)**: Truy vấn chất lượng sóng trạm vô tuyến 5 ngày và Top ứng dụng.
+
+Tổng thời gian tiền kiểm 1 thuê bao rút ngắn từ **5 - 8 giây xuống chỉ còn 1 - 1.5 giây** (tương đương thời gian của luồng mạng đơn lẻ dài nhất).
+
+---
+
+## 5. Quy Trình Tiền Kiểm & Tự Động Đóng Phiếu (End-to-End Pipeline)
+
+### 5.1. Tiền kiểm tra Mobile Internet
+1. **Lấy danh sách phiếu**: Lọc theo điều kiện bước xử lý (2.3 Xử lý PAKH hoặc 2.4 Đánh giá kết quả).
+2. **Khai thác BTools**: Lấy toàn bộ phiên data trong 5 ngày. Phân tích lưu lượng tải lên/xuống, loại sóng (4G/3G/2G), mã kết thúc phiên.
+3. **Đối soát SAPC**: Kiểm tra thuê bao có gói cước data không, còn hạn sử dụng hay đã hết dung lượng tốc độ cao và bị hạ băng thông về mã bóp tương ứng.
+4. **Đối soát CEM**: Xác định trạm phát sóng phục vụ, tỷ lệ bắt sóng trên từng cell, cảnh báo nếu thiết bị bật VPN hoặc trạm có sự cố nghẽn.
+5. **Đưa ra nhận định**: Phân loại theo các kịch bản chuẩn:
+   * *Bóp băng thông theo chính sách gói cước*.
+   * *Thuê bao hoạt động bình thường, lưu lượng ổn định*.
+   * *Lưu lượng yếu / Tập trung 1 trạm phục vụ*.
+   * *Không phát sinh lưu lượng data trong thời gian phản ánh*.
+   * *Treo phiên kết nối quản trị (Code 300 / 2042)*.
+   * *Khóa cước chiều GPRS (Cờ NAM = 1)*.
+
+### 5.2. Tiền kiểm tra Cuộc gọi & Tin nhắn
+1. **Lấy danh sách phiếu**: Lọc các phản ánh thuộc nhóm Thoại, SMS, Chuyển mạng giữ số (MNP)...
+2. **Kiểm tra trạng thái Core**: Kiểm tra cờ NAM, hồ sơ HSS, địa chỉ trạm VLR/MME phục vụ gần nhất.
+3. **Tra cứu CCOS**: Trích xuất nội dung khiếu nại chi tiết, đối chiếu số thuê bao chủ gọi / bị gọi và tải file biên bản hiện trường nếu có.
+4. **Đưa ra nhận định**: Xác nhận mạng lưới đảm bảo chất lượng, phân loại nguyên nhân phù hợp quy trình viễn thông.
+
+### 5.3. Chuỗi đóng phiếu tự động OneOSS (Auto-Close Pipeline)
+Khi bật chế độ **Đóng tự động (`Auto-Close = ON`)**, hệ thống thực hiện đóng dứt điểm theo quy trình:
+* **Phiếu ở bước 2.3**: Tự động chuyển bước sang 2.4.
+* **Phiếu ở bước 2.4**: Tự động chuyển tiếp sang bước 2.6 (hoặc hoàn tất theo cấu hình quy trình).
+* **Phiếu ở bước 2.6**: Tự động hoàn tất đóng phiếu với:
+  * Điền nội dung kết luận xử lý kỹ thuật chuẩn hóa.
+  * Tự động chọn Lĩnh vực: **Chất lượng mạng**.
+  * Tự động xác định địa bàn xử lý: Tỉnh/TP, Quận/Huyện, Phường/Xã từ thông tin trạm phát sóng hoặc dữ liệu phản ánh.
+  * Chọn đúng mã nguyên nhân đóng phiếu theo danh mục quy định của VNPT.
+
+---
+
+## 6. Hướng Dẫn Cài Đặt & Vận Hành
+
+### 6.1. Yêu cầu môi trường
+* **Hệ điều hành**: Microsoft Windows 10 / 11 (64-bit).
+* **Python**: Phiên bản 3.10 trở lên.
+* **Google Chrome**: Phiên bản chính thức mới nhất.
+
+### 6.2. Cài đặt các thư viện phụ thuộc
+Mở Command Prompt hoặc PowerShell tại thư mục dự án và chạy:
 ```bash
 pip install -r requirements.txt
 ```
-*(Nếu chưa có file `requirements.txt`: `pip install selenium requests openpyxl rapidfuzz google-generativeai python-dotenv`)*
+*(Các thư viện chính bao gồm: `fastapi`, `uvicorn`, `requests`, `selenium`, `websockets`, `openpyxl`, `rapidfuzz`, `google-generativeai`, `python-dotenv`)*
 
-### 3. Khởi chạy 1-Click (Khuyến nghị)
-Nhấp đúp chuột vào file:
+### 6.3. Cài đặt tiện ích mở rộng Chrome (VNPT Token Utilities)
+1. Mở Google Chrome, truy cập địa chỉ: `chrome://extensions/`.
+2. Bật công tắc **Chế độ dành cho nhà phát triển (Developer mode)** ở góc trên bên phải.
+3. Bấm nút **Tải tiện ích đã giải nén (Load unpacked)** và chọn thư mục tiện ích:
+   * Thư mục tiện ích chung: `python/VNPT_Token_Utilities` (hoặc thư mục `extension_precheck` đi kèm dự án).
+4. Tiện ích sẽ xuất hiện trên thanh công cụ trình duyệt. Bấm nút **Sync All Now** để tự động đồng bộ toàn bộ Session, Cookie và Token của các hệ thống nội bộ (TTS, BTools, SAPC, CEM, CCOS) sang Port 1234.
+
+### 6.4. Khởi chạy hệ thống
+Nhấp đúp chuột vào file batch:
 ```bash
 open_dashboard.bat
 ```
-Script sẽ tự động:
-1. Mở Google Chrome ở chế độ Remote Debugging (cổng 9222).
-2. Khởi động Web Server Python tại `http://localhost:1234`.
-3. Tự động mở giao diện Dashboard trên trình duyệt của bạn.
+Tập lệnh sẽ tự động:
+1. Mở Chrome ở chế độ Remote Debugging trên cổng `9222`.
+2. Khởi chạy Web Server FastAPI trên cổng `1234`.
+3. Tự động mở giao diện Dashboard tại địa chỉ: `http://localhost:1234`.
+
+*(Để dừng toàn bộ hệ thống khi kết thúc ca làm việc: Chạy file `stop_dashboard.bat`)*
 
 ---
 
-## ⚙️ Chế Độ Đóng Phiếu (Tự Động vs Thủ Công)
+## 7. Cấu Hình & Chế Độ Hoạt Động
 
-Hệ thống cung cấp công tắc chuyển đổi linh hoạt:
+### 7.1. Chế độ Đóng thủ công (An toàn / Kiểm thử)
+* Mặc định khi khởi động, chế độ Auto-Close ở trạng thái **OFF**.
+* KTV sử dụng Dashboard để giám sát toàn bộ quá trình tiền kiểm tự động, xem trước kết luận phân tích và hồ sơ Core của từng thuê bao.
+* Khi muốn đóng phiếu nào, KTV bấm nút **Đóng phiếu** hoặc **Mở chi tiết** trên dòng tương ứng để kiểm tra và xác nhận đóng.
 
-1. **Chế độ Tự Động Đóng (`Auto Close = ON`)**:
-   - Khi chạy chu kỳ quét (định kỳ hoặc bấm nút Quét), hệ thống tự động kiểm tra điều kiện đóng mức 1 (Level 1 Auto-Close Candidate).
-   - Nếu đủ điều kiện (Mạng lưới bình thường, cấu hình đúng), hệ thống sẽ gửi lệnh đóng phiếu lên TTS.
-   - Các phiếu chưa đủ điều kiện sẽ được gán nhãn `Chưa đóng được` kèm lý do chi tiết.
-
-2. **Chế độ Đóng Thủ Công (`Auto Close = OFF`)**:
-   - Hệ thống chỉ thực hiện cào dữ liệu, đối soát Core/SAPC/BTools và phân loại nhận định.
-   - Nhân viên chủ động bấm nút:
-     - **Đóng Phiếu** (trên TTS Cũ): Gửi lệnh đóng riêng cho từng phiếu đã chọn.
-     - **Đóng thủ công** (trên TTS Mới): Chuyển tab Chrome tới trang chi tiết phiếu (`chi-tiet-phieu-pakh`) để người dùng xem lại thông tin và xác nhận hoàn tất.
-
----
-
-## 🔒 Bảo Mật & Phân Quyền Sử Dụng
-
-> [!IMPORTANT]
-> - Khi khởi chạy trên máy tính cá nhân, hệ thống sử dụng phiên đăng nhập (Cookie / Token) trên trình duyệt Chrome của chính máy tính đó.
-> - **Nếu chia sẻ cho đồng nghiệp**: Khuyến nghị gửi toàn bộ thư mục cho đồng nghiệp để họ chạy file `open_dashboard.bat` trên máy của họ. Việc này đảm bảo các thao tác xử lý phiếu luôn ghi nhận đúng tài khoản và danh tính của người thực hiện.
-> - Tuyệt đối không commit file `.env`, file cấu hình chứa mật khẩu hoặc database khách hàng lên kho chứa mã nguồn công khai.
+### 7.2. Chế độ Đóng tự động (Auto-Close Pipeline)
+* KTV mở menu **Cấu hình Đóng tự động** trên thanh công cụ Dashboard.
+* Bật công tắc Auto-Close cho từng phân hệ mong muốn (Data, Cuộc gọi, Tin nhắn...).
+* Thiết lập các điều kiện an toàn:
+  * Chỉ đóng tự động các phiếu có kết quả tiền kiểm là *Mạng lưới đảm bảo* hoặc *Bóp băng thông theo gói*.
+  * Loại trừ các thuê bao VIP hoặc các phiếu phản ánh mở lại nhiều lần (Reopened tickets) để KTV kiểm tra thủ công.
 
 ---
 
-## 📄 Bản Quyền & Phát Triển
-* Được xây dựng và tối ưu bởi đội ngũ kỹ thuật VNPT.
-* Giấy phép sử dụng: **MIT License**.
+## 8. Nguyên Tắc Bảo Mật & An Toàn Dữ Liệu
+
+* **Xác thực phiên làm việc cá nhân**: Mọi yêu cầu tương tác và đóng phiếu lên OneOSS đều sử dụng chính phiên đăng nhập (JWT Token / Session Cookie) của KTV đang mở trên trình duyệt của máy trạm. Các thao tác trên hệ thống luôn gắn liền với danh tính và quyền hạn thực tế của KTV.
+* **Bảo mật thông tin khách hàng**: Cơ sở dữ liệu SQLite `tickets.db`, dữ liệu cào tạm thời (`number/`, `output/`, `cem/`) và các file cache token đều được loại trừ trong `.gitignore`, tuyệt đối không commit lên kho lưu trữ mã nguồn công khai.
+* **Cơ chế Dry-Run & Chống đóng nhầm**: Lệnh đóng phiếu tự động chỉ kích hoạt khi thỏa mãn đầy đủ ma trận điều kiện kỹ thuật đã được KTV phê duyệt cấu hình.
+
+---
+
+## 9. Bản Quyền & Hỗ Trợ Kỹ Thuật
+
+* **Đơn vị phát triển**: Khối Kỹ thuật Viễn thông VNPT / VinaPhone.
+* **Bảo trì & Tối ưu hóa**: Đội ngũ Quản trị Hệ thống & Tự động hóa Kỹ thuật.
+* **Giấy phép**: Lưu hành nội bộ phục vụ sản xuất kinh doanh VNPT.

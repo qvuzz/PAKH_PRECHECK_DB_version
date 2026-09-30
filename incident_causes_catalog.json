@@ -1,0 +1,522 @@
+{
+  "groups": [
+    {
+      "group": "Khách hàng",
+      "items": [
+        {
+          "id": 2015,
+          "name": "Thuê bao chưa mở dịch vụ, gói cước"
+        },
+        {
+          "id": 2014,
+          "name": "Thuê bao cài đặt sai trung tâm tin nhắn"
+        },
+        {
+          "id": 2013,
+          "name": "Thuê bao bị mạng đầu xa chặn"
+        },
+        {
+          "id": 2115,
+          "name": "Thuê bao bị khóa gọi OC, IC"
+        },
+        {
+          "id": 2012,
+          "name": "Thông tin đầu vào chưa chính xác, trùng lặp"
+        },
+        {
+          "id": 2011,
+          "name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường"
+        },
+        {
+          "id": 2114,
+          "name": "Lỗi SIM"
+        },
+        {
+          "id": 2010,
+          "name": "Không liên hệ được với khách hàng"
+        },
+        {
+          "id": 2009,
+          "name": "Khách hàng yêu cầu hủy dịch vụ"
+        },
+        {
+          "id": 2113,
+          "name": "Khách hàng theo dõi thêm"
+        },
+        {
+          "id": 2112,
+          "name": "Khách hàng không hợp tác"
+        },
+        {
+          "id": 2008,
+          "name": "Khách hàng chuyển mạng"
+        },
+        {
+          "id": 2007,
+          "name": "Đóng/Mở chặn spam"
+        },
+        {
+          "id": 2111,
+          "name": "Do thiết bị đầu cuối"
+        },
+        {
+          "id": 2110,
+          "name": "Đăng nhập chưa đúng mạng có hỗ trợ"
+        }
+      ]
+    },
+    {
+      "group": "VNPT-IT",
+      "items": [
+        {
+          "id": 2141,
+          "name": "Lỗi sự cố trên hệ thống VNPT-IT quản lý"
+        },
+        {
+          "id": 2040,
+          "name": "Lỗi profile thuê bao"
+        },
+        {
+          "id": 2140,
+          "name": "Lỗi khai báo trên hệ thống VNPT-IT quản lý"
+        },
+        {
+          "id": 2039,
+          "name": "Lỗi do gói cước"
+        }
+      ]
+    },
+    {
+      "group": "VNPT-VinaPhone",
+      "items": [
+        {
+          "id": 2042,
+          "name": "Lỗi do VNPT-VinaPhone khai báo cước cho khách hàng"
+        },
+        {
+          "id": 2143,
+          "name": "Lỗi do VNPT-VinaPhone khai báo dịch vụ cho khách hàng"
+        }
+      ]
+    },
+    {
+      "group": "Mạng Core (VNPT-Net)",
+      "items": [
+        {
+          "id": 2120,
+          "name": "Lỗi sự cố trên hệ thống Truyền dẫn"
+        },
+        {
+          "id": 2019,
+          "name": "Lỗi sự cố trên hệ thống Core IP"
+        },
+        {
+          "id": 2119,
+          "name": "Lỗi sự cố trên hệ thống Core CS/PS"
+        },
+        {
+          "id": 2018,
+          "name": "Lỗi khai báo trên hệ thống Truyền dẫn"
+        },
+        {
+          "id": 2118,
+          "name": "Lỗi khai báo trên hệ thống Core IP"
+        },
+        {
+          "id": 2117,
+          "name": "Lỗi khai báo trên hệ thống Core CS/PS"
+        },
+        {
+          "id": 2116,
+          "name": "Lỗi dịch vụ Wifi Calling"
+        },
+        {
+          "id": 2017,
+          "name": "Lỗi dịch vụ VoLTE"
+        },
+        {
+          "id": 2016,
+          "name": "Bổ sung tài nguyên, tối ưu hệ thống Core"
+        }
+      ]
+    },
+    {
+      "group": "Mạng Vô tuyến (VNPT-Net)",
+      "items": [
+        {
+          "id": 2030,
+          "name": "Triển khai 5G"
+        },
+        {
+          "id": 2131,
+          "name": "Thực hiện CRs hiện trường"
+        },
+        {
+          "id": 2029,
+          "name": "Thiếu trạm Macro"
+        },
+        {
+          "id": 2130,
+          "name": "Thiếu trạm IBS"
+        },
+        {
+          "id": 2028,
+          "name": "Thiếu thiết bị Sector"
+        },
+        {
+          "id": 2129,
+          "name": "Tắt, di dời trạm Macro do hết hợp đồng thuê CSHT"
+        },
+        {
+          "id": 2027,
+          "name": "Tắt trạm theo yêu cầu/văn bản/lộ trình của cơ quan chức năng"
+        },
+        {
+          "id": 2128,
+          "name": "Outdoor tốt, indoor kém"
+        },
+        {
+          "id": 2026,
+          "name": "Mất liên lạc do lỗi thiết bị trạm"
+        },
+        {
+          "id": 2127,
+          "name": "Mất liên lạc do CSHT nhà trạm"
+        },
+        {
+          "id": 2025,
+          "name": "Lỗi sự cố trên hệ thống RAN"
+        },
+        {
+          "id": 2126,
+          "name": "Lỗi khai báo trên hệ thống RAN"
+        },
+        {
+          "id": 2024,
+          "name": "Khóa sóng 2G"
+        },
+        {
+          "id": 2023,
+          "name": "Đưa vào quy hoạch dự án phát triển mạng"
+        },
+        {
+          "id": 2125,
+          "name": "Đã quy hoạch dự án lắp đặt trạm Macro"
+        },
+        {
+          "id": 2022,
+          "name": "Đã phát sóng trạm Macro"
+        },
+        {
+          "id": 2124,
+          "name": "Đã lắp đặt thiết bị Sector"
+        },
+        {
+          "id": 2123,
+          "name": "Bổ sung tài nguyên, tối ưu hệ thống RAN"
+        },
+        {
+          "id": 81,
+          "name": "Blacklist_KD không hiệu quả"
+        }
+      ]
+    },
+    {
+      "group": "Mạng Dịch vụ (VNPT-Net)",
+      "items": [
+        {
+          "id": 2122,
+          "name": "Lỗi sự cố trên hệ thống Dịch vụ eSIM"
+        },
+        {
+          "id": 2021,
+          "name": "Lỗi sự cố trên hệ thống Dịch vụ (GTGT, Roaming, MultiSIM...)"
+        },
+        {
+          "id": 2121,
+          "name": "Lỗi khai báo trên hệ thống Dịch vụ eSIM"
+        },
+        {
+          "id": 2020,
+          "name": "Lỗi khai báo trên hệ thống Dịch vụ (GTGT, Roaming, MultiSIM...)"
+        }
+      ]
+    },
+    {
+      "group": "Nguyên nhân khách quan",
+      "items": [
+        {
+          "id": 2133,
+          "name": "Tác động của cơ quan chức năng"
+        },
+        {
+          "id": 2032,
+          "name": "Nguồn nhiễu ngoài"
+        },
+        {
+          "id": 2031,
+          "name": "Lỗi phía đối tác"
+        },
+        {
+          "id": 2132,
+          "name": "BẤT KHẢ KHÁNG (thiên tai, lũ lụt…)"
+        }
+      ]
+    },
+    {
+      "group": "VNPT-Media",
+      "items": [
+        {
+          "id": 2142,
+          "name": "Lỗi sự cố trên hệ thống VNPT-Media quản lý"
+        },
+        {
+          "id": 2041,
+          "name": "Lỗi khai báo trên hệ thống VNPT-Media quản lý"
+        }
+      ]
+    },
+    {
+      "group": "Cung cấp log file",
+      "items": [
+        {
+          "id": 2109,
+          "name": "Cung cấp log quốc tế"
+        },
+        {
+          "id": 2006,
+          "name": "Cung cấp log file SMS theo yêu cầu"
+        }
+      ]
+    },
+    {
+      "group": "Roaming quốc tế",
+      "items": [
+        {
+          "id": 2139,
+          "name": "Thuê bao được lái vào mạng có thỏa thuận cước với VNPT nhưng vào khu vực mạng ưu tiên đó có sóng kém"
+        },
+        {
+          "id": 2138,
+          "name": "Thuê bao có gói cước data roaming Rx được lái vào mạng có thỏa thuận gói cước data giá rẻ đi vào khu vực mạng đó có sóng kém."
+        },
+        {
+          "id": 2038,
+          "name": "Thuê bao bị lái vào mạng không có thỏa thuận roaming"
+        },
+        {
+          "id": 2137,
+          "name": "Thuê bao bị lái vào mạng có thỏa thuận Roaming nhưng không hỗ trợ gói data roaming."
+        },
+        {
+          "id": 2037,
+          "name": "Thuê bao không sử dụng được dịch vụ thoại do mạng khách tắt sóng 2G/3G hoặc không kích hoạt được VoLTE trên máy."
+        },
+        {
+          "id": 2036,
+          "name": "Thuê bao không sử dụng được dịch vụ thoại do định tuyến bản tin vào hướng chất lượng kém."
+        },
+        {
+          "id": 2136,
+          "name": "Thuê bao roaming vào đúng mạng nhưng không thực hiện được dịch vụ data (do lỗi mạng/gói cước)."
+        },
+        {
+          "id": 2035,
+          "name": "Thuê bao có gói cước data roaming vào mạng không có thỏa thuận về gói cước, hoặc cài đặt sai."
+        },
+        {
+          "id": 2135,
+          "name": "Thuê bao không sử dụng được dịch vụ do lỗi chủ quan của KH và khai báo phía VNP"
+        },
+        {
+          "id": 2034,
+          "name": "Thuê bao không sử dụng được dịch vụ do lỗi cài đặt/không bật data roaming trên máy."
+        },
+        {
+          "id": 2134,
+          "name": "Thuê bao không roaming được do lỗi sử dụng eSIM của khách hàng"
+        },
+        {
+          "id": 2033,
+          "name": "Khiếu nại cước"
+        }
+      ]
+    }
+  ],
+  "id_map": {
+    "triển khai 5g": 2030,
+    "thực hiện crs hiện trường": 2131,
+    "thiếu trạm macro": 2029,
+    "thiếu trạm ibs": 2130,
+    "thiếu thiết bị sector": 2028,
+    "tắt, di dời trạm macro do hết hợp đồng thuê csht": 2129,
+    "tắt trạm theo yêu cầu/văn bản/lộ trình của cơ quan chức năng": 2027,
+    "outdoor tốt, indoor kém": 2128,
+    "mất liên lạc do lỗi thiết bị trạm": 2026,
+    "mất liên lạc do csht nhà trạm": 2127,
+    "lỗi sự cố trên hệ thống ran": 2025,
+    "lỗi khai báo trên hệ thống ran": 2126,
+    "khóa sóng 2g": 2024,
+    "đưa vào quy hoạch dự án phát triển mạng": 2023,
+    "đã quy hoạch dự án lắp đặt trạm macro": 2125,
+    "đã phát sóng trạm macro": 2022,
+    "đã lắp đặt thiết bị sector": 2124,
+    "bổ sung tài nguyên, tối ưu hệ thống ran": 2123,
+    "blacklist_kd không hiệu quả": 81,
+    "lỗi do vnpt-vinaphone khai báo cước cho khách hàng": 2042,
+    "lỗi do vnpt-vinaphone khai báo dịch vụ cho khách hàng": 2143,
+    "lỗi sự cố trên hệ thống vnpt-media quản lý": 2142,
+    "lỗi khai báo trên hệ thống vnpt-media quản lý": 2041,
+    "lỗi sự cố trên hệ thống vnpt-it quản lý": 2141,
+    "lỗi profile thuê bao": 2040,
+    "lỗi khai báo trên hệ thống vnpt-it quản lý": 2140,
+    "lỗi do gói cước": 2039,
+    "thuê bao được lái vào mạng có thỏa thuận cước với vnpt nhưng vào khu vực mạng ưu tiên đó có sóng kém": 2139,
+    "thuê bao có gói cước data roaming rx được lái vào mạng có thỏa thuận gói cước data giá rẻ đi vào khu vực mạng đó có sóng kém.": 2138,
+    "thuê bao bị lái vào mạng không có thỏa thuận roaming": 2038,
+    "thuê bao bị lái vào mạng có thỏa thuận roaming nhưng không hỗ trợ gói data roaming.": 2137,
+    "thuê bao không sử dụng được dịch vụ thoại do mạng khách tắt sóng 2g/3g hoặc không kích hoạt được volte trên máy.": 2037,
+    "thuê bao không sử dụng được dịch vụ thoại do định tuyến bản tin vào hướng chất lượng kém.": 2036,
+    "thuê bao roaming vào đúng mạng nhưng không thực hiện được dịch vụ data (do lỗi mạng/gói cước).": 2136,
+    "thuê bao có gói cước data roaming vào mạng không có thỏa thuận về gói cước, hoặc cài đặt sai.": 2035,
+    "thuê bao không sử dụng được dịch vụ do lỗi chủ quan của kh và khai báo phía vnp": 2135,
+    "thuê bao không sử dụng được dịch vụ do lỗi cài đặt/không bật data roaming trên máy.": 2034,
+    "thuê bao không roaming được do lỗi sử dụng esim của khách hàng": 2134,
+    "khiếu nại cước": 2033,
+    "tác động của cơ quan chức năng": 2133,
+    "nguồn nhiễu ngoài": 2032,
+    "lỗi phía đối tác": 2031,
+    "bất khả kháng (thiên tai, lũ lụt…)": 2132,
+    "lỗi sự cố trên hệ thống dịch vụ esim": 2122,
+    "lỗi sự cố trên hệ thống dịch vụ (gtgt, roaming, multisim...)": 2021,
+    "lỗi khai báo trên hệ thống dịch vụ esim": 2121,
+    "lỗi khai báo trên hệ thống dịch vụ (gtgt, roaming, multisim...)": 2020,
+    "lỗi sự cố trên hệ thống truyền dẫn": 2120,
+    "lỗi sự cố trên hệ thống core ip": 2019,
+    "lỗi sự cố trên hệ thống core cs/ps": 2119,
+    "lỗi khai báo trên hệ thống truyền dẫn": 2018,
+    "lỗi khai báo trên hệ thống core ip": 2118,
+    "lỗi khai báo trên hệ thống core cs/ps": 2117,
+    "lỗi dịch vụ wifi calling": 2116,
+    "lỗi dịch vụ volte": 2017,
+    "bổ sung tài nguyên, tối ưu hệ thống core": 2016,
+    "thuê bao chưa mở dịch vụ, gói cước": 2015,
+    "thuê bao cài đặt sai trung tâm tin nhắn": 2014,
+    "thuê bao bị mạng đầu xa chặn": 2013,
+    "thuê bao bị khóa gọi oc, ic": 2115,
+    "thông tin đầu vào chưa chính xác, trùng lặp": 2012,
+    "mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường": 2011,
+    "lỗi sim": 2114,
+    "không liên hệ được với khách hàng": 2010,
+    "khách hàng yêu cầu hủy dịch vụ": 2009,
+    "khách hàng theo dõi thêm": 2113,
+    "khách hàng không hợp tác": 2112,
+    "khách hàng chuyển mạng": 2008,
+    "đóng/mở chặn spam": 2007,
+    "do thiết bị đầu cuối": 2111,
+    "đăng nhập chưa đúng mạng có hỗ trợ": 2110,
+    "cung cấp log quốc tế": 2109,
+    "cung cấp log file sms theo yêu cầu": 2006,
+    "vnpt-vinaphone": 2005,
+    "vnpt-media": 2108,
+    "vnpt-it": 2004,
+    "roaming_lỗi chất lượng dịch vụ data": 2107,
+    "roaming_lỗi chất lượng dịch vụ thoại": 2002,
+    "roaming_lỗi vùng phủ sóng kém của mạng khách hàng roaming": 2003,
+    "roaming_lỗi do phía khách hàng": 2106,
+    "roaming_liên quan đến cước": 2105,
+    "nguyên nhân khách quan": 2001,
+    "mạng vô tuyến (vnpt-net)": 2104,
+    "mạng dịch vụ (vnpt-net)": 2103,
+    "mạng core (vnpt-net)": 2102,
+    "khách hàng": 2101,
+    "cung cấp log file": 2100,
+    "Triển khai 5G": 2030,
+    "Thực hiện CRs hiện trường": 2131,
+    "Thiếu trạm Macro": 2029,
+    "Thiếu trạm IBS": 2130,
+    "Thiếu thiết bị Sector": 2028,
+    "Tắt, di dời trạm Macro do hết hợp đồng thuê CSHT": 2129,
+    "Tắt trạm theo yêu cầu/văn bản/lộ trình của cơ quan chức năng": 2027,
+    "Outdoor tốt, indoor kém": 2128,
+    "Mất liên lạc do lỗi thiết bị trạm": 2026,
+    "Mất liên lạc do CSHT nhà trạm": 2127,
+    "Lỗi sự cố trên hệ thống RAN": 2025,
+    "Lỗi khai báo trên hệ thống RAN": 2126,
+    "Khóa sóng 2G": 2024,
+    "Đưa vào quy hoạch dự án phát triển mạng": 2023,
+    "Đã quy hoạch dự án lắp đặt trạm Macro": 2125,
+    "Đã phát sóng trạm Macro": 2022,
+    "Đã lắp đặt thiết bị Sector": 2124,
+    "Bổ sung tài nguyên, tối ưu hệ thống RAN": 2123,
+    "Blacklist_KD không hiệu quả": 81,
+    "Lỗi do VNPT-VinaPhone khai báo cước cho khách hàng": 2042,
+    "Lỗi do VNPT-VinaPhone khai báo dịch vụ cho khách hàng": 2143,
+    "Lỗi sự cố trên hệ thống VNPT-Media quản lý": 2142,
+    "Lỗi khai báo trên hệ thống VNPT-Media quản lý": 2041,
+    "Lỗi sự cố trên hệ thống VNPT-IT quản lý": 2141,
+    "Lỗi profile thuê bao": 2040,
+    "Lỗi khai báo trên hệ thống VNPT-IT quản lý": 2140,
+    "Lỗi do gói cước": 2039,
+    "Thuê bao được lái vào mạng có thỏa thuận cước với VNPT nhưng vào khu vực mạng ưu tiên đó có sóng kém": 2139,
+    "Thuê bao có gói cước data roaming Rx được lái vào mạng có thỏa thuận gói cước data giá rẻ đi vào khu vực mạng đó có sóng kém.": 2138,
+    "Thuê bao bị lái vào mạng không có thỏa thuận roaming": 2038,
+    "Thuê bao bị lái vào mạng có thỏa thuận Roaming nhưng không hỗ trợ gói data roaming.": 2137,
+    "Thuê bao không sử dụng được dịch vụ thoại do mạng khách tắt sóng 2G/3G hoặc không kích hoạt được VoLTE trên máy.": 2037,
+    "Thuê bao không sử dụng được dịch vụ thoại do định tuyến bản tin vào hướng chất lượng kém.": 2036,
+    "Thuê bao roaming vào đúng mạng nhưng không thực hiện được dịch vụ data (do lỗi mạng/gói cước).": 2136,
+    "Thuê bao có gói cước data roaming vào mạng không có thỏa thuận về gói cước, hoặc cài đặt sai.": 2035,
+    "Thuê bao không sử dụng được dịch vụ do lỗi chủ quan của KH và khai báo phía VNP": 2135,
+    "Thuê bao không sử dụng được dịch vụ do lỗi cài đặt/không bật data roaming trên máy.": 2034,
+    "Thuê bao không roaming được do lỗi sử dụng eSIM của khách hàng": 2134,
+    "Khiếu nại cước": 2033,
+    "Tác động của cơ quan chức năng": 2133,
+    "Nguồn nhiễu ngoài": 2032,
+    "Lỗi phía đối tác": 2031,
+    "BẤT KHẢ KHÁNG (thiên tai, lũ lụt…)": 2132,
+    "Lỗi sự cố trên hệ thống Dịch vụ eSIM": 2122,
+    "Lỗi sự cố trên hệ thống Dịch vụ (GTGT, Roaming, MultiSIM...)": 2021,
+    "Lỗi khai báo trên hệ thống Dịch vụ eSIM": 2121,
+    "Lỗi khai báo trên hệ thống Dịch vụ (GTGT, Roaming, MultiSIM...)": 2020,
+    "Lỗi sự cố trên hệ thống Truyền dẫn": 2120,
+    "Lỗi sự cố trên hệ thống Core IP": 2019,
+    "Lỗi sự cố trên hệ thống Core CS/PS": 2119,
+    "Lỗi khai báo trên hệ thống Truyền dẫn": 2018,
+    "Lỗi khai báo trên hệ thống Core IP": 2118,
+    "Lỗi khai báo trên hệ thống Core CS/PS": 2117,
+    "Lỗi dịch vụ Wifi Calling": 2116,
+    "Lỗi dịch vụ VoLTE": 2017,
+    "Bổ sung tài nguyên, tối ưu hệ thống Core": 2016,
+    "Thuê bao chưa mở dịch vụ, gói cước": 2015,
+    "Thuê bao cài đặt sai trung tâm tin nhắn": 2014,
+    "Thuê bao bị mạng đầu xa chặn": 2013,
+    "Thuê bao bị khóa gọi OC, IC": 2115,
+    "Thông tin đầu vào chưa chính xác, trùng lặp": 2012,
+    "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường": 2011,
+    "Lỗi SIM": 2114,
+    "Không liên hệ được với khách hàng": 2010,
+    "Khách hàng yêu cầu hủy dịch vụ": 2009,
+    "Khách hàng theo dõi thêm": 2113,
+    "Khách hàng không hợp tác": 2112,
+    "Khách hàng chuyển mạng": 2008,
+    "Đóng/Mở chặn spam": 2007,
+    "Do thiết bị đầu cuối": 2111,
+    "Đăng nhập chưa đúng mạng có hỗ trợ": 2110,
+    "Cung cấp log quốc tế": 2109,
+    "Cung cấp log file SMS theo yêu cầu": 2006,
+    "VNPT-VinaPhone": 2005,
+    "VNPT-Media": 2108,
+    "VNPT-IT": 2004,
+    "Roaming_Lỗi chất lượng dịch vụ Data": 2107,
+    "Roaming_Lỗi chất lượng dịch vụ Thoại": 2002,
+    "Roaming_Lỗi vùng phủ sóng kém của mạng Khách hàng roaming": 2003,
+    "Roaming_Lỗi do phía Khách hàng": 2106,
+    "Roaming_Liên quan đến cước": 2105,
+    "Nguyên nhân khách quan": 2001,
+    "Mạng Vô tuyến (VNPT-Net)": 2104,
+    "Mạng Dịch vụ (VNPT-Net)": 2103,
+    "Mạng Core (VNPT-Net)": 2102,
+    "Khách hàng": 2101,
+    "Cung cấp log file": 2100
+  }
+}

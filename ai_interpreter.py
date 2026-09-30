@@ -14,17 +14,43 @@ if hasattr(sys.stdout, 'reconfigure'):
 # Load file .env để lấy API Keys
 load_dotenv()
 
-# Khởi tạo Groq Client nếu có GROQ_API_KEY
-groq_client = None
-groq_api_key = os.getenv("GROQ_API_KEY", "").strip()
+# Khởi tạo Local LLM (Qwen 2.5 GGUF) nếu có file model
+local_llm = None
+_local_llm_lock = None
 
-if groq_api_key and groq_api_key != "YOUR_GROQ_API_KEY_HERE":
+
+def get_local_llm():
+    """Nạp model Qwen 2.5 GGUF chạy CPU (Lazy loading & Thread-safe)"""
+    global local_llm, _local_llm_lock
+    if local_llm is not None:
+        return local_llm
+
+    model_path = os.getenv("LOCAL_MODEL_PATH", "models/qwen2.5-3b-instruct-q4_k_m.gguf").strip()
+    if not os.path.isabs(model_path):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        model_path = os.path.join(base_dir, model_path)
+
+    if not os.path.exists(model_path):
+        return None
+
     try:
-        from groq import Groq  # pyright: ignore[reportMissingImports]
-        groq_client = Groq(api_key=groq_api_key)
-        print("🤖 [GROQ AI] Đã khởi tạo thành công Groq AI (Hạn ngạch 14,400 lượt/ngày).")
+        from llama_cpp import Llama
+        import threading
+        if _local_llm_lock is None:
+            _local_llm_lock = threading.Lock()
+
+        cpu_threads = int(os.getenv("LOCAL_LLM_THREADS", "4"))
+        local_llm = Llama(
+            model_path=model_path,
+            n_ctx=2048,
+            n_threads=cpu_threads,
+            verbose=False
+        )
+        print(f"🤖 [LOCAL LLM] Đã nạp thành công Qwen 2.5 GGUF ({os.path.basename(model_path)}) - CPU {cpu_threads} threads.")
+        return local_llm
     except Exception as e:
-        print(f"⚠️ Lỗi khởi tạo Groq SDK: {e}")
+        print(f"⚠️ Lỗi khởi tạo Local LLM ({model_path}): {e}")
+        return None
 
 
 def clean_and_normalize_text(text):
@@ -49,14 +75,15 @@ def detect_device_smart(text):
     if "android" in text_clean:
         return "Thiết bị Android"
 
+    STOP_WORDS = {"dung", "may", "khong", "duoc", "thao", "tac", "khach", "hang", "dang", "xem", "choi", "mang", "truy", "cap", "bao"}
     words = text_clean.split()
     for word in words:
-        if len(word) < 3: 
+        if len(word) < 4 or word in STOP_WORDS: 
             continue
         best_match = process.extractOne(word, brands, scorer=fuzz.WRatio)
         if best_match:
             matched_brand, score, _ = best_match
-            if score >= 75:
+            if score >= 85:
                 # Redmi là dòng máy con của Xiaomi, gộp chung nhãn hiển thị
                 return "XIAOMI" if matched_brand == "redmi" else matched_brand.upper()
                 
@@ -81,12 +108,17 @@ def analyze_ticket_offline(package_title, ticket_content):
     #   thành "MI" nếu chỉ dùng [A-Za-z0-9]).
     # - Bỏ qua từ đệm "cước"/"data" đứng giữa "gói" và mã gói thực tế, tránh
     #   bắt nhầm ký tự đầu của "cước"/"miễn phí" thành mã gói như "C"/"MI".
-    package_match = re.search(r'gói(?:\s+(?:cước|data))?[:\s]+([A-Za-z0-9_]+)', content_lower)
+    package_match = re.search(r'gói(?:\s+(?:cước|data))?[:\s]+([^\n,;]+)', ticket_content, re.IGNORECASE)
     if package_match:
-        package_used = package_match.group(1).strip('_').upper()
+        pkg_raw = package_match.group(1).strip().strip('_')
+        pkg_words = pkg_raw.split()
+        if len(pkg_words) <= 4:
+            package_used = pkg_raw
+        else:
+            package_used = " ".join(pkg_words[:3])
     else:
-        # Fallback pattern cũ
-        package_match2 = re.search(r'\b(vd\d+[a-z]*|d\d+[a-z]*|big\d+[a-z]*|yolo\d+[a-z]*|thaga\d+[a-z]*|mim\d+[a-z]*)\b', content_lower)
+        # Fallback pattern bóc tách từ tên gói phổ biến
+        package_match2 = re.search(r'\b(vd\d+[a-z]*|d\d+[a-z]*|big\d+[a-z]*|yolo\d+[a-z]*|thaga\d+[a-z]*|mim\d+[a-z]*|soda\d+[a-z]*|fclub[a-z]*|fhappy[a-z]*|u\d+[a-z]*|may\d+[a-z]*|vip\d+[a-z]*|bum\d+[a-z]*|spotv\d+[a-z]*|game\d+[a-z]*)\b', content_lower)
         if package_match2:
             package_used = package_match2.group(1).upper()
         elif title_lower and "mobile internet" not in title_lower:
@@ -113,9 +145,14 @@ def analyze_ticket_offline(package_title, ticket_content):
         (r'\bpubg\b', 'Game PUBG'),
         (r'\bgame\b', 'Game'),
         (r'\b(?:shopee|lazada)\b', 'Shopee/Lazada'),
-        (r'\b(?:web|trình duyệt|website)\b', 'Web'),
+        (r'\b(?:web|wed|trình duyệt|website)\b', 'Web'),
         (r'\bvnedu\b', 'VnEdu'),
         (r'\bmy\s?vnpt\b', 'My VNPT'),
+        (r'\b(?:ngân hàng|vietcombank|vcb|agribank|bidv|techcombank|tcb|mbbank|mb bank|acb|vpbank|tpbank|vietinbank|ctg)\b', 'App Ngân hàng'),
+        (r'\b(?:vneid|vssid)\b', 'VNeID / Dịch vụ công'),
+        (r'\b(?:momo|vnpt money|vnpt pay|zalopay|viettel money)\b', 'Ví điện tử'),
+        (r'\b(?:gmail|email|mail)\b', 'Email / Gmail'),
+        (r'\b(?:đầu số|tổng đài|1414)\b', 'Tổng đài / Đầu số SMS'),
         (r'\botp\b', 'Nhận OTP App'),
     ]
     detected_apps = []
@@ -158,8 +195,12 @@ def analyze_ticket_offline(package_title, ticket_content):
             access_status = f"Không được / Load chậm{extra_detail}"
         elif khong_duoc:
             access_status = f"Không được hoàn toàn{extra_detail}"
+        elif any(k in content_lower for k in ["h+", "chỉ hiện 3g", "không lên 4g", "không lên 5g", "mất 4g", "mất 5g", "mất lte", "chữ e"]):
+            access_status = f"Rớt mạng 2G/3G (Không lên được 4G/5G){extra_detail}"
         elif bi_cham:
             access_status = f"Chỉ bị chậm, chập chờn{extra_detail}"
+        elif any(k in content_lower for k in ["mau hết dung lượng", "nhanh hết dung lượng", "mau hết data", "nhanh hết data", "hao data", "hao dung lượng", "trừ cước nhanh", "trừ data nhanh", "nhanh hết gói"]):
+            access_status = "Phản ánh mau hết dung lượng / Hao data nhanh"
 
     # ----------------------------------------------------------------
     # 3. BÓC TÁCH TÌNH TRẠNG DUNG LƯỢNG
@@ -203,6 +244,8 @@ def analyze_ticket_offline(package_title, ticket_content):
                 don_vi = used_match.group(2).upper()
                 don_vi = "GB" if don_vi == "G" else don_vi
                 data_status = f"Đã sử dụng {so}{don_vi}"
+            elif any(k in content_lower for k in ["mau hết dung lượng", "nhanh hết dung lượng", "mau hết data", "nhanh hết data", "hao data", "hao dung lượng", "trừ cước nhanh", "trừ data nhanh", "nhanh hết gói"]):
+                data_status = "Phản ánh mau hết data / Hao dung lượng"
             elif any(k in content_lower for k in ["hết dung lượng", "hết data", "hết gói", "het data"]):
                 data_status = "Đã hết dung lượng"
             else:
@@ -219,11 +262,19 @@ def analyze_ticket_offline(package_title, ticket_content):
     # Kiểm tra "iphone" / "ipad" trực tiếp TRƯỚC khi đưa vào fuzzy match
     # (tránh fuzzy match nhầm sang samsung/oppo)
     # ----------------------------------------------------------------
-    device_used = "null"
+    device_used = "Không đề cập"
     content_lower_clean = content_lower
 
     # Ưu tiên check trực tiếp từ khoá rõ ràng trước
-    if any(k in content_lower_clean for k in ["iphone", "ipad"]):
+    if any(k in content_lower_clean for k in ["cục phát wifi", "cuc phat wifi", "bộ phát wifi", "bo phat wifi", "cục phát", "bộ phát", "mifi", "dcom", "router wifi", "router 4g"]):
+        device_used = "Cục phát WiFi (Router/Mifi)"
+    elif any(k in content_lower_clean for k in ["máy pos", "pos", "máy quẹt thẻ", "quẹt thẻ"]):
+        device_used = "Máy POS / Quẹt thẻ"
+    elif any(k in content_lower_clean for k in ["apple watch", "đồng hồ", "smartwatch"]):
+        device_used = "Đồng hồ thông minh (Smartwatch)"
+    elif any(k in content_lower_clean for k in ["thiết bị cảnh báo", "định vị", "camera", "hộp đen"]):
+        device_used = "Thiết bị IoT / Camera / Cảnh báo"
+    elif any(k in content_lower_clean for k in ["iphone", "ipad"]):
         # Thử lấy thêm model (14 pro max, 15...)
         model_match = re.search(r'iphone\s*([\w\s]+?)(?:,|\.|$)', content_lower_clean)
         if model_match:
@@ -285,50 +336,42 @@ def analyze_ticket_offline(package_title, ticket_content):
             "sansung": "SAMSUNG", "samsum": "SAMSUNG", "samssung": "SAMSUNG",
             "sámsung": "SAMSUNG", "sámung": "SAMSUNG", "sam sung": "SAMSUNG", "sam sum": "SAMSUNG",
         }
-        device_used = "null"
         for typo, brand in typo_map.items():
             if typo in content_lower_clean:
                 device_used = brand
                 break
-        if device_used == "null":
+        if device_used == "Không đề cập":
             # Fallback về fuzzy match cho trường hợp gõ sai (v.....ivo, aphone...)
-            device_used = detect_device_smart(ticket_content)
+            detected = detect_device_smart(ticket_content)
+            if detected and detected != "null":
+                device_used = detected
 
     # ----------------------------------------------------------------
-    # 5. BÓC TÁCH KHU VỰC (giữ nguyên logic cũ - đang ổn)
-    # Thêm: nhận diện "di chuyển khu vực khác cũng vậy"
+    # 5. BÓC TÁCH KHU VỰC
     # ----------------------------------------------------------------
-    area = "Chưa xác định"
+    area = "Không đề cập"
     if any(k in content_lower for k in [
         "đi nhiều nơi", "di nhiều nơi", "di chuyển khu vực", "khu vực khác cũng",
         "nhiều khu vực", "kv khác"
     ]):
         area = "Đi nhiều nơi bị lỗi"
     else:
-        location_match = re.search(
-            r'((?:phường|xã|đường|thị trấn|quận|huyện|thành phố)\s+[^,;\n]+)',
-            content_lower
-        )
-        if location_match:
-            clean_loc = location_match.group(1).strip()
-            for rác in ["khác", "thử", "số", "vina", "kh ", "không biết"]:
-                if f" {rác}" in clean_loc:
-                    clean_loc = clean_loc.split(f" {rác}")[0].strip()
-            area = f"Tại 1 khu vực ({clean_loc.title()})"
+        try:
+            from db_manager import extract_ward_address
+            w_addr = extract_ward_address(ticket_content)
+        except Exception:
+            w_addr = ""
+        if w_addr:
+            area = f"Tại 1 khu vực ({w_addr})"
+        elif any(k in content_lower for k in ["tại chỗ", "ở nhà", "trong phòng"]):
+            area = "Tại 1 khu vực (ở nhà/trong phòng)"
         else:
-            # Tìm dạng "Địa chỉ: Trà Cổ, Trảng Bom, Đồng Nai"
-            addr_match = re.search(r'địa chỉ[^:]*:\s*([^\n]+)', content_lower)
-            if addr_match:
-                area = f"Tại 1 khu vực ({addr_match.group(1).strip().title()})"
-            elif any(k in content_lower for k in ["tại chỗ", "ở nhà", "trong phòng"]):
-                area = "Tại 1 khu vực (chưa đi KV khác thử)"
+            area_match = re.search(r'(?:tại|ở|khu vực)\s+([^,;\n]+)', content_lower)
+            if area_match:
+                short_area = " ".join(area_match.group(1).strip().split()[:4])
+                area = f"Tại 1 khu vực ({short_area.title()})"
             else:
-                area_match = re.search(r'(?:tại|ở|khu vực)\s+([^,;\n]+)', content_lower)
-                if area_match:
-                    short_area = " ".join(area_match.group(1).strip().split()[:4])
-                    area = f"Tại 1 khu vực ({short_area.title()})"
-                else:
-                    area = "Tại 1 khu vực (chưa đi KV khác thử)"
+                area = "Không đề cập"
 
     # ----------------------------------------------------------------
     # 6. TÓM TẮT THÔNG TIN KHÁC
@@ -358,69 +401,77 @@ def analyze_ticket_offline(package_title, ticket_content):
 6. Tóm tắt thông tin khác: {other_info_str}"""
 
 
-def analyze_ticket_with_groq_ai(package_title, ticket_content):
-    """Gửi yêu cầu tới Groq AI (model Llama 3.3 70B) để tóm tắt thông minh 6 mục"""
-    if not groq_client:
+def analyze_ticket_with_local_ai(package_title, ticket_content):
+    """Gửi yêu cầu tới Local LLM (Qwen 2.5 3B GGUF) để tóm tắt thông minh 6 mục"""
+    llm = get_local_llm()
+    if not llm:
         return None
 
+    # Tra cứu 1 mẫu thực tế gần nhất đã được KTV duyệt để làm ví dụ mẫu (Few-shot learning)
+    few_shot_text = ""
+    try:
+        from db_manager import get_similar_ai_samples
+        similar_samples = get_similar_ai_samples(ticket_content, limit=1)
+        if similar_samples:
+            s = similar_samples[0]
+            clean_tc = str(s["ticket_content"] or "").strip()
+            clean_sc = str(s["summary_content"] or "").strip()
+            few_shot_text = f"\nMẪU THỰC TẾ ĐÃ ĐƯỢC KTV DUYỆT CHUẨN:\n- Phản ánh gốc: {clean_tc}\n- Tóm tắt chuẩn 6 mục:\n{clean_sc}\n"
+    except Exception:
+        few_shot_text = ""
+
     prompt = f"""Bạn là trợ lý AI chuyên gia phân tích sự cố mạng viễn thông di động Vinaphone/VNPT.
-Nhiệm vụ: Phân tích nội dung phản ánh khách hàng và trích xuất đúng 6 mục theo định dạng chính xác sau (mỗi mục 1 dòng):
+Nhiệm vụ: Trích xuất nội dung phản ánh khách hàng thành đúng 6 mục theo định dạng tiêu chuẩn viễn thông sau (mỗi mục 1 dòng):
 
-1. Gói cước sử dụng: [Tên gói cước hoặc "Không đề cập"]
-2. Tình trạng truy cập: [PHÂN TÍCH CHÍNH XÁC THEO HƯỚNG DẪN DƯỚI ĐÂY]
-3. Tình trạng dung lượng: [Ví dụ: "Đã hết dung lượng", "Còn XX GB", "Không đề cập"]
-4. Thiết bị sử dụng: [Tên dòng máy/hệ điều hành hoặc "null"]
-5. Khu vực xảy ra lỗi: [Ví dụ: "Tại 1 khu vực (Phường X...)", "Đi nhiều nơi bị lỗi", "Tại 1 khu vực (chưa đi KV khác thử)"]
-6. Tóm tắt thông tin khác: [Thông tin hành động KH đã thử như đổi SIM, bật data, reset máy... hoặc "Không có thông tin hành động phụ."]
-
-QUY TẮC BẮT BUỘC CHO MỤC 2 (Tình trạng truy cập):
-- KHÔNG ĐƯỢC chỉ nhìn vào câu mở đầu của mẫu điện thoại viên (như "KH phản ánh truy cập mạng Không được").
-- BẮT BUỘC ĐỌC KỸ trường "Truy cập báo: ..." và các mô tả chi tiết của khách hàng để nhận diện:
-  a) NẾU PHẢN ÁNH LỖI TRÊN ỨNG DỤNG CỤ THỂ (Zalo, TikTok, Facebook, YouTube, Messenger, Game Liên Quân, Web...):
-     Bắt buộc ghi theo định dạng: "Lỗi ứng dụng cụ thể: [Tên các App] - [Chi tiết lỗi thực tế]"
-     Ví dụ: "Lỗi ứng dụng cụ thể: Zalo báo đang kết nối, TikTok xem 1 video xong không lướt được"
-     Ví dụ: "Lỗi ứng dụng cụ thể: TikTok, YouTube - Bị trừ vào data chính dù dùng gói miễn phí App"
-     Ví dụ: "Lỗi ứng dụng cụ thể: Zalo không gửi được tin nhắn/hình ảnh"
-     Ví dụ: "Lỗi ứng dụng cụ thể: Chơi Game Liên Quân bị giật lag, ping cao"
-     Ví dụ: "Lỗi ứng dụng cụ thể: Không vào được trang Web cổng dịch vụ công"
-  b) NẾU BỊ MẤT MẠNG TOÀN BỘ MÁY (tất cả các app/web đều không vào được):
-     Ghi: "Không vào được mạng (toàn bộ)" (kèm chi tiết nếu có, ví dụ: "Không vào được mạng (xoay tròn)")
-  c) NẾU BỊ CHẬM TOÀN MẠNG:
-     Ghi: "Truy cập chậm, chập chờn"
-  d) NẾU KHÔNG CÓ THÔNG TIN RÕ:
-     Ghi: "Không đề cập"
-
-Nội dung phản ánh từ phiếu:
-- Tiêu đề gói cước: {package_title}
+1. Gói cước sử dụng: [Tên gói cước cụ thể (ví dụ YOLO90, D159V, VD149, Thương gia 249...) hoặc "Không đề cập"]
+2. Tình trạng truy cập: [Chọn 1 trong các chuẩn: "Không vào được mạng (toàn bộ)" / "Truy cập chậm, chập chờn" / "Lỗi ứng dụng cụ thể: TênApp" / "Phản ánh mau hết dung lượng / Hao data nhanh" / "Không đề cập"]
+3. Tình trạng dung lượng: [Ví dụ: "Còn 1.5GB", "Đã hết dung lượng", "Không đề cập"]
+4. Thiết bị sử dụng: [Ví dụ: "IPHONE", "SAMSUNG", "Thiết bị Android", hoặc "Không đề cập"]
+5. Khu vực xảy ra lỗi: [Ví dụ: "Chỉ ở 1 khu vực (Địa chỉ)", "Đi nhiều nơi bị lỗi", hoặc "Không đề cập"]
+6. Tóm tắt thông tin khác: [Ví dụ: "KH đã bật dữ liệu di động, đã chọn lại mạng, đã reset máy" hoặc "Không có thông tin hành động phụ."]
+{few_shot_text}
+Nội dung phản ánh cần trích xuất:
+- Tiêu đề phiếu: {package_title}
 - Chi tiết phản ánh: {ticket_content}
 
-LƯU Ý: Chỉ trả về đúng 6 dòng theo định dạng trên, không thêm bất kỳ lời chào hay giải thích nào."""
+BẮT BUỘC:
+- Toàn bộ kết quả phải viết 100% bằng TIẾNG VIỆT.
+- TUYỆT ĐỐI KHÔNG dịch tên riêng, tên gói cước (ví dụ: 'Thương gia', 'Đỉnh', 'Chất'...) sang tiếng Trung Quốc hay bất kỳ ngôn ngữ nào khác. Giữ nguyên tên gốc Tiếng Việt.
+- Chỉ trả về đúng 6 dòng theo thứ tự từ 1 đến 6.
+- Không thêm bất kỳ lời chào hay giải thích nào."""
 
-    model_name = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
     try:
-        completion = groq_client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": "Bạn là trợ lý AI chuyên môn viễn thông, trả lời ngắn gọn, chuẩn xác theo đúng cấu trúc 6 dòng được yêu cầu."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=3000  # Qwen cần ~2000 token cho <think>, còn 500 cho 6 dòng output; tổng ~3000 TPM
-        )
-        ai_reply = completion.choices[0].message.content.strip()
+        with _local_llm_lock:
+            completion = llm.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": "Bạn là chuyên gia viễn thông. Nhiệm vụ duy nhất của bạn là trích xuất đúng 6 dòng tiếng Việt bắt đầu bằng 1., 2., 3., 4., 5., 6. Tuyệt đối không dịch tên gói cước sang tiếng Trung Quốc."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                max_tokens=220,
+                stop=["<|im_end|>", "\n\n7.", "###"]
+            )
+        ai_reply = completion["choices"][0]["message"]["content"].strip()
         if "<think>" in ai_reply and "</think>" in ai_reply:
             ai_reply = ai_reply.split("</think>")[-1].strip()
-            
-        if ai_reply and "1. Gói cước" in ai_reply:
+
+        # Chuẩn hóa nếu model LLM vô tình dịch tên gói sang tiếng Trung (VD: 商家 -> Thương gia)
+        if "商家" in ai_reply:
+            ai_reply = ai_reply.replace("商家", "Thương gia")
+
+        # Kiểm tra nghiêm ngặt: Phải có ít nhất các mục 1, 2, 5
+        if ai_reply and "1. Gói cước" in ai_reply and "2. Tình trạng" in ai_reply:
             return ai_reply
+        else:
+            print(f"⚠️ Qwen sinh ra định dạng không chuẩn 6 mục. Lùi về Regex chuẩn.")
     except Exception as e:
-        print(f"⚠️ Groq AI API bận/lỗi ({e}). Tự động lùi về chế độ Offline...")
-        
+        print(f"⚠️ Local LLM bận/lỗi ({e}). Tự động lùi về chế độ Offline...")
+
     return None
 
 
 def analyze_ticket_with_ai(json_file_path):
-    """Hàm phân tích tổng hợp: Ưu tiên Groq AI -> Lùi về Offline nếu không có Key/Lỗi"""
+    """Hàm phân tích tổng hợp: Ưu tiên Local Qwen AI -> Lùi về Regex Offline nếu không có Model/Lỗi"""
     if not os.path.exists(json_file_path):
         return "null"
 
@@ -451,29 +502,37 @@ def analyze_ticket_with_ai(json_file_path):
     print(f"CACHE MISS | {phone}")
 
     # =========================
-    # GROQ AI
+    # KIỂM TRA MÔ HÌNH ĐƯỢC CHỌN (QWEN vs REGEX)
     # =========================
 
-    if groq_client and ticket_content:
+    selected_engine = "qwen"
+    try:
+        from services.state import state
+        selected_engine = getattr(state, "ai_summary_engine", "qwen")
+    except Exception:
+        selected_engine = "qwen"
 
-        groq_result = analyze_ticket_with_groq_ai(
+    # =========================
+    # LOCAL QWEN 2.5 AI
+    # =========================
+
+    if selected_engine == "qwen" and ticket_content:
+        local_result = analyze_ticket_with_local_ai(
             package_title,
             ticket_content
         )
 
-        if groq_result:
-
+        if local_result:
             save_summary(
                 phone,
                 package_title,
                 ticket_content,
-                groq_result
+                local_result
             )
-
-            return groq_result
+            return local_result
 
     # =========================
-    # OFFLINE FALLBACK
+    # OFFLINE REGEX FALLBACK
     # =========================
 
     offline_result = analyze_ticket_offline(

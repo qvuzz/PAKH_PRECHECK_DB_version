@@ -50,11 +50,12 @@ def _process_single_ticket(
     db_lock: threading.Lock,
     list_lock: threading.Lock,
     excel_summary_list: list,
-    progress_tracker: dict
+    progress_tracker: dict,
+    force_recheck: bool = False
 ):
     """
     Xử lý tiền kiểm hoàn chỉnh cho 1 thuê bao:
-    - Kiểm tra DB cache (nếu có kết quả hợp lệ thì kế thừa siêu tốc).
+    - Kiểm tra DB cache (nếu có kết quả hợp lệ thì kế thừa siêu tốc, trừ khi force_recheck=True).
     - Tra cứu Core song song: BTools, SAPC + Cell, CEM + App Usage chạy đồng thời (3 luồng con).
     - Phân tích kịch bản kỹ thuật & AI summary.
     - Lưu kết quả vào DB và xử lý tự động đóng (nếu bật).
@@ -67,6 +68,7 @@ def _process_single_ticket(
     from report_bot import (
         analyze_subscriber_status, 
         get_formatted_sapc_packages, 
+        extract_btools_packages_summary,
         extract_incident_time
     )
     from cem_client import CEMClient, save_cem_data_to_file
@@ -92,18 +94,29 @@ def _process_single_ticket(
     try:
         with db_lock:
             conn_chk = get_db_connection()
-            existing_db_row = conn_chk.execute("""
-                SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary
-                FROM tickets 
-                WHERE (ticket_id = ? OR ticket_code LIKE ? OR phone = ?) AND source = 'tts_new'
-                ORDER BY updated_at DESC LIMIT 1
-            """, (ticket.get("ticket_id"), f"{ticket_code}%", phone_84)).fetchone()
+            t_id = ticket.get("ticket_id")
+            clean_c = (ticket_code or "").split("\n")[0].strip()
+            if t_id:
+                existing_db_row = conn_chk.execute("""
+                    SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary
+                    FROM tickets 
+                    WHERE ticket_id = ? AND source = 'tts_new'
+                    ORDER BY updated_at DESC LIMIT 1
+                """, (t_id,)).fetchone()
+            if not existing_db_row and clean_c:
+                existing_db_row = conn_chk.execute("""
+                    SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary
+                    FROM tickets 
+                    WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new'
+                    ORDER BY updated_at DESC LIMIT 1
+                """, (clean_c, f"{clean_c}%")).fetchone()
             conn_chk.close()
     except Exception:
         pass
 
     can_reuse_db = (
-        existing_db_row 
+        not force_recheck
+        and existing_db_row 
         and existing_db_row["comment"] 
         and _is_valid_technical_status(existing_db_row["status"])
     )
@@ -115,10 +128,40 @@ def _process_single_ticket(
         action_plan = existing_db_row["action_plan"] or ""
         color = existing_db_row["color"] or "#4CAF50"
         final_packages_str = existing_db_row["real_packages"] or ""
+        if "BTools:" in final_packages_str and "(max " not in final_packages_str and "Không phát sinh" not in final_packages_str:
+            num_file = BASE_DIR / "number" / f"{phone_84}.json"
+            if num_file.exists():
+                try:
+                    with open(num_file, "r", encoding="utf-8") as jf:
+                        j_data = json.load(jf)
+                        b_data = j_data.get("btools_technical_data") or j_data.get("data") or []
+                        if b_data:
+                            s_btools = extract_btools_packages_summary(b_data)
+                            final_packages_str = get_formatted_sapc_packages(phone_84, fallback_btools=s_btools)
+                except Exception:
+                    pass
         rat_types_string = existing_db_row["rat_types"] or ""
         cem_data_str = existing_db_row["cem_data"] or ""
         app_usage_str = existing_db_row["app_usage"] or ""
         ai_summary = existing_db_row["ai_summary"] or ""
+        if not ai_summary or not ai_summary.strip().startswith("1.") or ai_summary.strip() == content.strip():
+            try:
+                from ai_interpreter import analyze_ticket_with_local_ai, analyze_ticket_offline
+                new_sum = analyze_ticket_with_local_ai(title, content) or analyze_ticket_offline(title, content)
+                if new_sum:
+                    ai_summary = new_sum
+                    with db_lock:
+                        conn_fix = get_db_connection()
+                        if clean_c:
+                            conn_fix.execute("UPDATE tickets SET ai_summary = ? WHERE ticket_code = ? OR ticket_code LIKE ?", (ai_summary, clean_c, f"{clean_c}%"))
+                        elif incident_time:
+                            conn_fix.execute("UPDATE tickets SET ai_summary = ? WHERE (phone = ? OR phone LIKE ?) AND incident_time = ?", (ai_summary, phone_84, f"%{phone_84[-9:]}%", incident_time))
+                        else:
+                            conn_fix.execute("UPDATE tickets SET ai_summary = ? WHERE rowid = (SELECT rowid FROM tickets WHERE phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1)", (ai_summary, phone_84, f"%{phone_84[-9:]}%"))
+                        conn_fix.commit()
+                        conn_fix.close()
+            except Exception:
+                pass
     else:
         state.log("INFO", f"[{idx}/{total_tickets}] 🚀 Tra cứu Core (Đa luồng BTools + SAPC + CEM): {phone_84} ({ticket_code})")
 
@@ -153,9 +196,11 @@ def _process_single_ticket(
             a_str = "Không có dữ liệu App Usage"
             if cem_client is not None:
                 try:
-                    cem_recs = cem_client.get_subscriber_history_5days(phone_84, days=5)
-                    app_evts = cem_client.get_subscriber_app_events(phone_84, days=5)
-                    c_str = CEMClient.extract_top_cells_summary(cem_recs, app_events=app_evts)
+                    cem_recs = cem_client.get_subscriber_history_5days(phone_84, days=5, incident_time_str=incident_time_str)
+                    app_evts = cem_client.get_subscriber_app_events(phone_84, days=5, incident_time_str=incident_time_str)
+                    _, _, c_str = CEMClient.extract_two_period_summary(
+                        cem_recs, incident_time_str=incident_time_str, app_events=app_evts, days=5
+                    )
                     a_str = CEMClient.extract_top_apps_summary(app_evts)
                 except Exception as ex_cem:
                     c_str = f"Lỗi CEM: {ex_cem}"
@@ -237,26 +282,19 @@ def _process_single_ticket(
         )
         state.log("INFO", f"   ↳ [{ticket_code} - {phone_84}] Nhận định: [{status}]")
 
-        # Hạ tầng RAT types
-        rats = list(set(str(r.get("RAT_TYPE_NAME", "")) for r in (clean_data or []) if r.get("RAT_TYPE_NAME")))
+        # Hạ tầng RAT types (trong phạm vi 5 ngày quét chuẩn)
+        _scan_5d_limit = (datetime.now() - timedelta(days=4)).date()
+        rats = list(set(
+            str(r.get("RAT_TYPE_NAME", "")) for r in (clean_data or [])
+            if r.get("RAT_TYPE_NAME") and (
+                not r.get("RECORD_OPENING_TIME") or 
+                datetime.strptime(r["RECORD_OPENING_TIME"].split()[0], "%d/%m/%Y").date() >= _scan_5d_limit
+            )
+        ))
         rat_types_string = ", ".join(rats) if rats else "Không có dữ liệu"
 
-        # Gói cước BTools / SAPC
-        cfg_p = BASE_DIR / "diagnostic_config.json"
-        ex_codes = set()
-        if cfg_p.exists():
-            with open(cfg_p, "r", encoding="utf-8") as cf:
-                ex_codes = set(json.load(cf).get("EXCLUDED_SYSTEM_CODES", []))
-        real_pkgs = set()
-        for r in (clean_data or []):
-            sc = str(r.get("SERVICE_ID_CODE", "")).strip()
-            sn = str(r.get("SERVICE_NAME", "")).strip()
-            if sc.lower() and sc.lower() not in ex_codes:
-                if sn and "gói cước lạ" not in sn.lower() and sn.lower() not in ex_codes:
-                    real_pkgs.add(sn)
-                else:
-                    real_pkgs.add(sc)
-        real_pkgs_str = ", ".join(list(real_pkgs)) if real_pkgs else "Không phát sinh gói TM"
+        # Gói cước BTools / SAPC kèm max session
+        real_pkgs_str = extract_btools_packages_summary(clean_data)
         final_packages_str = get_formatted_sapc_packages(phone_84, fallback_btools=real_pkgs_str)
 
     # Cảnh báo phiếu mở lại nếu có
@@ -290,7 +328,8 @@ def _process_single_ticket(
         "source": "tts_new",
         "ai_summary": ai_summary if ai_summary else "null",
         "reopen_count": reopen_count,
-        "last_reopened_date": last_reopened_date
+        "last_reopened_date": last_reopened_date,
+        "processing_content": ticket.get("processing_content", "")
     }
 
     with list_lock:
@@ -381,6 +420,10 @@ def _process_single_ticket(
                                         rec["ticket_status"] = "Chuyển VTT"
                                         with db_lock:
                                             save_or_update_ticket(rec)
+                                elif c_res2.get("blocked_by_ward"):
+                                    state.log("WARN", f"   ↳ ⛔ {c_res2.get('message')}")
+                                else:
+                                    state.log("WARN", f"   ↳ ⚠️ {c_res2.get('message')}")
                         except Exception as ex_chain:
                             state.log("WARN", f"Lỗi auto-chain cho {phone_84}: {ex_chain}")
                     elif close_res.get("round") == 1:
@@ -419,8 +462,8 @@ def _process_single_ticket(
                                 pass
                     else:
                         rec["ticket_status"] = "Đã đóng"
-                        with db_lock:
-                            save_or_update_ticket(rec)
+                elif close_res.get("blocked_by_ward"):
+                    state.log("WARN", f"   ↳ ⛔ {close_res.get('message')}")
                 else:
                     state.log("WARN", f"   ↳ ⚠️ [Phiếu lỗi] Không thể tự động chuyển bước phiếu {phone_84}: {close_res.get('message')}")
                     rec["ticket_status"] = "Phiếu lỗi"
@@ -438,7 +481,7 @@ def _process_single_ticket(
         state.current_step = f"Đã hoàn thành {progress_tracker['done']}/{total_tickets} thuê bao TTS Mới"
 
 
-def execute_tts_new_data_cycle():
+def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False):
     """
     Quy trình tiền kiểm tra phiếu sự cố từ hệ thống TTS Mới (FastAPI Multi-Threaded Engine):
     1. Lấy danh sách phiếu đang xử lý từ TTS Mới.
@@ -447,7 +490,7 @@ def execute_tts_new_data_cycle():
     4. Tra cứu Core ĐA LUỒNG:
        - Outer Level: Xử lý 3 phiếu đồng thời qua ThreadPoolExecutor(max_workers=3).
        - Inner Level: Cho mỗi phiếu mới, tra BTools, SAPC, và CEM đồng thời (3 workers).
-       - DB Cache: Nếu phiếu đã có kết quả hợp lệ trong SQLite, trả về ngay lập tức (1ms).
+       - DB Cache: Nếu phiếu đã có kết quả hợp lệ trong SQLite, trả về ngay lập tức (1ms), trừ khi force_recheck=True.
     5. Đồng bộ an toàn cơ sở dữ liệu và xuất báo cáo Excel.
     """
     state.status = "PROCESSING"
@@ -519,9 +562,9 @@ def execute_tts_new_data_cycle():
             "lock": threading.Lock()
         }
 
-        # XỬ LÝ ĐA LUỒNG TICKET LEVEL (3 WORKERS ĐỒNG THỜI)
+        # XỬ LÝ ĐA LUỒNG TICKET LEVEL (TỐI ĐA 8 WORKERS ĐỒNG THỜI)
         state.current_step = f"Đang xử lý 0/{total_tickets} thuê bao..."
-        max_ticket_workers = min(3, total_tickets)
+        max_ticket_workers = min(8, total_tickets)
 
         with ThreadPoolExecutor(max_workers=max_ticket_workers) as outer_exec:
             future_to_ticket = {
@@ -540,7 +583,8 @@ def execute_tts_new_data_cycle():
                     db_lock,
                     list_lock,
                     excel_summary_list,
-                    progress_tracker
+                    progress_tracker,
+                    force_recheck
                 ): ticket
                 for idx, ticket in enumerate(enriched_tickets, 1)
             }

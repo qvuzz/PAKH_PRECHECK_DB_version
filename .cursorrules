@@ -1,0 +1,18 @@
+# Cursor Rules for PAKH_PRECHECK
+# Refer to AGENTS.md for full architecture map
+
+# 1. TOKEN EFFICIENCY & SPEED RULES:
+- NEVER create temporary scratch/test scripts in scratch/ or run one-off find functions.
+- ALWAYS use fast indexed ripgrep/grep to find symbols and exact line locations in milliseconds.
+- ALWAYS use precision chunk edits (diff-based) instead of rewriting entire files.
+- NEVER execute live OneOSS ticket submissions without explicit user confirmation.
+- STRICTLY FORBIDDEN: NEVER add random/unnecessary emojis or icons (🤖, ⚡, 🚀, 🎉, ⭐, etc.) to the WebApp UI (buttons, labels, select options, alerts). Keep the interface strictly professional, clean, and enterprise-grade.
+
+# 2. KEY REPOSITORY MAP:
+- Service IDs & Throttling: serviceid.json
+- Scenarios Engine (Data/Radio/Core): scenarios_engine.py & diagnostic_scenarios.json
+- Reporting & Closing Bot: report_bot.py
+- Ticket API & Precheck Orchestration: routers/tickets.py
+- Web SPA & Routes: routers/web.py, templates/dashboard.html
+- Database: db_manager.py, tickets.db
+- Integrations: ttsnew_api.py, tts_old_api.py, btools_manager.py, sapccheck/, cem_client.py

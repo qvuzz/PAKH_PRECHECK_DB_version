@@ -7,7 +7,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from ai_interpreter import analyze_ticket_with_ai
 # Gọi bộ não kịch bản từ file độc lập vừa tách
-from scenarios_engine import match_diagnostic_scenarios
+from scenarios_engine import match_diagnostic_scenarios, is_throttled_service_code, get_throttled_speed_desc
 
 # 📂 Thư mục chứa file HSS Profile riêng theo từng số (định dạng: hss_profile/{phone_84}.json)
 # ⚠️ Đổi lại đúng tên thư mục thật nếu khác - đây là giá trị mặc định đang giả định.
@@ -33,12 +33,186 @@ def get_has_4g_profile(phone_84):
         print(f"⚠️ Lỗi đọc file HSS Profile ({file_path}): {e}")
         return None
 
+
+def extract_btools_packages_summary(clean_btools_data, excluded_codes=None, days=5):
+    """
+    Trích xuất danh sách gói cước từ BTools kèm dung lượng phiên lớn nhất (max session) trong N ngày gần nhất (mặc định 5 ngày).
+    Ví dụ: 'BIG(max 10MB), TIKTOK(max 5.2MB), MoMo(max 1.5MB), DIP_Youtube (dùng thống kê Youtube data IP) (max 0.8MB)'
+    """
+    if not clean_btools_data or not isinstance(clean_btools_data, list):
+        return "Không phát sinh gói TM"
+
+    start_date_filter = None
+    if days:
+        start_date_filter = (datetime.now() - timedelta(days=days - 1)).date()
+
+    if excluded_codes is None:
+        cfg_p = os.path.join(os.path.dirname(__file__), "diagnostic_config.json")
+        excluded_codes = set()
+        if os.path.exists(cfg_p):
+            try:
+                with open(cfg_p, "r", encoding="utf-8") as cf:
+                    excluded_codes = set(json.load(cf).get("EXCLUDED_SYSTEM_CODES", []))
+            except Exception:
+                pass
+
+    pkg_max_mb = {}
+    for r in clean_btools_data:
+        if not isinstance(r, dict):
+            continue
+        if start_date_filter:
+            t_str = r.get("RECORD_OPENING_TIME", "")
+            if t_str:
+                try:
+                    r_date = datetime.strptime(t_str.split()[0], "%d/%m/%Y").date()
+                    if r_date < start_date_filter:
+                        continue
+                except Exception:
+                    pass
+        sc = str(r.get("SERVICE_ID_CODE", "") or r.get("SERVICE_ID", "")).strip()
+        sn = str(r.get("SERVICE_NAME", "")).strip()
+        sc_lower = sc.lower()
+        if not sc_lower or sc_lower in excluded_codes or sc_lower in ("null", "none"):
+            continue
+
+        sn_lower = sn.lower()
+        if sn and "gói cước lạ" not in sn_lower and sn_lower not in excluded_codes and sn_lower not in ("null", "none"):
+            pkg_name = sn
+        elif sc_lower not in ("null", "none"):
+            pkg_name = sc
+        else:
+            continue
+
+        try:
+            dl = float(r.get("DATA_VOLUME_DOWNLINK") or 0)
+            ul = float(r.get("DATA_VOLUME_UPLINK") or 0)
+            session_mb = (dl + ul) / (1024 * 1024)
+        except Exception:
+            session_mb = 0.0
+
+        if pkg_name not in pkg_max_mb or session_mb > pkg_max_mb[pkg_name]:
+            pkg_max_mb[pkg_name] = session_mb
+
+    if not pkg_max_mb:
+        return "Không phát sinh gói TM"
+
+    def _fmt_mb(mb):
+        if mb >= 1024:
+            gb = mb / 1024
+            return f"{gb:.1f}GB" if round(gb, 1) != int(round(gb, 1)) else f"{int(round(gb))}GB"
+        if mb >= 10:
+            return f"{mb:.1f}MB" if round(mb, 1) != int(round(mb, 1)) else f"{int(round(mb))}MB"
+        if mb >= 1:
+            return f"{mb:.1f}MB" if round(mb, 1) != int(round(mb, 1)) else f"{int(round(mb))}MB"
+        if mb > 0:
+            if mb < 0.05:
+                return "<0.1MB"
+            return f"{mb:.1f}MB"
+        return "0MB"
+
+    sorted_pkgs = sorted(pkg_max_mb.items(), key=lambda x: (-x[1], x[0]))
+
+    parts = []
+    for name, max_mb in sorted_pkgs:
+        val_str = _fmt_mb(max_mb)
+        if name.endswith(")"):
+            parts.append(f"{name} (max {val_str})")
+        else:
+            parts.append(f"{name}(max {val_str})")
+
+    return ", ".join(parts)
+
+
+def refine_btools_with_sapc(btools_str: str, sapc_packages: list) -> str:
+    """
+    Rút gọn các nhóm gói BTools dài ngoằng (ví dụ: BIG (VD120M, VD89, D159V...))
+    thành đúng tên gói của khách hàng nếu khách hàng đang sử dụng gói đó trên SAPC.
+    Chỉ khi khách hàng không có gói hoặc không khớp gói nào thì mới giữ nguyên để KTV phán đoán.
+    """
+    if not btools_str or not sapc_packages or not isinstance(sapc_packages, list):
+        return btools_str
+
+    # Lấy danh sách tên gói cước từ SAPC (bỏ M0, Pay As You Go)
+    sapc_names = []
+    for p in sapc_packages:
+        n = ""
+        if isinstance(p, dict):
+            n = (p.get("package_name") or p.get("group_name") or "").upper().strip()
+        elif isinstance(p, str):
+            n = p.upper().strip()
+        if n and "PAYGO" not in n and n != "M0":
+            clean_n = n.split("(")[0].replace("•", "").strip()
+            if clean_n:
+                sapc_names.append(clean_n)
+
+    if not sapc_names:
+        return btools_str
+
+    def _replace_group(match):
+        full_match = match.group(0)
+        group_name = match.group(1)
+        inner_content = match.group(2)
+        max_part = match.group(3) if len(match.groups()) >= 3 and match.group(3) else ""
+
+        # Chỉ xử lý nếu trong ngoặc là danh sách phân tách bằng dấu phẩy hoặc có chấm lửng
+        if "," not in inner_content and "..." not in inner_content:
+            return full_match
+
+        # Tách danh sách ứng viên trong ngoặc
+        raw_candidates = re.split(r'[,;/]', inner_content)
+        candidates = []
+        for c in raw_candidates:
+            clean_c = re.sub(r'[\.\.\.\(\)]', '', c).strip()
+            if clean_c and len(clean_c) >= 2 and clean_c.upper() not in ("GÓI", "DATA", "NGÀY", "TUẦN", "THÁNG"):
+                candidates.append(clean_c)
+
+        # Sắp xếp candidate dài trước ngắn sau
+        candidates.sort(key=lambda x: -len(x))
+
+        matched_cand = None
+        for cand in candidates:
+            cand_upper = cand.upper()
+            for s_name in sapc_names:
+                if cand_upper in s_name:
+                    matched_cand = cand
+                    break
+                s_core = re.sub(r'^(MI_|DC_|KM_|D_)', '', s_name)
+                if cand_upper in s_core or s_core.startswith(cand_upper):
+                    matched_cand = cand
+                    break
+            if matched_cand:
+                break
+
+        # Nếu không khớp candidate con, kiểm tra tên nhóm (VD: BIG khớp với BIGKM_6GBN)
+        if not matched_cand and group_name:
+            grp_upper = group_name.upper()
+            for s_name in sapc_names:
+                s_core = re.sub(r'^(MI_|DC_|KM_|D_)', '', s_name)
+                if s_core.upper().startswith(grp_upper) or grp_upper in s_core.upper():
+                    matched_cand = s_core
+                    break
+            if not matched_cand and len(sapc_names) == 1:
+                s_core = re.sub(r'^(MI_|DC_|KM_|D_)', '', sapc_names[0])
+                matched_cand = s_core
+
+        if matched_cand:
+            return f"{matched_cand}{max_part}"
+        return full_match
+
+    pattern = r'([A-Za-z0-9_]+)\s*\(([^)]+)\)(\s*\(max\s*[^)]+\))?'
+    refined = re.sub(pattern, _replace_group, btools_str)
+
+    return refined
+
+
 def get_formatted_sapc_packages(phone_84, fallback_btools=""):
     """
     Đọc toàn bộ hồ sơ thuê bao (Radio, HSS Profile, IPv4), gói cước từ SAPC
     và kết hợp với gói thực tế từ BTools.
     Hiển thị đầy đủ cả hồ sơ Core và gói cước trong bảng.
     """
+    if isinstance(fallback_btools, list):
+        fallback_btools = extract_btools_packages_summary(fallback_btools)
     file_path = os.path.join(HSS_PROFILE_DIR, f"{phone_84}.json")
     sapc_lines = []
     profile_parts = []
@@ -52,16 +226,23 @@ def get_formatted_sapc_packages(phone_84, fallback_btools=""):
             sub_info = data.get("subscriber_info", {})
             if isinstance(sub_info, dict) and sub_info:
                 radio = str(sub_info.get("Radio") or "").strip()
+                cell_name = str(sub_info.get("CellName") or sub_info.get("cell_name") or sub_info.get("current_cell") or "").strip()
                 hss_prof = str(sub_info.get("HSS Profile") or "").strip()
                 ipv4 = str(sub_info.get("IPv4") or "").strip()
                 nam_val = str(sub_info.get("NAM") if sub_info.get("NAM") is not None else "").strip()
 
                 sub_tags = []
                 if radio and radio.lower() != "none":
-                    sub_tags.append(f"Radio: {radio}")
+                    if cell_name:
+                        sub_tags.append(f"Radio: {radio}, {cell_name}")
+                    else:
+                        sub_tags.append(f"Radio: {radio}")
+                elif cell_name:
+                    sub_tags.append(f"Radio: 4G, {cell_name}")
                 if hss_prof:
                     hss_digits = re.sub(r'\D', '', hss_prof)
-                    if len(hss_digits) >= 3:
+                    is_strange = len(hss_digits) >= 3 and (ipv4.startswith("113.") or ipv4.startswith("172.") or ipv4.startswith("192.168."))
+                    if is_strange:
                         sub_tags.append(f"HSS: {hss_prof} (PROFILE LẠ)")
                     else:
                         sub_tags.append(f"HSS: {hss_prof}")
@@ -101,6 +282,41 @@ def get_formatted_sapc_packages(phone_84, fallback_btools=""):
         except Exception as e:
             print(f"⚠️ Lỗi đọc file SAPC packages ({file_path}): {e}")
 
+    # Dự phòng: Bóc tách gói từ nội dung phản ánh / AI Summary trong tickets.db nếu SAPC chưa có gói
+    if not packages:
+        try:
+            import sqlite3
+            db_path = os.path.join(os.path.dirname(__file__), "tickets.db")
+            if os.path.exists(db_path):
+                conn = sqlite3.connect(db_path, timeout=3)
+                c = conn.cursor()
+                clean_9 = re.sub(r'\D', '', str(phone_84))[-9:]
+                c.execute("SELECT ai_summary, ticket_content, package_title FROM tickets WHERE phone LIKE ? ORDER BY updated_at DESC LIMIT 1", (f"%{clean_9}%",))
+                row = c.fetchone()
+                conn.close()
+                if row:
+                    ai_sum, t_cont, pkg_title = str(row[0] or ""), str(row[1] or ""), str(row[2] or "")
+                    detected_pkg = ""
+                    # 1. Từ ai_summary: '1. Gói cước sử dụng: <tên_gói>'
+                    m_ai = re.search(r'1\.\s*Gói\s*cước\s*sử\s*dụng\s*:\s*([^\n\r]+)', ai_sum, re.IGNORECASE)
+                    if m_ai:
+                        val = m_ai.group(1).strip()
+                        if val and not any(k in val.lower() for k in ["không đề cập", "không có", "chưa kiểm tra", "chưa đăng ký", "m0", "paygo"]):
+                            detected_pkg = val
+                    # 2. Từ ticket_content nếu chưa có
+                    if not detected_pkg:
+                        m_tc = re.search(r'(?:dùng gói|gói cước|gói)\s*[:=]\s*([A-Za-z0-9_]+)', t_cont, re.IGNORECASE)
+                        if m_tc:
+                            val = m_tc.group(1).strip()
+                            if val and not any(k in val.lower() for k in ["không", "m0", "paygo"]):
+                                detected_pkg = val
+
+                    if detected_pkg:
+                        packages = [{"package_name": detected_pkg, "register_date": "", "expire_date": ""}]
+                        sapc_lines.append(f"• {detected_pkg} (Ghi nhận từ PAKH)")
+        except Exception:
+            pass
+
     # Xây dựng chuỗi hiển thị kết hợp cả hồ sơ và gói cước
     result_parts = []
     if profile_parts:
@@ -112,16 +328,26 @@ def get_formatted_sapc_packages(phone_84, fallback_btools=""):
         result_parts.append("SAPC: Không có gói")
 
     btools_val = str(fallback_btools).strip() if fallback_btools else "Không phát sinh gói TM"
+    if btools_val and btools_val != "Không phát sinh gói TM":
+        btools_val = refine_btools_with_sapc(btools_val, packages)
     result_parts.append(f"BTools: {btools_val}")
 
     return "\n\n".join(result_parts)
 
 
-def get_sapc_package_validity(phone_84):
+def get_sapc_package_validity(phone_84, incident_time_str=None):
     """
     Phân loại chi tiết các gói cước của thuê bao từ SAPC:
     Trả về: (active_packages, expired_packages)
     Mỗi phần tử là dict chứa name, reg_str, exp_str, reg_dt, exp_dt, is_no_date, is_paygo, is_home.
+
+    Quy chuẩn nghiệp vụ (Chuẩn Viễn Thông VNPT):
+    - Nếu có incident_time_str (ngày tiếp nhận phản ánh):
+      Gói cước chỉ được coi là HẾT HẠN nếu thời hạn sử dụng < ngày tiếp nhận phản ánh.
+      Nếu thời hạn sử dụng >= ngày tiếp nhận phản ánh (kể cả khi < thời gian hiện tại),
+      gói cước VẪN CÒN HẠN tại thời điểm phản ánh -> xếp vào active_packages.
+    - Nếu không có incident_time_str:
+      So sánh với ngày hiện tại (exp_dt.date() < now.date()).
     """
     file_path = os.path.join(HSS_PROFILE_DIR, f"{phone_84}.json")
     if not os.path.exists(file_path):
@@ -134,6 +360,18 @@ def get_sapc_package_validity(phone_84):
             return [], []
 
         now = datetime.now()
+        ref_date = now.date()
+        if incident_time_str:
+            try:
+                for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                    try:
+                        ref_date = datetime.strptime(str(incident_time_str).strip(), fmt).date()
+                        break
+                    except ValueError:
+                        pass
+            except Exception:
+                ref_date = now.date()
+
         active_packages = []
         expired_packages = []
 
@@ -155,6 +393,7 @@ def get_sapc_package_validity(phone_84):
             if is_paygo:
                 active_packages.append({
                     "name": pkg_name,
+                    "group_name": pkg.get("group_name") or "",
                     "reg_str": "Chưa có thông tin",
                     "exp_str": "Gói mặc định Pay As You Go",
                     "reg_dt": None,
@@ -169,6 +408,7 @@ def get_sapc_package_validity(phone_84):
                 desc = "Gói tích hợp Home (Không có thông tin ngày)" if is_home else "Không có thông tin ngày ĐK/HSD"
                 active_packages.append({
                     "name": pkg_name,
+                    "group_name": pkg.get("group_name") or "",
                     "reg_str": "Chưa có thông tin",
                     "exp_str": desc,
                     "reg_dt": None,
@@ -203,6 +443,7 @@ def get_sapc_package_validity(phone_84):
 
             pkg_info = {
                 "name": pkg_name,
+                "group_name": pkg.get("group_name") or "",
                 "reg_str": reg_display,
                 "exp_str": exp_display,
                 "reg_dt": reg_dt,
@@ -212,7 +453,8 @@ def get_sapc_package_validity(phone_84):
                 "is_home": is_home
             }
 
-            if exp_dt and exp_dt < now:
+            # Quy chuẩn: Hết hạn khi và chỉ khi exp_dt.date() < ref_date (ngày tiếp nhận phản ánh)
+            if exp_dt and exp_dt.date() < ref_date:
                 expired_packages.append(pkg_info)
             else:
                 active_packages.append(pkg_info)
@@ -252,19 +494,48 @@ VPN_KEYWORDS = [
     "hotspot shield", "windscribe", "protonvpn", "hide.me", "cyberghost"
 ]
 
-def detect_vpn_application(app_events):
+def detect_vpn_application(app_events, target_date=None):
     """
     Kiểm tra xem trong dữ liệu App Usage của CEM có xuất hiện ứng dụng VPN / 1.1.1.1 / Cloudflare không.
+    Nếu có target_date: Chỉ lọc các bản ghi ứng dụng phát sinh trong đúng ngày đó.
     Trả về tên app VPN phát hiện được, hoặc None.
     """
     if not app_events:
         return None
         
+    target_date_strs = set()
+    if target_date:
+        if isinstance(target_date, str):
+            t_clean = target_date.strip().split(" ")[0].replace("/", "-")
+            target_date_strs.add(t_clean)
+            parts = t_clean.split("-")
+            if len(parts) == 3:
+                if len(parts[0]) == 4: # yyyy-mm-dd
+                    target_date_strs.add(f"{parts[2]}-{parts[1]}-{parts[0]}")
+                    target_date_strs.add(f"{parts[2]}/{parts[1]}/{parts[0]}")
+                elif len(parts[2]) == 4: # dd-mm-yyyy
+                    target_date_strs.add(f"{parts[2]}-{parts[1]}-{parts[0]}")
+                    target_date_strs.add(f"{parts[0]}/{parts[1]}/{parts[2]}")
+        elif hasattr(target_date, "strftime"):
+            target_date_strs.add(target_date.strftime("%Y-%m-%d"))
+            target_date_strs.add(target_date.strftime("%d/%m/%Y"))
+            target_date_strs.add(target_date.strftime("%d-%m-%Y"))
+
+    def _matches_target_date(item_dict):
+        if not target_date_strs:
+            return True
+        item_d = str(item_dict.get("_query_date") or item_dict.get("date") or item_dict.get("day") or item_dict.get("time") or "").strip().split(" ")[0].replace("/", "-")
+        if not item_d:
+            return True  # Nếu bản ghi không gắn date metadata thì vẫn xem xét
+        return any(td in item_d or item_d in td for td in target_date_strs)
+
     app_names = set()
     if isinstance(app_events, dict):
         data_list = app_events.get("data", [])
         if isinstance(data_list, list):
             for h in data_list:
+                if isinstance(h, dict) and not _matches_target_date(h):
+                    continue
                 for item in h.get("top_list", []):
                     app_name = str(item.get("up_application") or "").strip().lower()
                     if app_name:
@@ -272,7 +543,9 @@ def detect_vpn_application(app_events):
     elif isinstance(app_events, list):
         for item in app_events:
             if isinstance(item, dict):
-                # Trường hợp 1: item là hour-bucket với top_list bên trong (format CEM app_usage_5days)
+                if not _matches_target_date(item):
+                    continue
+                # Trường hợp 1: item là hour-bucket với top_list bên trong
                 top_list = item.get("top_list")
                 if isinstance(top_list, list):
                     for sub_item in top_list:
@@ -296,6 +569,8 @@ def detect_vpn_application(app_events):
     for app in app_names:
         for kw in VPN_KEYWORDS:
             if kw in app:
+                if kw in ("1.1.1.1", "cloudflare", "warp"):
+                    return "Warp"
                 return app.title()
     return None
 
@@ -372,20 +647,25 @@ def extract_packages_from_text(text):
     return pkgs
 
 
-def get_expected_service_codes_for_pkg(pkg_name):
+def get_expected_service_codes_for_pkg(pkg_name, group_name=None):
     """
     Xác định mã Service ID dự kiến của gói cước để đối chiếu với BTools.
     Hỗ trợ một gói có thể có nhiều Service ID (ví dụ: mã chính, mã phụ, mã hạ băng thông).
-    Ví dụ:
-    VD120, VD120N, BIG, YOLO, D159V -> {"3000", "0000003000", "3601", "0000003601"...}
-    HOME, GD, GIA DINH -> {"5000", "0000005000", "3605", "0000003605", "9301", "10002", "10003"...}
-    TD3, TD5, TD49 -> {"3600", "0000003600", "8301", "0000008301"}
-    D5, D7, D15 -> {"3632", "0000003632"}
+    Nếu gói không có trong serviceid.json (VD120, VD89, THAGA...), tự động lấy mã từ Group Name SAPCCheck (ví dụ: Group Name: 3000).
     """
-    if not pkg_name:
-        return set()
-    p_clean = pkg_name.strip().upper()
     codes = set()
+    if group_name:
+        g_clean = str(group_name).strip()
+        digits = re.sub(r'\D', '', g_clean)
+        if digits:
+            codes.add(digits)
+            codes.add(digits.lstrip("0") or "0")
+            codes.add(digits.zfill(10))
+
+    if not pkg_name:
+        return codes
+
+    p_clean = pkg_name.strip().upper()
 
     # Nhóm HOME / Gia đình / GD
     if "HOME" in p_clean or "GD" in p_clean or "GIA DINH" in p_clean or "GIADINH" in p_clean:
@@ -426,8 +706,10 @@ def get_expected_service_codes_for_pkg(pkg_name):
     if "PLUS" in p_clean and "D" in p_clean:
         codes.update({"8604", "0000008604"})
 
-    # Nhóm THAGA, M0, PAYGO
-    if any(k in p_clean for k in ["THAGA", "THẢ GA", "M0", "PAYGO"]):
+    # Nhóm THAGA (THAGA70, THAGA70N, THAGA60, THAGA90... dùng nền BIG 3000 hoặc 3001)
+    if "THAGA" in p_clean or "THẢ GA" in p_clean:
+        codes.update({"3000", "0000003000", "3001", "0000003001", "2902", "2910", "2917"})
+    elif any(k in p_clean for k in ["M0", "PAYGO"]):
         codes.update({"3001", "0000003001"})
 
     # Nhóm SG120, VOCUC
@@ -458,6 +740,348 @@ def get_expected_service_codes_for_pkg(pkg_name):
         pass
 
     return codes
+
+
+def check_core_profile_failure(sub_info):
+    """
+    Kiểm tra các lỗi hồ sơ mạng lõi Core (NAM, HSS Profile chưa khai báo, HSS Profile lạ).
+    Được gọi khi BTools xác nhận khách hàng gặp sự cố / không dùng được dữ liệu.
+    Độ ưu tiên:
+    1. Cờ NAM = 1 (Bị khóa GPRS)
+    2. HSS Profile chưa khai báo (rỗng / None / "") -> CHƯA KHAI BÁO PROFILE 4G
+    3. HSS Profile lạ: BẮT BUỘC thỏa mãn điều kiện AND:
+       Profile >= 3 chữ số VÀ IPv4 bắt đầu bằng 113., 172. hoặc 192.168.
+    """
+    if not sub_info or not isinstance(sub_info, dict):
+        return None
+
+    # 1. Khóa GPRS (NAM = 1)
+    nam_val = str(sub_info.get("NAM") if sub_info.get("NAM") is not None else "").strip()
+    if nam_val == "1":
+        return (
+            "BỊ KHÓA GPRS",
+            "Thuê bao đang bị khóa GPRS (cờ NAM = 1 trên Core).",
+            "Nhờ VNP khai báo lại GPRS cho Khách hàng.",
+            "FFF2CC"
+        )
+
+    # 2. HSS Profile chưa khai báo (rỗng / None / "")
+    hss_profile = str(sub_info.get("HSS Profile") or "").strip()
+    if not hss_profile or hss_profile.lower() in ("none", "null", ""):
+        return (
+            "CHƯA KHAI BÁO PROFILE 4G",
+            "Kiểm tra trên hệ thống HSS Core, thuê bao chưa được mở profile dịch vụ 4G LTE, thiết bị chỉ kết nối được sóng 2G/3G hoặc không truy cập được dữ liệu.",
+            "Chuyển bộ phận IT/Khai thác mạng kiểm tra, bổ sung kích hoạt profile 4G cho thuê bao trên hệ thống.",
+            "FCE4D6"
+        )
+
+    # 3. HSS Profile lạ: Điều kiện AND (Profile >= 3 chữ số VÀ IPv4 bắt đầu bằng 113., 172. hoặc 192.168.)
+    hss_digits = re.sub(r'\D', '', hss_profile)
+    ipv4_val = str(sub_info.get("IPv4") or sub_info.get("IP") or "").strip()
+    is_ip_captured = ipv4_val.startswith("113.") or ipv4_val.startswith("172.") or ipv4_val.startswith("192.168.")
+    
+    if len(hss_digits) >= 3 and is_ip_captured:
+        return (
+            "PROFILE LẠ",
+            f"Phát hiện HSS Profile lạ ({hss_profile}), IP: {ipv4_val}.",
+            "Chuyển IT kiểm tra khai báo lại HSS Profile cho khách hàng.",
+            "FFC7CE"
+        )
+
+    return None
+
+
+def is_explicit_5g_complaint(package_title: str, ticket_content: str) -> bool:
+    """
+    Phân biệt chính xác giữa:
+    - Phản ánh THỰC SỰ về sự cố mạng 5G: 'không dùng được 5G', 'có 5G nhưng không dùng được', 'mất sóng 5G', 'không bắt được 5G'...
+    - VỚI việc chỉ mô tả trạng thái hiển thị sóng trên máy hoặc dòng máy: 'máy hiển thị sóng 5G', 'máy có sóng: 5G', 'iphone 14 5G'...
+      khi KH thực chất đang báo không dùng được data/mạng chung.
+    """
+    pkg = str(package_title or "").lower()
+    content = str(ticket_content or "").lower()
+    full_text = f"{pkg} {content}"
+
+    # 1. Loại bỏ các cụm dung lượng (5GB, 1.5GB, 5G/ngày, 5G/tháng...)
+    cleaned = re.sub(r'\b\d+([.,]\d+)?\s*(gb|mb|giga|tb)\b', ' ', full_text, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\d+([.,]\d+)?(gb|mb)\b', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\b\d+[.,]\d+\s*g\b', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\b\d+\s*g\s*/\s*(?:ngày|tháng|ngay|thang|day|thg)\b', ' ', cleaned, flags=re.IGNORECASE)
+
+    # Nếu sau khi loại bỏ dung lượng hoàn toàn không có chữ '5g' -> False
+    if not re.search(r'(?<![0-9a-zA-Z.])5g(?![0-9a-zA-Z])', cleaned, flags=re.IGNORECASE):
+        return False
+
+    # 2. Các mẫu phản ánh ĐÍCH DANH sự cố 5G:
+    # a) KH phản ánh không dùng được 5G / không truy cập được 5G
+    p_cant_use = r'(?:không|chưa|ko|k)\s+(?:dùng|dung|sử\s*dụng|sd|truy\s*cập|vào|kết\s*nối|xài)\s+(?:được\s+)?(?:mạng\s+|dịch\s*vụ\s+)?5g\b'
+    p_cant_use_alt = r'không\s+thể\s+(?:dùng|sử\s*dụng|truy\s*cập|kết\s*nối)\s+(?:mạng\s+)?5g\b'
+
+    # b) Có 5G nhưng không dùng được / Có sóng 5G nhưng không dùng được
+    p_have_but = r'có\s+(?:sóng\s+)?5g\s+(?:nhưng|mà|song)\s+(?:không|ko|chưa|k)\s+(?:dùng|dung|sử\s*dụng|sd|xài)\s+được'
+
+    # c) Mất sóng 5G / Không có sóng 5G / Không bắt được 5G / Không lên được 5G / Về 3G
+    p_signal = r'(?:mất|thiếu|yếu|chập\s*chờn|không\s*có|ko\s*có|chưa\s*có)\s+sóng\s+5g\b'
+    p_nocatch = r'(?:không|ko|chưa)\s+(?:bắt|lên|nhận|thấy|tìm\s+thấy|có|hiện)\s+(?:được\s+)?(?:sóng\s+)?5g\b'
+    p_only4g = r'(?:chỉ|chi)\s+(?:lên|bắt|nhận|hiện)\s+(?:được\s+)?(?:4g|3g|2g|lte|h\+?)\s+.*?(?:không|ko|chưa)\s+(?:lên|bắt|thấy)?\s*5g\b'
+    p_was5g = r'bình\s*thường\s+(?:lên|có)\s+5g\s+nhưng\s+.*?(?:chỉ|về)\s+(?:3g|4g|2g)\b'
+
+    # d) Lỗi / Chậm / Lag riêng cho dịch vụ hoặc mạng 5G
+    p_err = r'(?:lỗi|sự\s*cố|hỏng)\s+(?:mạng\s+|dịch\s*vụ\s+|sóng\s+)?5g\b'
+    p_slow = r'\b5g\s+(?:bị\s+)?(?:lỗi|sự\s*cố|hỏng|chậm|lag|chập\s*chờn|yếu|rớt)\b'
+    p_net_bad = r'(?:mạng|dịch\s*vụ|sóng)\s+5g\s+(?:bị\s+)?(?:chậm|lag|yếu|kém|chập\s*chờn|rớt|không\s*ổn\s*định)\b'
+
+    # e) Đăng ký gói 5G nhưng không dùng được mạng 5G
+    p_pkg = r'(?:đăng\s*ký|đk|mua|gói\s+cước|gói)\s+5g\s+.*?(?:không|ko|chưa)\s+(?:dùng|sd|sử\s*dụng|vào)\s+được\s+(?:mạng\s+)?5g\b'
+
+    patterns = [p_cant_use, p_cant_use_alt, p_have_but, p_signal, p_nocatch, p_only4g, p_was5g, p_err, p_slow, p_net_bad, p_pkg]
+    return any(bool(re.search(p, cleaned, flags=re.IGNORECASE)) for p in patterns)
+
+
+def detect_device_category(ticket_content="", ai_summary=""):
+    """
+    Phân loại thiết bị người dùng sử dụng từ nội dung phản ánh hoặc tóm tắt AI:
+    - Trả về: (category, device_display_name)
+      category: 'uncommon' | 'common' | 'unknown'
+      device_display_name: chuỗi tên thiết bị hiển thị
+    """
+    raw_text = f"{ticket_content} {ai_summary}".strip()
+    text_lower = raw_text.lower()
+
+    # Bóc tách tên thiết bị cụ thể nếu có trường KH dùng Máy: ...
+    m_dev = re.search(
+        r'(?:KH dùng Máy|Dòng máy|Thiết bị sử dụng|Thiết bị|Loại máy|Máy sử dụng|Máy)[:\s]*([^\n,;]+)', 
+        raw_text, 
+        re.IGNORECASE
+    )
+    extracted_dev = m_dev.group(1).strip() if m_dev else ""
+    
+    # Lọc bỏ từ nối hoặc thông tin rác phía sau tên máy nếu có
+    STOP_WORDS = [
+        "không vào được", "khong vao duoc", "không được", "khong duoc", "mạng", "mang", 
+        "chậm", "cham", "yếu", "yeu", "lag", "lỗi", "loi", "chập chờn", "chap chon", 
+        "rớt", "rot", "truy cập báo", "truy cap bao", "máy có sóng", "sóng", "bật dldđ", 
+        "đã thao tác", "chọn mạng", "xóa cache", "reset gprs"
+    ]
+    for sw in STOP_WORDS:
+        if sw in extracted_dev.lower():
+            idx = extracted_dev.lower().find(sw)
+            extracted_dev = extracted_dev[:idx].strip()
+
+    if any(trash in extracted_dev.lower() for trash in ["không rõ", "ko ro", "lúc 4g", "không có"]):
+        extracted_dev = ""
+
+    # 1. Các nhóm thiết bị KHÔNG THÔNG DỤNG (Ô tô, Wifi/Router, Huawei/LG, POS/Đồng hồ, Camera...)
+    UNCOMMON_KEYWORDS = [
+        # Thiết bị ô tô / xe hơi
+        ("màn hình ô tô", "màn hình ô tô"),
+        ("đầu máy ô tô", "đầu máy ô tô"),
+        ("đầu máy màn hình", "đầu máy màn hình ô tô"),
+        ("đầu máy", "đầu máy ô tô"),
+        ("màn hình xe", "màn hình xe hơi"),
+        ("ô tô", "thiết bị ô tô"),
+        ("o to", "thiết bị ô tô"),
+        ("xe hơi", "thiết bị xe hơi"),
+        ("xe hoi", "thiết bị xe hơi"),
+        ("android box", "Android Box ô tô"),
+        ("tẩu sim", "tẩu SIM ô tô"),
+        ("dvd", "đầu DVD ô tô"),
+        ("camera hành trình", "camera hành trình"),
+        
+        # Thiết bị phát Wi-Fi / Router / Dcom / Modem
+        ("phát wifi", "bộ phát Wi-Fi"),
+        ("phat wifi", "bộ phát Wi-Fi"),
+        ("bắt wifi", "thiết bị bắt Wi-Fi"),
+        ("bat wifi", "thiết bị bắt Wi-Fi"),
+        ("cục phát", "cục phát Wi-Fi"),
+        ("cuc phat", "cục phát Wi-Fi"),
+        ("router", "Router 4G"),
+        ("modem", "Modem 4G"),
+        ("dcom", "Dcom 4G"),
+        ("usb 3g", "USB 3G/4G"),
+        ("usb 4g", "USB 4G"),
+        ("cpe", "thiết bị CPE"),
+
+        # Các dòng máy đặc thù / kén sóng / nội địa / xách tay
+        ("huawei", "máy Huawei"),
+        ("honor", "máy Honor"),
+        ("lg", "máy LG"),
+        ("sony", "máy Sony"),
+        ("zte", "máy ZTE"),
+        ("meizu", "máy Meizu"),
+        ("coolpad", "máy Coolpad"),
+        ("blackberry", "máy BlackBerry"),
+        ("htc", "máy HTC"),
+        ("xách tay", "máy xách tay"),
+        ("nội địa", "máy nội địa"),
+        ("khóa mạng", "máy lock"),
+        ("bản lock", "máy lock"),
+
+        # Thiết bị IoT / POS / Đồng hồ / Camera
+        ("máy pos", "máy POS"),
+        ("đồng hồ", "đồng hồ thông minh"),
+        ("dong ho", "đồng hồ thông minh"),
+        ("smartwatch", "smartwatch"),
+        ("định vị", "thiết bị định vị"),
+        ("dinh vi", "thiết bị định vị"),
+        ("camera", "camera 4G")
+    ]
+
+    for kw, label in UNCOMMON_KEYWORDS:
+        if re.search(r'\b' + re.escape(kw) + r'\b', text_lower):
+            display_name = extracted_dev or label
+            return "uncommon", display_name
+
+    # 2. Thiết bị THÔNG DỤNG (iPhone, Samsung, Oppo, Xiaomi, Vivo, Realme...)
+    COMMON_KEYWORDS = [
+        "iphone", "apple", "ipad", "samsung", "galaxy", "oppo", 
+        "xiaomi", "redmi", "vivo", "realme", "poco", "oneplus", "infinix", "tecno"
+    ]
+    for kw in COMMON_KEYWORDS:
+        if re.search(r'\b' + re.escape(kw) + r'\b', text_lower):
+            display_name = extracted_dev or kw.capitalize()
+            return "common", display_name
+
+    return "unknown", extracted_dev or "thiết bị"
+
+
+def evaluate_vpn_status(
+    clean_data,
+    cem_records,
+    app_events,
+    sub_info,
+    downlink_sessions,
+    max_dl_session,
+    max_dl_incident_day,
+    has_large_btools_session,
+    incident_date,
+    dt_incident,
+    incident_time_str,
+    dominant_cell,
+    dominant_pct,
+    ticket_content_lower,
+    combined_report_text,
+    action_suffix,
+    ticket_content=""
+):
+    """
+    KỊCH BẢN ĐẶC THÙ VPN / CLOUDFLARE 1.1.1.1 (ĐỘ ƯU TIÊN CUỐI CÙNG):
+    Chỉ kích hoạt khi thỏa mãn TẤT CẢ các điều kiện:
+    1. Không bị bóp băng thông gói cước (không có mã dịch vụ 100xx / 10002..10014).
+    2. Khách hàng thực sự phản ánh lỗi mạng (chậm, yếu, không vào được, chập chờn...).
+    3. Lưu lượng BTools ở mức thấp (toàn bộ các phiên < 11MB, không có phiên lớn >= 11MB).
+    4. Thuê bao di chuyển qua nhiều khu vực (nhiều cell/site trên CEM >= 2, hoặc nội dung phản ánh, không bị tập trung 1 cell >= 70%).
+    5. Có bằng chứng VPN: Xuất hiện app VPN/Cloudflare trên CEM, HOẶC bắt 4G dải lưu lượng 1-11MB đều nhau qua các ngày.
+    """
+    # 1. Điểm mù 3: Nếu phát hiện mã hạ/bóp băng thông BTools -> Bỏ qua VPN ngay!
+    is_throttled_present = any(
+        is_throttled_service_code(r.get("SERVICE_ID_CODE") or r.get("SERVICE_ID") or "")
+        for r in (clean_data or [])
+    )
+    if is_throttled_present:
+        return None
+
+    # 2. Điểm mù 2: Khách hàng phải phản ánh sự cố kết nối (chậm, yếu, mất mạng, không vào được...)
+    is_trouble_reported = any(
+        w in ticket_content_lower for w in [
+            "chậm", "cham", "yếu", "yeu", "không vào được", "khong vao duoc", 
+            "không được", "khong duoc", "mất mạng", "mat mang", "lag", "xoay", 
+            "chập chờn", "chap chon", "rớt mạng", "rot mang", "không load", "ko load"
+        ]
+    )
+    if not is_trouble_reported:
+        return None
+
+    # 3. Điểm mù 1 & Kiểm tra BTools Ground Truth: Lưu lượng phiên thấp, KHÔNG có phiên >= 11MB
+    if has_large_btools_session or max_dl_session >= 11_000_000 or (max_dl_incident_day and max_dl_incident_day >= 11_000_000):
+        return None
+
+    # 4. Kiểm tra di chuyển nhiều nơi: Có từ 2 cell hoặc 2 trạm (site) khác nhau trên CEM, hoặc phản ánh đi nhiều nơi
+    cem_cells = set(
+        str(r.get("cell_name") or r.get("cellName") or r.get("cell_id") or "").strip()
+        for r in (cem_records or [])
+        if (r.get("cell_name") or r.get("cellName") or r.get("cell_id"))
+    )
+    cem_sites = set(extract_site_name_from_cell(c) for c in cem_cells if c)
+    multi_area_patterns = [
+        "đi nhiều nơi", "di nhiều nơi", "di nhieu noi", "nhiều nơi", "nhieu noi",
+        "đi nhiều khu vực", "nhiều khu vực", "nhieu khu vuc",
+        "khu vực khác cũng", "khu vuc khac cung", "kv khác cũng", "kv khac cung",
+        "đi đâu cũng", "di dau cung", "các khu vực", "qua nhiều trạm", "nhiều địa chỉ",
+        "nhiều chỗ", "nhieu cho", "ở đâu cũng", "o dau cung", "khắp nơi", "khap noi",
+        "di chuyển", "di chuyen", "tại nhiều điểm", "tai nhieu diem"
+    ]
+    is_multi_area_reported = any(p in combined_report_text for p in multi_area_patterns)
+    is_moving_multi_area = (len(cem_sites) >= 2 or len(cem_cells) >= 2 or is_multi_area_reported) and (not dominant_cell or dominant_pct < 70.0)
+
+    if not is_moving_multi_area:
+        return None
+
+    # 5. Phát hiện VPN trên CEM (ưu tiên ngày phản ánh)
+    detected_vpn_incident = detect_vpn_application(app_events, target_date=incident_date) if incident_date else None
+    detected_vpn_any = detect_vpn_application(app_events)
+
+    if detected_vpn_incident or detected_vpn_any:
+        vpn_app_name = detected_vpn_incident or detected_vpn_any or "Cloudflare / 1.1.1.1"
+        max_used_bytes = max_dl_incident_day if max_dl_incident_day > 0 else max_dl_session
+        max_used_mb = max_used_bytes / 1_000_000
+        incident_date_str_display = dt_incident.strftime("%d/%m/%Y") if dt_incident else (incident_time_str[:10] if incident_time_str else "ngày phản ánh")
+        return (
+            "ĐANG SỬ DỤNG VPN / 1.1.1.1",
+            f"Khách hàng phản ánh mạng chậm/sự cố khi di chuyển qua nhiều khu vực. Kiểm tra thuê bao không bị bóp băng thông gói cước, nhưng dữ liệu CEM ({incident_date_str_display}) ghi nhận thiết bị phát sinh lưu lượng qua ứng dụng VPN ({vpn_app_name}). BTools ghi nhận toàn bộ lưu lượng bị giới hạn dưới 11MB (phiên lớn nhất chỉ đạt {max_used_mb:.1f} MB). Khi bật VPN, lưu lượng đi quốc tế bị bóp dung lượng dẫn đến tình trạng load chậm hoặc chập chờn.",
+            f"Hướng dẫn khách hàng tạm thời tắt/gỡ ứng dụng VPN ({vpn_app_name}) trên máy, sau đó bật lại dữ liệu di động để truy cập bình thường." + action_suffix,
+            "E2EFDA"
+        )
+
+    # 6. Nhánh chẩn đoán lưu lượng thấp nghi ngờ VPN / Thiết bị đầu cuối
+    sub_radio_upper = str(sub_info.get("Radio") or "").upper()
+    has_4g_signal = ("4G" in sub_radio_upper) or ("LTE" in sub_radio_upper) or any(
+        "4G" in str(r.get("RAT_TYPE_NAME") or "").upper() or str(r.get("RAT_TYPE") or "") == "6"
+        for r in (clean_data or [])
+    )
+    sessions_in_1_to_11mb = [s for s in downlink_sessions if 1_000_000 <= s < 11_000_000]
+    if (
+        has_4g_signal 
+        and (1_000_000 <= max_dl_session < 11_000_000) 
+        and len(sessions_in_1_to_11mb) >= 2
+    ):
+        day_max_sessions = {}
+        if clean_data:
+            for r in clean_data:
+                r_time = r.get("RECORD_OPENING_TIME", "")
+                r_dt = parse_dt_safe(r_time)
+                if r_dt:
+                    d_k = r_dt.date()
+                    dl_v = float(r.get("DATA_VOLUME_DOWNLINK") or 0)
+                    if dl_v > 0:
+                        day_max_sessions[d_k] = max(day_max_sessions.get(d_k, 0), dl_v)
+
+        all_days_under_11mb = all(v < 11_000_000 for v in day_max_sessions.values()) if day_max_sessions else True
+        if all_days_under_11mb:
+            max_used_mb = max_dl_session / 1_000_000
+
+            # Chẩn đoán thêm thiết bị đầu cuối
+            dev_cat, dev_name = detect_device_category(ticket_content=ticket_content, ai_summary="")
+
+            # Kịch bản 1: Thiết bị không phải điện thoại di động thông dụng (ô tô, bộ phát Wi-Fi, Huawei, LG...)
+            if dev_cat == "uncommon":
+                dev_display = dev_name if dev_name else "đặc thù (ô tô / bộ phát Wi-Fi / Huawei / LG...)"
+                return (
+                    "LỖI THIẾT BỊ ĐẦU CUỐI",
+                    f"Thuê bao bắt sóng 4G bình thường, gói cước không bị bóp băng thông nhưng lưu lượng BTools trong các ngày chỉ phát sinh trong dải thấp dưới 11MB (phiên lớn nhất chỉ đạt {max_used_mb:.1f} MB, không có phiên vượt 11MB). Khách hàng sử dụng SIM trên thiết bị {dev_display} (không phải dòng smartphone thông dụng), nguyên nhân do thiết bị đầu cuối bị treo kết nối data, giới hạn băng thông phần cứng hoặc lỗi cấu hình mạng của thiết bị.",
+                    f"Hướng dẫn khách hàng khởi động lại thiết bị (tắt/bật lại nguồn thiết bị {dev_display}, tháo lắp lại SIM). Đề nghị khách hàng thử đổi SIM sang thiết bị di động thông dụng hơn (iPhone, Samsung, Oppo...) để test và so sánh đối chiếu." + action_suffix,
+                    "FFF2CC"
+                )
+            else:
+                # Kịch bản 2: Không có phiên VPN, không có thiết bị cụ thể hoặc là dòng máy thông dụng
+                return (
+                    "NGHI NGỜ VPN / LỖI THIẾT BỊ",
+                    f"Thuê bao bắt sóng 4G bình thường, không bị bóp băng thông gói cước nhưng lưu lượng BTools trong các ngày đều phân bổ đều trong dải thấp dưới 11MB (phiên lớn nhất chỉ đạt {max_used_mb:.1f} MB, không có phiên vượt 11MB). Nguyên nhân có thể do thiết bị đang bật VPN / 1.1.1.1 / Private DNS dẫn đến bị giới hạn dung lượng từng phiên, hoặc do thiết bị đầu cuối bị treo phiên kết nối data.",
+                    "Hướng dẫn khách hàng: (1) Kiểm tra và tắt các ứng dụng VPN / 1.1.1.1 hoặc cấu hình DNS riêng/Proxy trên máy; (2) Tắt/bật lại thiết bị và dữ liệu di động, sau đó speedtest lại; (3) Nếu vẫn chưa cải thiện, nhờ khách hàng thử đổi SIM sang máy khác để kiểm tra lại giúp." + action_suffix,
+                    "FFF2CC"
+                )
+
+    return None
 
 
 def analyze_subscriber_status(clean_data, package_title, ticket_content="", phone_84="", cem_records=None, app_events=None, incident_time_str=None, driver=None):
@@ -514,55 +1138,52 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             "FFF2CC"
         )
 
-    # 1. KỊCH BẢN NAM: NAM = 1 (BỊ KHÓA GPRS)
-    nam_val = str(sub_info.get("NAM") if sub_info.get("NAM") is not None else "").strip()
-    if nam_val == "1":
-        return (
-            "BỊ KHÓA GPRS",
-            "Thuê bao đang bị khóa GPRS.",
-            "Nhờ VNP khai báo lại GPRS cho Khách hàng.",
-            "FFF2CC"
-        )
+    # 🔍 BTOOLS GROUND TRUTH: Trích xuất sớm các phiên Downlink và mốc thời gian tiếp nhận
+    downlink_sessions = []
+    if clean_data:
+        for r in clean_data:
+            try:
+                dl = float(r.get("DATA_VOLUME_DOWNLINK") or 0)
+                if dl > 0:
+                    downlink_sessions.append(dl)
+            except (ValueError, TypeError):
+                pass
 
-    # 🎯 KỊCH BẢN HSS PROFILE LẠ (HSS Profile từ 3 chữ số trở lên)
-    # Profile bình thường: 10, 20, 23 (4G/thông thường) hoặc 55, 56, 65, 66, 67 (5G).
-    # Khi thấy HSS Profile từ 3 chữ số trở lên:
-    # - Nếu bắt được IP (113.x.x.x hoặc 172.x.x.x) -> Nhận định lỗi profile và chuyển IT kiểm tra khai báo lại HSS profile cho khách hàng.
-    # - Bôi đỏ cảnh báo PROFILE LẠ.
-    hss_profile = str(sub_info.get("HSS Profile") or "").strip()
-    hss_digits = re.sub(r'\D', '', hss_profile)
-    if len(hss_digits) >= 3:
-        ipv4_val = str(sub_info.get("IPv4") or sub_info.get("IP") or "").strip()
-        has_captured_ip = ipv4_val.startswith("113.") or ipv4_val.startswith("172.")
-        
-        if has_captured_ip:
-            comment_text = (
-                f"Thuê bao có HSS Profile ({hss_profile}) là profile lạ (từ 3 chữ số trở lên), thiết bị vẫn bắt được IP ({ipv4_val}) "
-                f"nhưng không sử dụng được dịch vụ do lỗi sai cấu hình Profile Core (profile thông thường: 10, 20, 23 hoặc 5G: 55, 56, 65, 66, 67)."
-            )
-            action_text = f"Chuyển IT kiểm tra khai báo lại HSS Profile cho khách hàng (Profile: {hss_profile}, IP: {ipv4_val})."
-        else:
-            comment_text = (
-                f"HSS Profile của thuê bao ({hss_profile}) có từ 3 chữ số trở lên, là profile lạ/bất thường "
-                f"(profile thông thường: 10, 20, 23 hoặc 5G: 55, 56, 65, 66, 67)."
-            )
-            action_text = f"Chuyển IT kiểm tra khai báo lại HSS Profile cho khách hàng."
+    max_dl_session = max(downlink_sessions, default=0)
+    has_large_btools_session = max_dl_session >= 10_000_000  # Có phiên >= 10MB
 
-        return (
-            "PROFILE LẠ",
-            comment_text,
-            action_text,
-            "FFC7CE"
-        )
+    dt_incident = parse_dt_safe(incident_time_str)
+    sessions_after_incident = []
+    if dt_incident and clean_data:
+        for row in clean_data:
+            time_str = row.get("RECORD_OPENING_TIME", "")
+            row_dt = parse_dt_safe(time_str)
+            if row_dt and row_dt >= dt_incident:
+                sessions_after_incident.append((row_dt, row))
+
+    downlinks_after = [
+        float(r.get("DATA_VOLUME_DOWNLINK", 0) or 0) 
+        for _, r in sessions_after_incident 
+        if r.get("DATA_VOLUME_DOWNLINK") is not None
+    ]
+    max_downlink_after = max(downlinks_after, default=0)
+    has_session_over_10mb_after = max_downlink_after >= 10_000_000
+
+    # 🎯 KIỂM TRA LỖI PROFILE CORE (NAM, HSS Profile rỗng, HSS Profile lạ):
+    # Ưu tiên kiểm tra BTools trước: nếu thuê bao ĐANG CÓ PHIÊN DATA BÌNH THƯỜNG (>= 10MB) sau thời điểm tiếp nhận,
+    # BTools xác nhận thuê bao đã sử dụng được dịch vụ, KHÔNG bị chặn bởi Profile.
+    # Ngược lại, nếu BTools xác nhận KHÔNG có data bình thường sau tiếp nhận (hoặc không có mốc tiếp nhận và không có phiên >= 10MB):
+    # -> Kiểm tra ngay các lỗi hồ sơ mạng lõi Core để xác định nguyên nhân (NAM=1, Profile rỗng, Profile lạ AND IP: 113/172/192.168).
+    has_normal_btools_after = has_session_over_10mb_after or (not dt_incident and has_large_btools_session)
+    if not has_normal_btools_after:
+        core_err = check_core_profile_failure(sub_info)
+        if core_err:
+            return core_err
 
     # 2. KỊCH BẢN MOBILE INTERNET 5G
-    combined_report_text = f"{package_title} {ticket_content}".lower()
-    # Loại bỏ các cụm dung lượng như 1.5GB, 5GB, 15GB, 5G/ngày, 2.5G data... tránh nhận diện nhầm là mạng 5G
-    cleaned_5g_text = re.sub(r'\b\d+([.,]\d+)?\s*(gb|mb|giga|tb)\b', ' ', combined_report_text, flags=re.IGNORECASE)
-    cleaned_5g_text = re.sub(r'\d+([.,]\d+)?(gb|mb)\b', ' ', cleaned_5g_text, flags=re.IGNORECASE)
-    cleaned_5g_text = re.sub(r'\b\d+[.,]\d+\s*g\b', ' ', cleaned_5g_text, flags=re.IGNORECASE)
-    cleaned_5g_text = re.sub(r'\b\d+\s*g\s*/\s*(?:ngày|tháng|ngay|thang|day|thg)\b', ' ', cleaned_5g_text, flags=re.IGNORECASE)
-    is_5g_reported = ("mobile internet 5g" in package_title.lower()) or bool(re.search(r'(?<![0-9a-zA-Z.])5g(?![0-9a-zA-Z])', cleaned_5g_text, flags=re.IGNORECASE))
+    # CHỈ kích hoạt khi KH phản ánh thực sự về 5G (không dùng được 5G, có 5G nhưng không dùng được, mất sóng 5G...)
+    # KHÔNG kích hoạt nếu chỉ là mô tả trạng thái màn hình máy ("máy hiển thị sóng 5G") trong khi KH báo lỗi data chung.
+    is_5g_reported = is_explicit_5g_complaint(package_title, ticket_content)
     if is_5g_reported:
         hss_profile = str(sub_info.get("HSS Profile") or "").strip()
         valid_5g_profiles = {"55", "56", "65", "66", "67"}
@@ -590,64 +1211,45 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     "FFF2CC"
                 )
 
-    # 🔍 BTOOLS GROUND TRUTH: Trích xuất các phiên Downlink trên BTools
-    downlink_sessions = []
-    if clean_data:
+    # 🔍 BTOOLS GROUND TRUTH: Đánh giá phân bố lưu lượng phiên BTools & mốc thời gian phản ánh
+    dt_incident = parse_dt_safe(incident_time_str)
+    incident_date = dt_incident.date() if dt_incident else None
+
+    # Lọc các phiên BTools trong đúng ngày phản ánh
+    sessions_incident_day = []
+    if clean_data and incident_date:
         for r in clean_data:
-            try:
-                dl = float(r.get("DATA_VOLUME_DOWNLINK") or 0)
-                if dl > 0:
-                    downlink_sessions.append(dl)
-            except (ValueError, TypeError):
-                pass
+            r_time = r.get("RECORD_OPENING_TIME", "")
+            r_dt = parse_dt_safe(r_time)
+            if r_dt and r_dt.date() == incident_date:
+                sessions_incident_day.append((r_dt, r))
 
-    max_dl_session = max(downlink_sessions, default=0)
-    has_large_btools_session = max_dl_session >= 11_500_000  # Có phiên >= 11.5MB (> 11MB)
-    all_btools_sessions_under_11mb = bool(len(downlink_sessions) >= 2 and all(s < 11_500_000 for s in downlink_sessions))
-    all_in_vpn_block_range = bool(len(downlink_sessions) >= 2 and all(4_500_000 <= s <= 11_500_000 for s in downlink_sessions))
-
-    # Kiểm tra phản ánh KH có báo chậm / lag / chập chờn hay không
-    combined_report_text = f"{package_title} {ticket_content}".lower()
-    slow_keywords = [
-        "chậm", "cham", "load chậm", "load cham", "truy cập chậm", "truy cap cham",
-        "lag", "quay vòng", "quay vong", "chập chờn", "chap chon", "kém", "kem",
-        "yếu", "yeu", "chậm chờn", "tải chậm", "tai cham", "chậm lag", "không ổn định",
-        "khong on dinh", "bị giật", "bi giat", "load mãi", "quay mãi", "rớt mạng"
+    downlinks_incident_day = [
+        float(r.get("DATA_VOLUME_DOWNLINK") or 0)
+        for _, r in sessions_incident_day
+        if r.get("DATA_VOLUME_DOWNLINK") is not None and float(r.get("DATA_VOLUME_DOWNLINK") or 0) > 0
     ]
-    is_reported_slow = any(k in combined_report_text for k in slow_keywords)
+    max_dl_incident_day = max(downlinks_incident_day, default=0)
 
-    # 🎯 KỊCH BẢN ĐẶC THÙ 1: Kiểm tra App Usage / BTools đối với VPN / 1.1.1.1 / Cloudflare
-    # CHỈ KÍCH HOẠT KHI:
-    # 1. Các phiên BTools đều bị bóp < 11MB (nghi ngờ VPN, CEM có thể có hoặc chưa có dữ liệu)
-    # HOẶC 2. Khách hàng báo CHẬM trong nội dung phản ánh VÀ có phát hiện app VPN trong CEM
-    detected_vpn = detect_vpn_application(app_events)
-    
-    is_vpn_scenario = False
-    vpn_app_name = detected_vpn or "1.1.1.1 / Cloudflare"
+    # Đánh giá phiên lớn nhất (toàn bộ lịch sử BTools và ngày phản ánh)
+    max_dl_session = max(downlink_sessions, default=0)
+    has_large_btools_session = (max_dl_session >= 11_000_000) or (max_dl_incident_day >= 11_000_000)
 
-    if all_btools_sessions_under_11mb and (all_in_vpn_block_range or detected_vpn):
-        is_vpn_scenario = True
-        if not detected_vpn:
-            vpn_app_name = "VPN / 1.1.1.1"
-    elif is_reported_slow and detected_vpn:
-        is_vpn_scenario = True
+    # Kiểm tra xem có phiên nào đạt dải < 11MB không
+    is_under_11mb_overall = bool(len(downlink_sessions) >= 1 and max_dl_session < 11_000_000)
+    is_under_11mb_incident = bool(len(downlinks_incident_day) >= 1 and max_dl_incident_day < 11_000_000) if downlinks_incident_day else is_under_11mb_overall
 
-    # Nếu KH có phiên dữ liệu lớn (> 11MB, hàng chục/hàng trăm MB) VÀ KHÔNG báo chậm:
-    # -> BTools ưu tiên tuyệt đối, KHÔNG kết luận lỗi do VPN mà để BTools đánh giá bình thường
-    if is_vpn_scenario and not (has_large_btools_session and not is_reported_slow):
-        vpn_note = f"vào ngày tiếp nhận phản ánh ({incident_time_str[:10]})" if incident_time_str else "gần đây"
-        return (
-            "ĐANG SỬ DỤNG VPN / 1.1.1.1",
-            f"Dữ liệu CEM ghi nhận {vpn_note}, thiết bị của khách hàng có phát sinh lưu lượng qua ứng dụng mạng riêng ảo ({vpn_app_name}). Khi bật VPN, lưu lượng đi quốc tế bị bóp dung lượng dẫn đến tình trạng load chậm hoặc mất kết nối dịch vụ.",
-            f"Hướng dẫn khách hàng tạm thời tắt/gỡ ứng dụng VPN ({vpn_app_name}) trên máy, sau đó bật lại dữ liệu di động để truy cập bình thường." + action_suffix,
-            "E2EFDA"
-        )
+    # Phát hiện ứng dụng VPN trên CEM để lưu ý KTV trong mọi kịch bản
+    detected_vpn_incident = detect_vpn_application(app_events, target_date=incident_date) if incident_date else None
+    detected_vpn_any = detect_vpn_application(app_events)
+    active_vpn_name = detected_vpn_incident or detected_vpn_any
+    vpn_advice_suffix = ""
 
     # 🎯 KỊCH BẢN ĐẶC THÙ 2: Khách hàng phản ánh dùng gói VD2 nhưng SAPC không thấy có gói PAYGO
     combined_report_text = f"{package_title} {ticket_content}".lower()
     is_vd2_reported = bool(re.search(r"\bvd2\b|\bvd2k\b|gói vd2|goi vd2", combined_report_text))
     if is_vd2_reported:
-        active_pkgs, _ = get_sapc_package_validity(phone_84)
+        active_pkgs, _ = get_sapc_package_validity(phone_84, incident_time_str=incident_time_str)
         has_paygo = any(p.get("is_paygo") or "paygo" in p.get("name", "").lower() for p in active_pkgs)
         if not has_paygo:
             return (
@@ -686,9 +1288,24 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     ]
     is_multi_area = any(p in combined_report_text for p in multi_area_patterns)
 
+    # Cô lập dữ liệu chuẩn 5 ngày gần nhất để không bị lẫn dữ liệu tra cứu bổ sung (> 5 ngày)
+    start_scan_date = (datetime.now() - timedelta(days=4)).date()
+    clean_data_5d = []
+    for r in (clean_data or []):
+        t_str = r.get("RECORD_OPENING_TIME", "")
+        if t_str:
+            try:
+                d = datetime.strptime(t_str.split()[0], "%d/%m/%Y").date()
+                if d >= start_scan_date:
+                    clean_data_5d.append(r)
+            except Exception:
+                clean_data_5d.append(r)
+        else:
+            clean_data_5d.append(r)
+
     total_bytes = 0
-    if clean_data:
-        for r in clean_data:
+    if clean_data_5d:
+        for r in clean_data_5d:
             try:
                 dl = float(r.get("DATA_VOLUME_DOWNLINK") or 0)
                 ul = float(r.get("DATA_VOLUME_UPLINK") or 0)
@@ -696,7 +1313,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             except (ValueError, TypeError):
                 pass
     total_mb = total_bytes / (1024 * 1024)
-    has_btools_under_10mb = bool(clean_data and len(clean_data) > 0 and 0 <= total_mb < 10.0)
+    has_btools_under_10mb = bool(clean_data_5d and len(clean_data_5d) > 0 and 0 <= total_mb < 10.0)
 
     if is_incident_today and is_radio_3g and is_ip_null and is_multi_area and has_btools_under_10mb:
         return (
@@ -706,14 +1323,16 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             "FFF2CC"
         )
 
-    if not clean_data or len(clean_data) == 0:
-        active_pkgs, expired_pkgs = get_sapc_package_validity(phone_84)
+    if not clean_data_5d or len(clean_data_5d) == 0:
+        active_pkgs, expired_pkgs = get_sapc_package_validity(phone_84, incident_time_str=incident_time_str)
+        act_commercial = [p for p in active_pkgs if not p.get("is_paygo")]
+        exp_commercial = [p for p in expired_pkgs if not p.get("is_paygo")]
         
-        # 1. TẤT CẢ GÓI ĐỀU ĐÃ HẾT HẠN (không còn gói active nào)
-        if not active_pkgs and expired_pkgs:
-            exp_names = ", ".join([p["name"] for p in expired_pkgs])
-            exp_dates = ", ".join([p["exp_str"] for p in expired_pkgs])
-            exp_note = f" (trước/vào thời điểm tiếp nhận phản ánh {incident_time_str})" if incident_time_str else ""
+        # 1. TẤT CẢ GÓI ĐỀU ĐÃ HẾT HẠN TRƯỚC NGÀY TIẾP NHẬN PHẢN ÁNH
+        if not act_commercial and exp_commercial:
+            exp_names = ", ".join([p["name"] for p in exp_commercial])
+            exp_dates = ", ".join([p["exp_str"] for p in exp_commercial])
+            exp_note = f" (trước thời điểm tiếp nhận phản ánh {incident_time_str})" if incident_time_str else ""
             return (
                 "GÓI CƯỚC ĐÃ HẾT HẠN",
                 f"Thuê bao hoàn toàn không phát sinh dữ liệu trong các ngày qua do gói cước {exp_names} của khách hàng đã hết hạn vào ngày {exp_dates}{exp_note}.",
@@ -721,86 +1340,71 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 "FFF2CC"
             )
         
-        # 2. VẪN CÓ GÓI ACTIVE: Kiểm tra chi tiết loại gói (PAYGO / HOME / Gói thương mại)
-        if active_pkgs:
-            # 2.1. Thuê bao CHỈ CÓ GÓI PAYGO
-            if all(p.get("is_paygo") for p in active_pkgs):
+        # 2. CHƯA ĐĂNG KÝ GÓI (Dựa vào SAPCCheck: chỉ có PAYGO / không có gói thương mại)
+        if not act_commercial and not exp_commercial:
+            return (
+                "CHƯA ĐĂNG KÝ GÓI",
+                "Hồ sơ SAPC ghi nhận thuê bao chưa đăng ký gói cước di động (chỉ có gói nền PAYGO/M0), không có gói data ưu đãi và tài khoản chính không đủ để trừ cước truy cập ngoài gói.",
+                "Hướng dẫn khách hàng kiểm tra số dư tài khoản chính, đồng thời tư vấn đăng ký các gói cước Data VinaPhone ưu đãi để sử dụng.",
+                "FFF2CC"
+            )
+
+        # 3. LỖI DO GÓI CƯỚC: Có gói cước còn hạn nhưng không phát sinh dữ liệu kể từ khi đăng ký
+        if act_commercial:
+            act_names = ", ".join([p["name"] for p in act_commercial])
+            act_exp_dates = ", ".join([p["exp_str"] for p in act_commercial])
+            act_reg_dates = ", ".join([p["reg_str"] for p in act_commercial if p.get("reg_str") != "N/A"]) or "trước đó"
+            earliest_reg_dt = min([p["reg_dt"] for p in act_commercial if p.get("reg_dt")], default=None)
+            start_scan_date = (datetime.now() - timedelta(days=4)).date()
+
+            # Case 1: Gói mới đăng ký trong 5 ngày qua -> ĐÓNG PHIẾU LUÔN
+            if earliest_reg_dt and earliest_reg_dt.date() >= start_scan_date:
                 return (
-                    "CHỈ CÓ GÓI PAYGO",
-                    "Thuê bao hiện chỉ có gói cước mặc định (PAYGO/M0), không có gói data ưu đãi và tài khoản chính không đủ để trừ cước truy cập ngoài gói.",
-                    "Hướng dẫn khách hàng kiểm tra số dư tài khoản chính, đồng thời tư vấn đăng ký các gói cước Data VinaPhone ưu đãi để sử dụng.",
+                    "LỖI DO GÓI CƯỚC",
+                    f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
+                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                     "FFF2CC"
                 )
 
-            # 2.2. Trường hợp đặc biệt: Gói tích hợp HOME không có ngày tháng
-            if all(p.get("is_home") or p.get("is_no_date") for p in active_pkgs):
-                pkg_names = ", ".join([p["name"] for p in active_pkgs])
-                return (
-                    "LỖI GÓI HOME / NGHẼN BĂNG THÔNG",
-                    f"Thuê bao sử dụng gói tích hợp {pkg_names} nhưng BTools 5 ngày qua hoàn toàn không phát sinh mã dịch vụ data và không có phiên kết nối nào trên 1MB. Nghi ngờ bị bóp băng thông hoặc gói HOME bị lỗi chia sẻ data.",
-                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {pkg_names} và luồng chia sẻ data của thuê bao trên hệ thống.",
-                    "FFF2CC"
-                )
+            # Case 2: Gói đăng ký trước chu kỳ 5 ngày -> Thực hiện hành vi bổ sung tra thêm BTools
+            elif earliest_reg_dt and earliest_reg_dt.date() < start_scan_date:
+                try:
+                    from crawler_btools import fetch_supplementary_btools_if_needed
+                    clean_data = fetch_supplementary_btools_if_needed(driver, phone_84, clean_data, earliest_reg_dt, start_scan_date)
+                except Exception:
+                    pass
+                prior_rows = []
+                for r in (clean_data or []):
+                    t_str = r.get("RECORD_OPENING_TIME", "")
+                    if t_str:
+                        try:
+                            d = datetime.strptime(t_str.split()[0], "%d/%m/%Y").date()
+                            if d < start_scan_date:
+                                prior_rows.append(r)
+                        except Exception:
+                            pass
+                prior_mb = sum((float(r.get("DATA_VOLUME_DOWNLINK") or 0) + float(r.get("DATA_VOLUME_UPLINK") or 0))/(1024*1024) for r in prior_rows)
 
-            commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date")]
-            if commercial_pkgs:
-                act_names = ", ".join([p["name"] for p in commercial_pkgs])
-                act_exp_dates = ", ".join([p["exp_str"] for p in commercial_pkgs])
-                act_reg_dates = ", ".join([p["reg_str"] for p in commercial_pkgs if p.get("reg_str") != "N/A"]) or "trước đó"
-                earliest_reg_dt = min([p["reg_dt"] for p in commercial_pkgs if p.get("reg_dt")], default=None)
-                start_scan_date = (datetime.now() - timedelta(days=4)).date()
-
-                # Case 1: Gói mới đăng ký trong 5 ngày qua -> ĐÓNG PHIẾU LUÔN
-                if earliest_reg_dt and earliest_reg_dt.date() >= start_scan_date:
+                # Nhánh 2A: Từ khi đăng ký đến nay cũng không có phát sinh data -> Giống Case 1, ĐÓNG PHIẾU LUÔN
+                if prior_mb < 1.0:
                     return (
-                        "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
-                        f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
+                        "LỖI DO GÓI CƯỚC",
+                        f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu (kể cả trước 5 ngày gần đây), nghi ngờ lỗi luồng cước/profile gói.",
                         f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                         "FFF2CC"
                     )
-
-                # Case 2: Gói đăng ký trước chu kỳ 5 ngày -> Thực hiện hành vi bổ sung tra thêm BTools
-                elif earliest_reg_dt and earliest_reg_dt.date() < start_scan_date:
-                    try:
-                        from crawler_btools import fetch_supplementary_btools_if_needed
-                        clean_data = fetch_supplementary_btools_if_needed(driver, phone_84, clean_data, earliest_reg_dt, start_scan_date)
-                    except Exception:
-                        pass
-                    prior_rows = []
-                    for r in (clean_data or []):
-                        t_str = r.get("RECORD_OPENING_TIME", "")
-                        if t_str:
-                            try:
-                                d = datetime.strptime(t_str.split()[0], "%d/%m/%Y").date()
-                                if d < start_scan_date:
-                                    prior_rows.append(r)
-                            except Exception:
-                                pass
-                    prior_mb = sum((float(r.get("DATA_VOLUME_DOWNLINK") or 0) + float(r.get("DATA_VOLUME_UPLINK") or 0))/(1024*1024) for r in prior_rows)
-
-                    # Nhánh 2A: Từ khi đăng ký đến nay cũng không có phát sinh data -> Giống Case 1, ĐÓNG PHIẾU LUÔN
-                    if prior_mb < 1.0:
-                        return (
-                            "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
-                            f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu (kể cả trước 5 ngày gần đây), nghi ngờ lỗi luồng cước/profile gói.",
-                            f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
-                            "FFF2CC"
-                        )
-                    else:
-                        # Trước đó có data, 5 ngày gần đây hoàn toàn không có phiên nào
-                        return (
-                            "KHÔNG CÓ DỮ LIỆU",
-                            f"Thuê bao có gói cước {act_names} đã từng phát sinh dữ liệu trước đó ({prior_mb:.1f}MB), tuy nhiên 5 ngày gần đây hoàn toàn không phát sinh phiên kết nối nào trên BTools." + ALERT_COMMENT,
-                            "Nghi ngờ do thiết bị của khách hàng bị treo data hoặc tắt máy. Nhờ khách hàng thử tắt/bật thiết bị và data, đổi sim sang máy khác và kiểm tra SPEEDTEST giúp." + ALERT_ACTION,
-                            "FFF2CC"
-                        )
+                else:
+                    # Trước đó có data, 5 ngày gần đây hoàn toàn không có phiên nào
+                    return (
+                        "KHÔNG CÓ DỮ LIỆU",
+                        f"Thuê bao có gói cước {act_names} đã từng phát sinh dữ liệu trước đó ({prior_mb:.1f}MB), tuy nhiên 5 ngày gần đây hoàn toàn không phát sinh phiên kết nối nào trên BTools." + ALERT_COMMENT,
+                        "Nghi ngờ do thiết bị của khách hàng bị treo data hoặc tắt máy. Nhờ khách hàng thử tắt/bật thiết bị và data, đổi sim sang máy khác và kiểm tra SPEEDTEST giúp." + ALERT_ACTION,
+                        "FFF2CC"
+                    )
 
             # Fallback nếu gói thương mại không có ngày tháng cụ thể
-            act_names = ", ".join([p["name"] for p in active_pkgs if not p.get("is_paygo")])
-            act_exp_dates = ", ".join([p["exp_str"] for p in active_pkgs if not p.get("is_paygo")])
-            act_reg_dates = ", ".join([p["reg_str"] for p in active_pkgs if not p.get("is_paygo") and p["reg_str"] != "N/A"]) or "trước đó"
             return (
-                "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
+                "LỖI DO GÓI CƯỚC",
                 f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
                 f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                 "FFF2CC"
@@ -821,13 +1425,13 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         config = json.load(f)
     scenarios = config.get("SCENARIOS", [])
 
-    # 🕒 1. KIỂM TRA CHÉO 2 NGÀY GẦN NHẤT XEM CÓ DATA KHÔNG
+    # 🕒 1. KIỂM TRA CHÉO 2 NGÀY GẦN NHẤT XEM CÓ DATA KHÔNG (trên phạm vi 5 ngày chuẩn)
     has_recent_data = False
     today_date = datetime.now().date()
     recent_dates = {today_date, today_date - timedelta(days=1)}
     latest_date_in_log = None
     
-    for row in clean_data:
+    for row in clean_data_5d:
         time_str = row.get("RECORD_OPENING_TIME", "")
         if time_str:
             try:
@@ -848,7 +1452,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     recent_3days_data = []
 
     if latest_date_in_log:
-        for row in clean_data:
+        for row in clean_data_5d:
             time_str = row.get("RECORD_OPENING_TIME", "")
             if time_str:
                 try:
@@ -861,8 +1465,8 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 except:
                     pass
     else:
-        recent_day_data = clean_data
-        recent_3days_data = clean_data
+        recent_day_data = clean_data_5d
+        recent_3days_data = clean_data_5d
 
     # Tập hợp các mã gói và RAT của 3 ngày gần nhất
     service_set_3days = set(str(r.get("SERVICE_ID_CODE", "")).strip().lower() for r in recent_3days_data if r.get("SERVICE_ID_CODE"))
@@ -897,7 +1501,25 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     )
     
     if matched_id:
+        if matched_id == "KC_04_PACKAGE_OR_DEVICE_HANG":
+            # Chuyển về kịch bản LỖI DO GÓI CƯỚC / CHƯA ĐĂNG KÝ GÓI theo chuẩn SAPC
+            matched_id = None
+
+    if matched_id:
         status, comment, plan, color = get_scenario_result(scenarios, matched_id)
+        if matched_id == "KC_03_THROTTLED":
+            # Ghi nhận chính xác mã code 100xx đã bóp băng thông kèm thông số tốc độ (64/64, 128/64, 3072/3072...)
+            detected_codes = [str(c).strip() for c in (service_set | (service_set_3days or set())) if is_throttled_service_code(c)]
+            clean_codes = sorted(list(set(c.lstrip("0") or c for c in detected_codes)))
+            detail_list = []
+            for c in clean_codes:
+                speed = get_throttled_speed_desc(c)
+                if speed:
+                    detail_list.append(f"{c} (bóp băng thông {speed})")
+                else:
+                    detail_list.append(f"{c}")
+            code_str = "; ".join(detail_list) if detail_list else "100xx"
+            comment = f"Hệ thống ghi nhận mã dịch vụ giới hạn băng thông: {code_str}, thuê bao đã sử dụng hết dung lượng tốc độ cao và đang bị hạ băng thông."
         return status, comment + comment_suffix, plan + action_suffix, color
 
     # =========================================================================
@@ -909,27 +1531,74 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     
     ticket_content_lower = ticket_content.lower() if ticket_content else ""
 
-    # 🎯 ĐIỀU KIỆN 1: [CHƯA ĐĂNG KÝ GÓI]
+    # 🎯 ĐIỀU KIỆN GÓI CƯỚC & MÃ DỊCH VỤ BTOOLS (CHUẨN HÓA THEO QUY CHUẨN KỸ THUẬT)
     all_days_service_codes = set()
     for row in clean_data:
         sc = str(row.get("SERVICE_ID_CODE", "")).strip().lower()
         if sc:
             all_days_service_codes.add(sc)
 
-    has_active_sapc_pkgs = False
-    if phone_84:
-        act_p, _ = get_sapc_package_validity(phone_84)
-        has_active_sapc_pkgs = any(not p.get("is_paygo") for p in act_p)
+    norm_service_codes = set(str(c).strip().lstrip("0") for c in all_days_service_codes if str(c).strip())
+    SYSTEM_CODES = {"300", "302", "330", "2042"}
 
-    is_pure_system_codes_only = bool(all_days_service_codes) and all(code in excluded_system_codes for code in all_days_service_codes) and not has_active_sapc_pkgs
-    
-    if is_pure_system_codes_only:
+    act_p, exp_p = get_sapc_package_validity(phone_84, incident_time_str=incident_time_str) if phone_84 else ([], [])
+    act_commercial = [p for p in act_p if not p.get("is_paygo")]
+    exp_commercial = [p for p in exp_p if not p.get("is_paygo")]
+
+    is_pure_system_codes_only = bool(all_days_service_codes) and (
+        all(code in excluded_system_codes for code in all_days_service_codes) or
+        (norm_service_codes and norm_service_codes.issubset(SYSTEM_CODES))
+    )
+
+    # 1. QUY TẮC "CHƯA ĐĂNG KÝ GÓI" (Dựa vào SAPCCheck: chỉ có PAYGO / không có gói thương mại)
+    if is_pure_system_codes_only and not act_commercial and not exp_commercial:
         return (
             "CHƯA ĐĂNG KÝ GÓI",
-            "Lịch sử phân tích dữ liệu xuyên suốt các ngày qua chỉ xuất hiện các mã hệ thống mặc định, không tồn tại gói cước thương mại phát sinh data.",
-            "Yêu cầu kỹ thuật viên kiểm tra trạng thái gói trên hLR/PCRF và hướng dẫn khách hàng cách thức đăng ký gói cước di động." + action_suffix,
+            "Hồ sơ SAPC ghi nhận thuê bao chưa đăng ký gói cước di động (chỉ có gói nền PAYGO/M0), lịch sử dữ liệu không tồn tại gói cước thương mại phát sinh data.",
+            "Yêu cầu kỹ thuật viên kiểm tra trạng thái gói trên HLR/PCRF và hướng dẫn khách hàng cách thức đăng ký các gói cước Data VinaPhone ưu đãi." + action_suffix,
             "FFF2CC"
         )
+
+    # 2. QUY TẮC "GÓI CƯỚC HẾT HẠN" (Có gói nhưng thời hạn sử dụng < ngày tiếp nhận phản ánh)
+    if is_pure_system_codes_only and not act_commercial and exp_commercial:
+        exp_names = ", ".join([p["name"] for p in exp_commercial])
+        exp_dates = ", ".join([p["exp_str"] for p in exp_commercial])
+        return (
+            "GÓI CƯỚC ĐÃ HẾT HẠN",
+            f"Lịch sử phân tích dữ liệu chỉ xuất hiện các mã hệ thống do gói cước {exp_names} của khách hàng đã hết hạn vào ngày {exp_dates} (trước ngày tiếp nhận phản ánh).",
+            f"Gói cước của Khách hàng ({exp_names}) đã hết hạn vào ngày {exp_dates}. Nhờ VNP kiểm tra lại, tư vấn khách hàng gia hạn/đăng ký gói cước mới." + action_suffix,
+            "FFF2CC"
+        )
+
+    # 3. QUY TẮC "LỖI GÓI CƯỚC" (Kể từ khi đăng ký gói cước, không phát sinh các code gói hợp lệ)
+    if act_commercial:
+        expected_codes = set()
+        for p in act_commercial:
+            expected_codes.update(get_expected_service_codes_for_pkg(p.get("name", "")))
+            grp = str(p.get("group_name") or "").strip()
+            if grp and grp.lower() not in ["none", "null", ""]:
+                expected_codes.add(grp)
+                expected_codes.add(grp.lstrip("0") or "0")
+                expected_codes.add(grp.zfill(10))
+        norm_expected = set(c.lstrip("0") for c in expected_codes if c)
+
+        has_valid_pkg_code = False
+        if norm_expected:
+            has_valid_pkg_code = bool(norm_expected.intersection(norm_service_codes))
+        else:
+            has_valid_pkg_code = bool(norm_service_codes - SYSTEM_CODES)
+
+        if is_pure_system_codes_only or not has_valid_pkg_code:
+            act_names = ", ".join([p["name"] for p in act_commercial])
+            act_exp_dates = ", ".join([p["exp_str"] for p in act_commercial])
+            act_reg_dates = ", ".join([p["reg_str"] for p in act_commercial if p.get("reg_str") != "N/A"]) or "trước đó"
+            sys_str = ", ".join(sorted(list(norm_service_codes))) if norm_service_codes else "quản trị hệ thống"
+            return (
+                "LỖI DO GÓI CƯỚC",
+                f"Thuê bao có gói cước {act_names} (đăng ký từ ngày {act_reg_dates}, còn hạn đến {act_exp_dates}), tuy nhiên kể từ khi đăng ký đến nay lịch sử BTools không phát sinh các mã dịch vụ (Service ID) hợp lệ của gói cước (chỉ ghi nhận mã {sys_str}). Nghi ngờ lỗi luồng cước hoặc profile gói chưa được kích hoạt quyền truy cập data.",
+                f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống PCRF/OCS để kích hoạt lại quyền truy cập cho thuê bao." + action_suffix,
+                "FFF2CC"
+            )
 
     TRAFFIC_MIN_WEAK = 1_000_000      # 1MB
     TRAFFIC_MAX_WEAK = 10_000_000     # 10MB
@@ -945,6 +1614,24 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             "nhiều nơi", "nhieu noi", "nhiều chỗ", "nhieu cho", "ở đâu cũng", "o dau cung",
             "đi đâu cũng", "di dau cung", "khắp nơi", "khap noi", "di chuyển", "di chuyen",
             "tại nhiều điểm", "tai nhieu diem", "nhiều khu vực", "nhieu khu vuc"
+        ]
+    )
+    is_data_depletion_reported = any(
+        k in ticket_content_lower for k in [
+            "mau hết dung lượng", "nhanh hết dung lượng", "mau hết data", "nhanh hết data",
+            "hao data", "hao dung lượng", "trừ cước nhanh", "trừ data nhanh", "nhanh hết gói",
+            "bị mau hết", "mau het", "hao dung luong", "mau het dung luong", "trừ data", "trừ cước"
+        ]
+    )
+    is_network_failure_reported = any(
+        k in ticket_content_lower for k in [
+            "không được", "khong duoc", "không vào được", "khong vao duoc", "mất hoàn toàn",
+            "mất mạng", "không có mạng", "mất kết nối", "ko vào", "ko duoc", "chậm", "cham",
+            "yếu", "yeu", "chập chờn", "chap chon", "load chậm", "không load", "xoay",
+            "không truy cập", "khong truy cap", "không sử dụng được", "khong su dung duoc",
+            "không dùng được", "khong dung duoc", "chưa dùng được", "chưa sử dụng được",
+            "bị rớt mạng", "chỉ có sóng 3g", "chỉ hiện h+", "chỉ hiện 3g", "không có 4g",
+            "mạng lag", "khó truy cập", "chặn mạng"
         ]
     )
 
@@ -1021,6 +1708,27 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 dominant_cell = top_c
                 dominant_pct = cell_pct
 
+    def check_tail_vpn():
+        return evaluate_vpn_status(
+            clean_data=clean_data,
+            cem_records=cem_records,
+            app_events=app_events,
+            sub_info=sub_info,
+            downlink_sessions=downlink_sessions,
+            max_dl_session=max_dl_session,
+            max_dl_incident_day=max_dl_incident_day,
+            has_large_btools_session=has_large_btools_session,
+            incident_date=incident_date,
+            dt_incident=dt_incident,
+            incident_time_str=incident_time_str,
+            dominant_cell=dominant_cell,
+            dominant_pct=dominant_pct,
+            ticket_content_lower=ticket_content_lower,
+            combined_report_text=combined_report_text,
+            action_suffix=action_suffix,
+            ticket_content=ticket_content
+        )
+
     # 🎯 PHÂN TÍCH THEO MỐC THỜI GIAN TIẾP NHẬN PHẢN ÁNH (ĐỐI CHIẾU PHIÊN DATA SAU KHI TIẾP NHẬN)
     dt_incident = parse_dt_safe(incident_time_str)
     sessions_after_incident = []
@@ -1055,23 +1763,51 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             elif dominant_cell and is_reported_slow:
                 return (
                     "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
-                    f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng). Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
-                    "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                    f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng).",
+                    "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                     "FFF2CC"
                 )
             elif is_reported_slow:
+                vpn_res = check_tail_vpn()
+                if vpn_res:
+                    return vpn_res
+
+                # KH phản ánh chậm, không bóp băng thông, có phiên cao, di chuyển nhiều nơi (không có trạm dominant hoặc phản ánh nhiều nơi)
+                # -> Khả năng di chuyển vào khu vực sóng kém -> Khách hàng theo dõi thêm
+                if is_reported_multiple_places or not dominant_cell or dominant_pct < 50.0:
+                    return (
+                        "THEO DÕI THÊM",
+                        "Khách hàng di chuyển nhiều nơi khả năng di chuyển vào khu vực sóng kém/chất lượng mạng chưa đảm bảo.",
+                        "Nhờ khách hàng theo dõi thêm giúp. Nếu khách hàng có vị trí cụ thể nhờ VNP tạo lại giúp phản ánh mới và chuyển trường chất lượng mạng để kỹ thuật địa bàn kiểm tra." + action_suffix,
+                        "FFF2CC"
+                    )
+
                 return (
                     "LƯU LƯỢNG YẾU",
                     f"Khách hàng phản ánh mạng chậm. Dữ liệu sau thời điểm tiếp nhận ({incident_time_str}) ghi nhận tốc độ download chưa ổn định, phiên cao nhất đạt {max_downlink_after/1024/1024:.1f}MB. Nghi ngờ chất lượng sóng tại khu vực khách hàng chưa đảm bảo.",
-                    "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                    "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                     "FFF2CC"
                 )
-            else:
+            elif is_data_depletion_reported:
+                return (
+                    "KHIẾU NẠI DUNG LƯỢNG / CƯỚC (KTV XỬ LÝ)",
+                    "",
+                    "",
+                    "FFFFFF"
+                )
+            elif is_network_failure_reported:
                 return (
                     "HOẠT ĐỘNG BÌNH THƯỜNG",
                     f"Kiểm tra lịch sử kết nối sau thời điểm tiếp nhận phản ánh ({incident_time_str}), thuê bao đã phát sinh lưu lượng data bình thường (phiên lớn nhất đạt {max_downlink_after/1024/1024:.1f}MB, mạng 4G ổn định). Khách hàng đã sử dụng được dịch vụ.",
                     "Dịch vụ đã khôi phục hoạt động bình thường sau thời điểm phản ánh. Hướng dẫn khách hàng theo dõi sử dụng, nếu cần hỗ trợ thêm vui lòng liên hệ lại tổng đài." + action_suffix,
                     "E2EFDA"
+                )
+            else:
+                return (
+                    "CHƯA RÕ KỊCH BẢN (KTV XỬ LÝ)",
+                    "",
+                    "",
+                    "FFFFFF"
                 )
         
         # Trường hợp 2: Có phiên >10MB TRƯỚC thời điểm tiếp nhận, nhưng SAU mốc tiếp nhận CHƯA CÓ phiên >10MB
@@ -1086,15 +1822,25 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             elif dominant_cell and (is_reported_slow or is_reported_multiple_places):
                 return (
                     "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
-                    f"Khách hàng phản ánh mạng chậm / sự cố. Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% kết nối). Mặc dù trước đó có sử dụng data, nhưng sau mốc tiếp nhận ({incident_time_str}) chưa ghi nhận phiên kết nối mới. Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
-                    "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                    f"Khách hàng phản ánh mạng chậm / sự cố. Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% kết nối). Mặc dù trước đó có sử dụng data, nhưng sau mốc tiếp nhận ({incident_time_str}) chưa ghi nhận phiên kết nối mới.",
+                    "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                     "FFF2CC"
                 )
             elif is_reported_slow:
+                vpn_res = check_tail_vpn()
+                if vpn_res:
+                    return vpn_res
+                if is_reported_multiple_places or not dominant_cell or dominant_pct < 50.0:
+                    return (
+                        "THEO DÕI THÊM",
+                        "Khách hàng di chuyển nhiều nơi khả năng di chuyển vào khu vực sóng kém/chất lượng mạng chưa đảm bảo.",
+                        "Nhờ khách hàng theo dõi thêm giúp. Nếu khách hàng có vị trí cụ thể nhờ VNP tạo lại giúp phản ánh mới và chuyển trường chất lượng mạng để kỹ thuật địa bàn kiểm tra." + action_suffix,
+                        "FFF2CC"
+                    )
                 return (
                     "LƯU LƯỢNG YẾU",
                     f"Khách hàng phản ánh mạng chậm. Dữ liệu trước thời điểm tiếp nhận có phát sinh data nhưng sau mốc tiếp nhận ({incident_time_str}) chưa ghi nhận phiên kết nối mới. Nghi ngờ chất lượng sóng tại khu vực khách hàng chưa đảm bảo.",
-                    "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                    "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                     "FFF2CC"
                 )
             else:
@@ -1110,15 +1856,18 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             if dominant_cell:
                 return (
                     "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
-                    f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng). Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
-                    "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                    f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng).",
+                    "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                     "FFF2CC"
                 )
             else:
+                vpn_res = check_tail_vpn()
+                if vpn_res:
+                    return vpn_res
                 return (
                     "LƯU LƯỢNG YẾU",
                     f"Sau thời điểm tiếp nhận ({incident_time_str}), lưu lượng data thực tế ở mức thấp (phiên lớn nhất chỉ đạt {max_downlink_after/1024/1024:.1f}MB), kết nối chập chờn tại khu vực phản ánh.",
-                    "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                    "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                     "FFF2CC"
                 )
 
@@ -1131,11 +1880,18 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 f"Chuyển Kỹ thuật viên kiểm tra lỗi ứng dụng ({app_names_str}) và liên hệ hỗ trợ trực tiếp khách hàng." + action_suffix,
                 "FFF2CC"
             )
+        elif is_data_depletion_reported:
+            return (
+                "KHIẾU NẠI DUNG LƯỢNG / CƯỚC (KTV XỬ LÝ)",
+                "",
+                "",
+                "FFFFFF"
+            )
         elif dominant_cell and (is_reported_slow or is_reported_multiple_places):
             return (
                 "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
-                f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng). Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
-                "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng).",
+                "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                 "FFF2CC"
             )
         elif is_reported_completely_failed:
@@ -1146,18 +1902,35 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 "E2EFDA"
             )
         elif is_reported_slow or is_reported_multiple_places:
+            vpn_res = check_tail_vpn()
+            if vpn_res:
+                return vpn_res
+            if is_reported_multiple_places or not dominant_cell or dominant_pct < 50.0:
+                return (
+                    "THEO DÕI THÊM",
+                    "Khách hàng di chuyển nhiều nơi khả năng di chuyển vào khu vực sóng kém/chất lượng mạng chưa đảm bảo.",
+                    "Nhờ khách hàng theo dõi thêm giúp. Nếu khách hàng có vị trí cụ thể nhờ VNP tạo lại giúp phản ánh mới và chuyển trường chất lượng mạng để kỹ thuật địa bàn kiểm tra." + action_suffix,
+                    "FFF2CC"
+                )
             return (
                 "LƯU LƯỢNG YẾU",
                 f"Khách hàng phản ánh mạng chậm / chập chờn. Dữ liệu thực tế ngày gần nhất ({recent_day_str}) ghi nhận tốc độ download chưa ổn định ({max_downlink/1024/1024:.1f}MB). Nghi ngờ chất lượng sóng tại khu vực khách hàng chưa đảm bảo.",
-                "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                 "FFF2CC"
             )
-        else:
+        elif is_network_failure_reported:
             return (
                 "HOẠT ĐỘNG BÌNH THƯỜNG",
                 f"Kiểm tra lịch sử kết nối ngày gần nhất ({recent_day_str}), thuê bao phát sinh lưu lượng data bình thường (phiên lớn nhất đạt {max_downlink/1024/1024:.1f}MB, mạng 4G ổn định).",
                 "Dịch vụ đã hoạt động bình thường. Hướng dẫn khách hàng tiếp tục theo dõi sử dụng." + action_suffix,
                 "E2EFDA"
+            )
+        else:
+            return (
+                "CHƯA RÕ KỊCH BẢN (KTV XỬ LÝ)",
+                "",
+                "",
+                "FFFFFF"
             )
 
     # 🎯 KỊCH BẢN LƯU LƯỢNG YẾU (1MB - 10MB)
@@ -1165,15 +1938,18 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         if dominant_cell:
             return (
                 "LƯU LƯỢNG YẾU - TẬP TRUNG 1 CELL",
-                f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng). Nghi ngờ trạm phát sóng tại khu vực này đang tải cao hoặc suy hao cục bộ.",
-                "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                f"Dữ liệu trạm phát sóng (CEM) ({dominant_context_str}) ghi nhận thuê bao kết nối chủ yếu qua trạm {dominant_cell} (chiếm {dominant_pct:.0f}% lưu lượng).",
+                "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                 "FFF2CC"
             )
         else:
+            vpn_res = check_tail_vpn()
+            if vpn_res:
+                return vpn_res
             return (
                 "LƯU LƯỢNG YẾU",
                 f"Lưu lượng data thực tế ngày gần nhất ({recent_day_str}) ở mức thấp (phiên lớn nhất chỉ đạt từ 1MB đến dưới 10MB), kết nối chập chờn tại khu vực phản ánh.",
-                "Nhờ tạo phiếu CLM chuyển Kỹ thuật địa bàn để đo kiểm chất lượng mạng và tối ưu vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
+                "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng tại khu vực khách hàng phản ánh." + action_suffix,
                 "FFF2CC"
             )
 
@@ -1183,11 +1959,12 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     # =========================================================================
     
     # 1. Phân tích lưu lượng data BTools theo từng ngày
+    start_scan_date = (datetime.now() - timedelta(days=4)).date()
     daily_traffic = {}  # date -> total_mb
     all_btools_services = set()
     btools_service_codes = set()
-    btools_service_volumes = {}       # code -> total MB
-    btools_service_max_session = {}   # code -> max session MB
+    btools_service_volumes = {}       # code -> total MB (chỉ trong 5 ngày quét chuẩn)
+    btools_service_max_session = {}   # code -> max session MB (chỉ trong 5 ngày quét chuẩn)
     max_session_mb = 0.0
 
     for row in (clean_data or []):
@@ -1206,24 +1983,27 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         except Exception:
             mb = 0.0
         daily_traffic[d_obj] = daily_traffic.get(d_obj, 0.0) + mb
-        if mb > max_session_mb:
-            max_session_mb = mb
         
-        sc_name = str(row.get("SERVICE_NAME") or "").strip()
-        sc_code = str(row.get("SERVICE_ID_CODE") or row.get("SERVICE_ID") or "").strip()
-        if sc_name and sc_name.lower() != "none":
-            all_btools_services.add(sc_name)
-        elif sc_code and sc_code.lower() != "none":
-            all_btools_services.add(sc_code)
+        # Chỉ đưa vào các chỉ số phân tích kịch bản nếu thuộc phạm vi 5 ngày chuẩn
+        if d_obj >= start_scan_date:
+            if mb > max_session_mb:
+                max_session_mb = mb
+            
+            sc_name = str(row.get("SERVICE_NAME") or "").strip()
+            sc_code = str(row.get("SERVICE_ID_CODE") or row.get("SERVICE_ID") or "").strip()
+            if sc_name and sc_name.lower() != "none":
+                all_btools_services.add(sc_name)
+            elif sc_code and sc_code.lower() != "none":
+                all_btools_services.add(sc_code)
 
-        if sc_code and sc_code.lower() not in ["none", "null", ""]:
-            c_clean = sc_code.lstrip("0") or "0"
-            btools_service_codes.add(sc_code)
-            btools_service_codes.add(c_clean)
-            btools_service_volumes[sc_code] = btools_service_volumes.get(sc_code, 0.0) + mb
-            btools_service_volumes[c_clean] = btools_service_volumes.get(c_clean, 0.0) + mb
-            btools_service_max_session[sc_code] = max(btools_service_max_session.get(sc_code, 0.0), mb)
-            btools_service_max_session[c_clean] = max(btools_service_max_session.get(c_clean, 0.0), mb)
+            if sc_code and sc_code.lower() not in ["none", "null", ""]:
+                c_clean = sc_code.lstrip("0") or "0"
+                btools_service_codes.add(sc_code)
+                btools_service_codes.add(c_clean)
+                btools_service_volumes[sc_code] = btools_service_volumes.get(sc_code, 0.0) + mb
+                btools_service_volumes[c_clean] = btools_service_volumes.get(c_clean, 0.0) + mb
+                btools_service_max_session[sc_code] = max(btools_service_max_session.get(sc_code, 0.0), mb)
+                btools_service_max_session[c_clean] = max(btools_service_max_session.get(c_clean, 0.0), mb)
 
     sorted_dates = sorted(daily_traffic.keys())
     latest_traffic_date = sorted_dates[-1] if sorted_dates else latest_date_in_log
@@ -1239,7 +2019,10 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             from db_manager import get_db_connection
             conn = get_db_connection()
             with conn:
-                row = conn.execute("SELECT ai_summary, ticket_content FROM tickets WHERE phone = ?", (phone_84,)).fetchone()
+                if incident_time_str:
+                    row = conn.execute("SELECT ai_summary, ticket_content FROM tickets WHERE (phone = ? OR phone LIKE ?) AND incident_time = ?", (phone_84, f"%{phone_84[-9:]}%", incident_time_str)).fetchone()
+                else:
+                    row = conn.execute("SELECT ai_summary, ticket_content FROM tickets WHERE phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1", (phone_84, f"%{phone_84[-9:]}%")).fetchone()
                 if row:
                     combined_text = f"{combined_text} {row[0] or ''} {row[1] or ''}"
         except Exception:
@@ -1254,7 +2037,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         vol_ai = f"{m_vol.group(1)}{m_vol.group(2).upper()}"
 
     # 3. Lấy thông tin gói cước SAPC
-    active_pkgs, expired_pkgs = get_sapc_package_validity(phone_84)
+    active_pkgs, expired_pkgs = get_sapc_package_validity(phone_84, incident_time_str=incident_time_str)
 
     # Dịch vụ thương mại thực sự đang hoạt động trên BTools (loại bỏ app miễn cước bypass)
     APP_SERVICES = {"momo", "zalo", "mytv", "vieon", "facebook", "tiktok", "youtube"}
@@ -1376,6 +2159,9 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
 
     # D: Trường hợp đi nhiều nơi bị lỗi (Chỉ kết luận do máy khi các ngày trước ĐÃ DÙNG DATA BÌNH THƯỜNG >= 1MB)
     if is_reported_multiple_places and not dominant_cell and prior_traffic_mb >= 1.0:
+        vpn_res = check_tail_vpn()
+        if vpn_res:
+            return vpn_res
         return (
             "LỖI THIẾT BỊ / ĐI NHIỀU NƠI BỊ LỖI",
             "Khách hàng phản ánh đi nhiều nơi đều bị lỗi, dữ liệu mạng ghi nhận thuê bao đổi trạm liên tục qua nhiều khu vực khác nhau nhưng đều không load được data (<1MB). Nguyên nhân do xung đột cài đặt mạng, lỗi SIM hoặc thiết bị đầu cuối của khách hàng.",
@@ -1403,6 +2189,12 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
 
     # Gom toàn bộ expected service IDs của các gói mà KH sở hữu
     all_expected_codes = set()
+    for p in active_pkgs:
+        grp = str(p.get("group_name") or "").strip()
+        if grp and grp.lower() not in ["none", "null", ""]:
+            all_expected_codes.add(grp)
+            all_expected_codes.add(grp.lstrip("0") or "0")
+            all_expected_codes.add(grp.zfill(10))
     for p_name in all_pkg_names:
         all_expected_codes.update(get_expected_service_codes_for_pkg(p_name))
 
@@ -1469,6 +2261,15 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     if extracted_pkgs_ai and not has_working_commercial_pkg:
         for p_cand in extracted_pkgs_ai:
             expected_codes = get_expected_service_codes_for_pkg(p_cand)
+            # Đối chiếu với active_pkgs từ SAPC để lấy thêm Group Name (ví dụ Group Name: 3000)
+            for p in active_pkgs:
+                if p_cand.upper() in p.get("name", "").upper() or p.get("name", "").upper() in p_cand.upper():
+                    grp = str(p.get("group_name") or "").strip()
+                    digits = re.sub(r'\D', '', grp)
+                    if digits:
+                        expected_codes.add(digits)
+                        expected_codes.add(digits.lstrip("0") or "0")
+                        expected_codes.add(digits.zfill(10))
             has_expected_code = bool(expected_codes.intersection(btools_service_codes))
 
             sapc_str = ", ".join([p["name"] for p in active_pkgs]) if active_pkgs else ""
@@ -1494,6 +2295,11 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     "FFF2CC"
                 )
 
+    # 🎯 KỊCH BẢN ĐẶC THÙ CUỐI CÙNG: PHÁT HIỆN VPN / CLOUDFLARE 1.1.1.1
+    vpn_res = check_tail_vpn()
+    if vpn_res:
+        return vpn_res
+
     # F: ĐÁNH GIÁ LƯU LƯỢNG NGÀY GẦN NHẤT < 1MB (CĂN CỨ MULTI-DAY BTOOLS)
     if recent_traffic_mb < 1.0:
         recent_day_str = latest_traffic_date.strftime('%d/%m/%Y') if latest_traffic_date else "gần nhất"
@@ -1511,7 +2317,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             # Các ngày trước đó có data >= 1MB (đã từng dùng bình thường), chỉ ngày gần nhất sụt giảm < 1MB -> Nghi ngờ treo data
             return (
                 "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ",
-                f"Lịch sử BTools các ngày trước phát sinh data bình thường ({prior_mb:.1f}MB), "
+                f"Lịch sử BTools các ngày trước phát sinh data bình thường ({prior_traffic_mb:.1f}MB), "
                 f"nhưng ngày gần nhất ({recent_day_str}) gần như không phát sinh lưu lượng sử dụng thực tế (dưới 1MB).",
                 "Nghi ngờ do thiết bị của khách hàng bị treo data. Nhờ khách hàng thử tắt/bật thiết bị và data, speedtest lại giúp." + action_suffix,
                 "FFF2CC"
@@ -1582,7 +2388,7 @@ def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, 
     # Subtitle Copyright Banner
     ws.merge_cells("A2:L2")
     sub_cell = ws["A2"]
-    sub_cell.value = "VNPT PRECHECK • Copyright by quangvu@vnpt.vn (Sep.2026)"
+    sub_cell.value = "VNPT TTS PRECHECK • Copyright by quangvu@vnpt.vn (Sep.2026)"
     sub_cell.font = Font(name="Segoe UI", size=9.5, italic=True, color="595959")
     sub_cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[2].height = 18
@@ -1617,8 +2423,10 @@ def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, 
             s_cell.font = Font(name="Segoe UI", size=11, bold=True, color="9C0006")
             s_cell.fill = PatternFill(start_color="FFC7CE", fill_type="solid")
         else:
+            raw_c = str(rec.get("color") or "FFFFFF").replace("#", "").strip().upper()
+            safe_c = raw_c if len(raw_c) in (6, 8) else "FFFFFF"
             s_cell.font = Font(name="Segoe UI", size=11, bold=True, color="333333")
-            s_cell.fill = PatternFill(start_color=rec["color"], fill_type="solid")
+            s_cell.fill = PatternFill(start_color=safe_c, fill_type="solid")
         
         # 🎯 CỘT 2 (B): SỐ ĐIỆN THOẠI + HYPERLINK BTOOLS
         phone_num = rec["phone"]
@@ -1666,7 +2474,9 @@ def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, 
         comment_text = rec["comment"]
         c_cell = ws.cell(row=current_row, column=10, value=comment_text)
         c_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        if "Lưu ý: 2 ngày gần nhất không thấy phát sinh data" in comment_text:
+        if "Phiếu mở lại" in str(comment_text):
+            c_cell.font = Font(name="Segoe UI", size=11, bold=True, color="C00000")
+        elif "Lưu ý: 2 ngày gần nhất không thấy phát sinh data" in comment_text:
             c_cell.font = Font(name="Segoe UI", size=11, bold=True, color="C00000")
             
         # 🎯 CỘT 11 (K): HƯỚNG XỬ LÝ KHUYÊN DÙNG

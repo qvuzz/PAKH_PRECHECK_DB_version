@@ -32,6 +32,7 @@ def execute_tts_old_data_cycle():
         from report_bot import (
             analyze_subscriber_status, 
             get_formatted_sapc_packages, 
+            extract_btools_packages_summary,
             export_diagnostics_to_excel,
             extract_incident_time
         )
@@ -214,6 +215,10 @@ def execute_tts_old_data_cycle():
                 except Exception as ex_case2:
                     state.log("WARN", f"Lỗi tra cứu bổ sung Case 2: {ex_case2}")
 
+            # 🎯 BÓC TÁCH THỜI ĐIỂM SỰ CỐ / TIẾP NHẬN
+            incident_time_str = ticket.get("incident_time") or extract_incident_time(content, ticket.get("created_time", ""))
+            created_time_str = ticket.get("created_time") or incident_time_str
+
             # Tra cứu CEM & App Usage
             cem_records = []
             app_events = []
@@ -223,9 +228,11 @@ def execute_tts_old_data_cycle():
             try:
                 if cem_client is None:
                     cem_client = CEMClient(driver=driver)
-                cem_records = cem_client.get_subscriber_history_5days(phone_84, days=5)
-                app_events = cem_client.get_subscriber_app_events(phone_84, days=5)
-                cem_data_str = CEMClient.extract_top_cells_summary(cem_records, app_events=app_events)
+                cem_records = cem_client.get_subscriber_history_5days(phone_84, days=5, incident_time_str=incident_time_str)
+                app_events = cem_client.get_subscriber_app_events(phone_84, days=5, incident_time_str=incident_time_str)
+                _, _, cem_data_str = CEMClient.extract_two_period_summary(
+                    cem_records, incident_time_str=incident_time_str, app_events=app_events, days=5
+                )
                 app_usage_str = CEMClient.extract_top_apps_summary(app_events)
 
                 save_cem_data_to_file(phone_84, cem_records, app_events, base_dir=BASE_DIR)
@@ -235,39 +242,34 @@ def execute_tts_old_data_cycle():
             # Tóm tắt thông tin bằng AI / NLP Offline
             ai_summary = analyze_ticket_with_ai(json_filename)
 
-            # 🎯 BÓC TÁCH THỜI ĐIỂM SỰ CỐ / TIẾP NHẬN
-            incident_time_str = ticket.get("incident_time") or extract_incident_time(content, ticket.get("created_time", ""))
-            created_time_str = ticket.get("created_time") or incident_time_str
-
             # Kịch bản phân tích kỹ thuật (kết hợp BTools + SAPC + CEM + App Usage + Mốc thời gian tiếp nhận)
             status, comment, action_plan, color = analyze_subscriber_status(
                 clean_data, title, content, phone_84=phone_84, cem_records=cem_records, app_events=app_events, incident_time_str=incident_time_str, driver=driver
             )
             state.log("INFO", f"   ↳ Nhận định: [{status}]")
 
-            # Thu thập hạ tầng
-            rats = list(set(str(r.get("RAT_TYPE_NAME", "")) for r in (clean_data or []) if r.get("RAT_TYPE_NAME")))
+            # Thu thập hạ tầng (trong phạm vi 5 ngày quét chuẩn)
+            _scan_5d_limit = (datetime.now() - timedelta(days=4)).date()
+            rats = list(set(
+                str(r.get("RAT_TYPE_NAME", "")) for r in (clean_data or [])
+                if r.get("RAT_TYPE_NAME") and (
+                    not r.get("RECORD_OPENING_TIME") or 
+                    datetime.strptime(r["RECORD_OPENING_TIME"].split()[0], "%d/%m/%Y").date() >= _scan_5d_limit
+                )
+            ))
             rat_types_string = ", ".join(rats) if rats else "Không có dữ liệu"
 
-            # Lọc gói cước
-            cfg_p = BASE_DIR / "diagnostic_config.json"
-            ex_codes = set()
-            if cfg_p.exists():
-                with open(cfg_p, "r", encoding="utf-8") as cf:
-                    ex_codes = set(json.load(cf).get("EXCLUDED_SYSTEM_CODES", []))
-            
-            real_pkgs = set()
-            for r in (clean_data or []):
-                sc = str(r.get("SERVICE_ID_CODE", "")).strip()
-                sn = str(r.get("SERVICE_NAME", "")).strip()
-                if sc.lower() and sc.lower() not in ex_codes:
-                    if sn and "gói cước lạ" not in sn.lower() and sn.lower() not in ex_codes:
-                        real_pkgs.add(sn)
-                    else:
-                        real_pkgs.add(sc)
-            real_pkgs_str = ", ".join(list(real_pkgs)) if real_pkgs else "Không phát sinh gói TM"
-
+            # Trích xuất gói cước phát sinh từ BTools kèm max session
+            real_pkgs_str = extract_btools_packages_summary(clean_data)
             final_packages_str = get_formatted_sapc_packages(phone_84, fallback_btools=real_pkgs_str)
+
+            is_reopened = bool(ticket.get("is_reopened") or (ticket.get("reopen_count", 0) > 0))
+            reopen_count = int(ticket.get("reopen_count", 0) or (1 if is_reopened else 0))
+            reopen_prefix = "Phiếu mở lại, KTV kiểm tra thêm."
+            if is_reopened:
+                if reopen_prefix not in comment:
+                    comment = f"{reopen_prefix}\n\n{comment}" if comment else reopen_prefix
+                status = "⚠️ PHIẾU MỞ LẠI" if not str(status).startswith("⚠️") else status
 
             excel_summary_list.append({
                 "phone": phone_84,
@@ -284,7 +286,8 @@ def execute_tts_old_data_cycle():
                 "action_plan": action_plan,
                 "color": color,
                 "ticket_status": "Chưa đóng",
-                "ai_summary": ai_summary if ai_summary else "null"
+                "ai_summary": ai_summary if ai_summary else "null",
+                "reopen_count": reopen_count
             })
 
         # 💾 LƯU TRỮ VÀO SQLITE DATABASE (TỰ ĐỘNG BẢO TOÀN DỮ LIỆU)
@@ -310,7 +313,7 @@ def execute_tts_old_data_cycle():
         time.sleep(2)
 
         # Bước 3: Tự động đóng phiếu TTS
-        if state.auto_close and saved_excel_file:
+        if state.should_auto_close("tts_old") and saved_excel_file:
             state.current_step = "Tự động đóng phiếu trên TTS"
             state.log("STEP", "Đang tiến hành tự động điền form và đóng phiếu TTS...")
             from update_tts.run import run_update_tts

@@ -5,10 +5,12 @@ import os
 import json
 import time
 import base64
+import threading
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 LAN_SESSIONS_FILE = BASE_DIR / "lan_sessions.json"
+_session_lock = threading.Lock()
 
 
 def _load_lan_sessions():
@@ -22,11 +24,12 @@ def _load_lan_sessions():
 
 
 def _save_lan_sessions():
-    try:
-        with open(LAN_SESSIONS_FILE, "w", encoding="utf-8") as f:
-            json.dump(ACTIVE_LAN_SESSIONS, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    with _session_lock:
+        try:
+            with open(LAN_SESSIONS_FILE, "w", encoding="utf-8") as f:
+                json.dump(ACTIVE_LAN_SESSIONS, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
 
 
 ACTIVE_LAN_SESSIONS = _load_lan_sessions()
@@ -65,24 +68,34 @@ def resolve_ttsnew_token(client_ip: str, is_local: bool, client_tok: str = "") -
     if tok and len(tok) > 30 and "." in tok:
         if not tok.startswith("Bearer "):
             tok = f"Bearer {tok}"
-        user_info = decode_jwt(tok)
-        if user_info.get("userName"):
-            if client_ip not in ACTIVE_LAN_SESSIONS:
-                ACTIVE_LAN_SESSIONS[client_ip] = {}
-            ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok
-            ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
-            ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
-            _save_lan_sessions()
-            return tok, user_info
+        from ttsnew_api import _is_jwt_valid
+        if _is_jwt_valid(tok):
+            user_info = decode_jwt(tok)
+            if user_info.get("userName"):
+                if client_ip not in ACTIVE_LAN_SESSIONS:
+                    ACTIVE_LAN_SESSIONS[client_ip] = {}
+                ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok
+                ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
+                ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
+                _save_lan_sessions()
+                return tok, user_info
+        else:
+            # Token client gửi lên đã hết hạn -> xóa khỏi session để tránh dùng lại
+            if client_ip in ACTIVE_LAN_SESSIONS and ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_token") == tok:
+                ACTIVE_LAN_SESSIONS[client_ip].pop("ttsnew_token", None)
+                ACTIVE_LAN_SESSIONS[client_ip].pop("ttsnew_user", None)
+                _save_lan_sessions()
 
     # 2. Kiểm tra phiên LAN session của IP này
     if client_ip in ACTIVE_LAN_SESSIONS:
         lan_tok = (ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_token") or "").strip()
         if lan_tok and len(lan_tok) > 30 and "." in lan_tok:
-            if not lan_tok.startswith("Bearer "):
-                lan_tok = f"Bearer {lan_tok}"
-            user_info = ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_user") or decode_jwt(lan_tok)
-            return lan_tok, user_info
+            from ttsnew_api import _is_jwt_valid
+            if _is_jwt_valid(lan_tok):
+                if not lan_tok.startswith("Bearer "):
+                    lan_tok = f"Bearer {lan_tok}"
+                user_info = ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_user") or decode_jwt(lan_tok)
+                return lan_tok, user_info
 
     # 3. Nếu là máy chủ local (Admin), cho phép fallback lấy từ Chrome máy chủ
     if is_local:

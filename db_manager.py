@@ -1,6 +1,7 @@
 # db_manager.py
 import sqlite3
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -8,6 +9,51 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "tickets.db"
 
 _db_initialized = False
+
+def extract_ward_address(text: str) -> str:
+    """
+    Trích xuất địa bàn (Phường/Xã, Quận/Huyện, Tỉnh/TP) từ nội dung phản ánh khách hàng.
+    """
+    if not text:
+        return ""
+    
+    # 1. ƯU TIÊN 1: Bắt theo từ khóa Địa chỉ rõ ràng (Địa chỉ mới, Địa chỉ sự cố, Địa chỉ, Đ/c, Nơi phản ánh)
+    m = re.search(r'(?:địa chỉ(?: mới| sự cố)?|đ/c|nơi phản ánh)[:\s]+([^\n\r]+)', text, re.I)
+    raw = m.group(1).strip() if m else ""
+    
+    # 2. ƯU TIÊN 2: Tìm cụm hành chính cấp xã/phường/ấp/thôn kèm quận/huyện/tỉnh/tp
+    if not raw:
+        m2 = re.search(r'((?:ấp|thôn|tổ|khóm|xã|phường|thị trấn|quận|huyện|thành phố|tp\.?|tỉnh)\s+[^,\n\r]+(?:,\s*[^,\n\r]+){1,3})', text, re.I)
+        if m2:
+            raw = m2.group(1).strip()
+
+    # 3. ƯU TIÊN 3: Bắt theo từ khóa khu vực/tại nếu theo sau có thông tin địa danh hành chính
+    if not raw:
+        m3 = re.search(r'(?:khu vực|tại)[:\s]+((?:ấp|thôn|tổ|khóm|xã|phường|thị trấn|quận|huyện|thành phố|tp\.?|tỉnh)\s+[^\n\r]+)', text, re.I)
+        if m3:
+            raw = m3.group(1).strip()
+            
+    if not raw:
+        return ""
+        
+    # Loại bỏ các từ rác hoặc câu nối sau địa chỉ
+    stop_words = [
+        'kh nhờ', 'kh yêu cầu', 'kh báo', 'kh phan anh', 'kh phản ánh', 'kính chuyển', 
+        'kinh chuyen', 'chuyển tc', 'chuyen tc', 'các số vina', 'thuê bao khác', 
+        'kh không đồng ý', 'ktv đã', 'kh đã', 'liên hệ', 'lh:', 'sđt:', 'sdt:', 
+        'ẩn danh', 'gọi lại', 'thời điểm', 'khi dùng', 'không vào được', 'mạng chậm'
+    ]
+    cleaned = raw
+    for sw in stop_words:
+        idx = cleaned.lower().find(sw)
+        if idx != -1:
+            cleaned = cleaned[:idx]
+            
+    # Cắt dấu câu rác ở cuối
+    cleaned = cleaned.strip(' .,;-\t\r\n"\'')
+    if '.' in cleaned:
+        cleaned = cleaned.split('.')[0].strip()
+    return cleaned
 
 def get_db_connection():
     conn = sqlite3.connect(str(DB_PATH), timeout=60.0)
@@ -84,6 +130,44 @@ def init_db():
             conn.execute("ALTER TABLE tickets ADD COLUMN id_he_thong INTEGER DEFAULT 0;")
         except Exception:
             pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN incident_cause TEXT;")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN ccos_attachments TEXT;")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN processing_content TEXT;")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN closed_at TEXT;")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN prechecked_at TEXT;")
+        except Exception:
+            pass
+        try:
+            # Đồng bộ prechecked_at sang UTC+7 cho các phiếu đã có kết quả tiền kiểm
+            conn.execute("UPDATE tickets SET prechecked_at = datetime(updated_at, '+7 hours') WHERE prechecked_at IS NULL AND status IS NOT NULL AND status != '' AND status != 'CHƯA PHÂN LOẠI';")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN ward TEXT;")
+        except Exception:
+            pass
+        try:
+            # Tự động trích xuất Phường/Xã/Tỉnh/TP cho các phiếu mới chưa có thông tin ward
+            old_rows = conn.execute("SELECT phone, incident_time, ticket_content FROM tickets WHERE (ward IS NULL OR ward = '') AND ticket_content IS NOT NULL AND ticket_content != '';").fetchall()
+            for r in old_rows:
+                w = extract_ward_address(r["ticket_content"])
+                if w:
+                    conn.execute("UPDATE tickets SET ward = ? WHERE phone = ? AND incident_time = ?", (w, r["phone"], r["incident_time"]))
+        except Exception:
+            pass
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS tts_new_stages (
@@ -98,8 +182,73 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ai_feedback_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticket_id INTEGER,
+                phone TEXT,
+                package_title TEXT,
+                ticket_content TEXT,
+                summary_content TEXT,
+                verified_by TEXT DEFAULT 'KTV',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
     conn.close()
     _db_initialized = True
+
+
+def save_ai_feedback_sample(ticket_id=None, phone="", package_title="", ticket_content="", summary_content="", verified_by="KTV"):
+    """Lưu mẫu tóm tắt chuẩn KTV đã duyệt để Qwen học theo (Few-shot)"""
+    init_db()
+    conn = get_db_connection()
+    with conn:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("""
+            INSERT INTO ai_feedback_samples (ticket_id, phone, package_title, ticket_content, summary_content, verified_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (ticket_id, phone, package_title, ticket_content, summary_content, verified_by, now_str))
+
+        if ticket_id:
+            conn.execute("UPDATE tickets SET ai_summary = ? WHERE ticket_id = ?", (summary_content, ticket_id))
+        elif phone:
+            conn.execute("UPDATE tickets SET ai_summary = ? WHERE phone = ?", (summary_content, phone))
+    conn.close()
+
+
+def get_similar_ai_samples(ticket_content: str, limit: int = 2):
+    """Tìm 1-2 mẫu phản ánh trong quá khứ có độ tương đồng cao nhất để nạp vào Prompt Qwen"""
+    if not ticket_content:
+        return []
+    try:
+        init_db()
+        conn = get_db_connection()
+        rows = conn.execute("""
+            SELECT id, package_title, ticket_content, summary_content 
+            FROM ai_feedback_samples 
+            ORDER BY id DESC LIMIT 100
+        """).fetchall()
+        conn.close()
+        if not rows:
+            return []
+
+        from rapidfuzz import fuzz
+        scored = []
+        tc_clean = ticket_content.lower().strip()
+        for r in rows:
+            sample_content = str(r["ticket_content"] or "").lower().strip()
+            if not sample_content or not r["summary_content"]:
+                continue
+            score = fuzz.token_set_ratio(tc_clean, sample_content)
+            scored.append((score, r))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        best_samples = [s[1] for s in scored if s[0] >= 35][:limit]
+        return best_samples
+    except Exception as e:
+        print(f"⚠️ Lỗi tìm mẫu AI tương tự: {e}")
+        return []
 
 def record_ttsnew_stage(phone: str, ticket_code: str = "", round_num: int = 1, flow_id: int = None, status: str = ""):
     """Lưu vết tiến trình đóng phiếu 2 vòng trên TTS Mới."""
@@ -193,6 +342,9 @@ def check_ticket_can_close(t):
         if can_close:
             return True, "Đủ điều kiện tự động đóng"
         else:
+            if norm_status == excel_reader.LEVEL_1_STATUS:
+                acc_st = rec.get("access_status") or "không xác định"
+                return False, f"Trạng thái [{status}] nhưng tình trạng truy cập [{acc_st}] chưa đủ điều kiện tự đóng (yêu cầu khách phản ánh 'Không được hoàn toàn')"
             return False, f"Trạng thái [{status}] chưa đủ điều kiện tự đóng (dành cho KTV kiểm tra xử lý)"
     except Exception as e:
         return False, f"Lỗi kiểm tra điều kiện: {e}"
@@ -203,7 +355,18 @@ def save_or_update_ticket(t):
     Mỗi lần phản ánh ở các mốc thời gian khác nhau sẽ là một bản ghi riêng biệt.
     """
     phone = str(t.get("phone", "")).strip()
-    incident_time = str(t.get("incident_time", "")).strip() or "Không xác định"
+    incident_time = str(t.get("incident_time", "")).strip()
+    if not incident_time:
+        if t.get("ticket_id"):
+            incident_time = f"ID_{t.get('ticket_id')}"
+        elif t.get("ticket_code"):
+            clean_c = (t.get("ticket_code") or "").split("\n")[0].strip()
+            incident_time = f"CODE_{clean_c}"
+        elif t.get("created_time"):
+            incident_time = str(t.get("created_time")).strip()
+        else:
+            incident_time = "Không xác định"
+
     if not phone:
         return
 
@@ -216,6 +379,7 @@ def save_or_update_ticket(t):
             with conn:
                 source = t.get("source", "tts_old") or "tts_old"
                 ticket_code = t.get("ticket_code", "")
+                ticket_id = t.get("ticket_id")
         
                 # 1. Chống trùng lặp theo ticket_code (dành riêng cho TTS Mới)
                 if ticket_code:
@@ -247,40 +411,39 @@ def save_or_update_ticket(t):
                             (ticket_code,)
                         )
         
-                # 2. Chống trùng lặp theo số thuê bao đang ở trạng thái 'Chưa đóng' cùng nguồn
-                # Nếu đã có bản ghi chưa đóng nhưng lệch định dạng incident_time -> kế thừa toàn bộ kết quả tiền kiểm rồi xóa bản ghi cũ
-                existing_active = conn.execute(
-                    """SELECT * FROM tickets 
-                       WHERE phone = ? AND (source = ? OR (source IS NULL AND ? = 'tts_old')) 
-                         AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')""",
-                    (phone, source, source)
-                ).fetchone()
-        
-                if existing_active and existing_active["incident_time"] != incident_time:
-                    has_old_eval = existing_active["status"] and existing_active["status"] not in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI", None, "")
-                    if has_old_eval:
-                        if not t.get("status") or t.get("status") in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI", ""):
-                            t["status"] = existing_active["status"]
-                            t["color"] = existing_active["color"] or "green"
-                            if not t.get("comment"):
-                                t["comment"] = existing_active["comment"] or ""
-                            if not t.get("action_plan"):
-                                t["action_plan"] = existing_active["action_plan"] or ""
-                            if not t.get("real_packages") or t.get("real_packages") == "--":
-                                t["real_packages"] = existing_active["real_packages"] or "--"
-                            if not t.get("rat_types") or t.get("rat_types") == "--":
-                                t["rat_types"] = existing_active["rat_types"] or "--"
-                            if not t.get("cem_data") or t.get("cem_data") == "--":
-                                t["cem_data"] = existing_active["cem_data"] or "--"
-                            if not t.get("app_usage") or t.get("app_usage") == "--":
-                                t["app_usage"] = existing_active["app_usage"] or "--"
-                    if not t.get("ai_summary") and existing_active["ai_summary"]:
-                        t["ai_summary"] = existing_active["ai_summary"]
+                # 2. Xử lý trùng lặp theo ticket_id: CHỈ gộp khi đây thực sự là cùng 1 phiếu (cùng ticket_id)
+                # NẾU 1 số phản ánh nhiều lần (khác thời gian incident_time / khác mã phiếu) thì ĐÂY LÀ CÁC PHIẾU ĐỘC LẬP
+                # Tuyệt đối không xóa bản ghi cũ và không kế thừa nhầm kết quả cũ!
+                if ticket_id:
+                    existing_id = conn.execute(
+                        "SELECT * FROM tickets WHERE ticket_id = ? AND source = ?", 
+                        (ticket_id, source)
+                    ).fetchone()
+                    if existing_id and existing_id["incident_time"] != incident_time:
+                        has_old_eval = existing_id["status"] and existing_id["status"] not in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI", None, "")
+                        if has_old_eval:
+                            if not t.get("status") or t.get("status") in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI", ""):
+                                t["status"] = existing_id["status"]
+                                t["color"] = existing_id["color"] or "green"
+                                if not t.get("comment"):
+                                    t["comment"] = existing_id["comment"] or ""
+                                if not t.get("action_plan"):
+                                    t["action_plan"] = existing_id["action_plan"] or ""
+                                if not t.get("real_packages") or t.get("real_packages") == "--":
+                                    t["real_packages"] = existing_id["real_packages"] or "--"
+                                if not t.get("rat_types") or t.get("rat_types") == "--":
+                                    t["rat_types"] = existing_id["rat_types"] or "--"
+                                if not t.get("cem_data") or t.get("cem_data") == "--":
+                                    t["cem_data"] = existing_id["cem_data"] or "--"
+                                if not t.get("app_usage") or t.get("app_usage") == "--":
+                                    t["app_usage"] = existing_id["app_usage"] or "--"
+                        if not t.get("ai_summary") and existing_id["ai_summary"]:
+                            t["ai_summary"] = existing_id["ai_summary"]
 
-                    conn.execute(
-                        "DELETE FROM tickets WHERE phone = ? AND incident_time = ?",
-                        (phone, existing_active["incident_time"])
-                    )
+                        conn.execute(
+                            "DELETE FROM tickets WHERE ticket_id = ? AND source = ?",
+                            (ticket_id, source)
+                        )
         
                 existing = conn.execute(
                     "SELECT * FROM tickets WHERE phone = ? AND incident_time = ?", 
@@ -293,10 +456,13 @@ def save_or_update_ticket(t):
                 ai_summary = t.get("ai_summary", "")
         
                 if existing:
-                    # Đối với tts_new (quét trực tiếp từ live API), nếu phiếu đang xuất hiện thì luôn khôi phục 'Chưa đóng'
-                    # Chỉ giữ 'Đã đóng' khi là nguồn tts_old và không có force_update_status
-                    if source != "tts_new" and not t.get("force_update_status") and existing["ticket_status"] in ("Đã đóng", "Da dong") and ticket_status == "Chưa đóng":
+                    # Đối với tts_new hoặc phiếu mở lại (reopen_count > 0 / is_reopened):
+                    # Nếu phiếu đang xuất hiện trên TTS thì luôn khôi phục 'Chưa đóng' để đưa vào danh sách cần xử lý.
+                    is_reopened_flag = bool(t.get("is_reopened") or int(t.get("reopen_count") or 0) > 0)
+                    if source != "tts_new" and not t.get("force_update_status") and not is_reopened_flag and existing["ticket_status"] in ("Đã đóng", "Da dong") and ticket_status == "Chưa đóng":
                         ticket_status = "Đã đóng"
+                    elif is_reopened_flag:
+                        ticket_status = "Chưa đóng"
                     if not ai_summary and "ai_summary" in existing.keys():
                         ai_summary = existing["ai_summary"] or ""
 
@@ -333,14 +499,28 @@ def save_or_update_ticket(t):
                         reopen_count = existing_rc
                         last_reopened_date = str(existing["last_reopened_date"] or "")
         
+                ccos_attachments = t.get("ccos_attachments")
+                if ccos_attachments is None and existing and "ccos_attachments" in existing.keys():
+                    ccos_attachments = existing["ccos_attachments"]
+
+                processing_content = t.get("processing_content")
+                if processing_content is None and existing and "processing_content" in existing.keys():
+                    processing_content = existing["processing_content"]
+
+                ward = t.get("ward")
+                if not ward and existing and "ward" in existing.keys() and existing["ward"]:
+                    ward = existing["ward"]
+                if not ward:
+                    ward = extract_ward_address(t.get("ticket_content", ""))
+
                 conn.execute("""
                     INSERT INTO tickets (
                         phone, incident_time, package_title, real_packages, rat_types,
                         cem_data, app_usage, ticket_content, status, comment,
                         action_plan, color, ticket_status, created_time, ai_summary,
                         source, ticket_code, ticket_id, flow_id, reopen_count, last_reopened_date,
-                        phan_hoi_he_thong, id_he_thong, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        phan_hoi_he_thong, id_he_thong, ccos_attachments, processing_content, prechecked_at, ward, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? NOT IN ('', 'CHƯA PHÂN LOẠI') THEN datetime('now', '+7 hours') ELSE NULL END, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(phone, incident_time) DO UPDATE SET
                         package_title = excluded.package_title,
                         real_packages = excluded.real_packages,
@@ -363,6 +543,10 @@ def save_or_update_ticket(t):
                         last_reopened_date = excluded.last_reopened_date,
                         phan_hoi_he_thong = COALESCE(excluded.phan_hoi_he_thong, tickets.phan_hoi_he_thong),
                         id_he_thong = COALESCE(excluded.id_he_thong, tickets.id_he_thong),
+                        ccos_attachments = COALESCE(excluded.ccos_attachments, tickets.ccos_attachments),
+                        processing_content = COALESCE(NULLIF(excluded.processing_content, ''), tickets.processing_content),
+                        prechecked_at = CASE WHEN excluded.status NOT IN ('', 'CHƯA PHÂN LOẠI') THEN datetime('now', '+7 hours') ELSE COALESCE(tickets.prechecked_at, datetime('now', '+7 hours')) END,
+                        ward = COALESCE(NULLIF(excluded.ward, ''), tickets.ward),
                         updated_at = CURRENT_TIMESTAMP;
                 """, (
                     phone,
@@ -388,6 +572,10 @@ def save_or_update_ticket(t):
                     last_reopened_date,
                     t.get("phan_hoi_he_thong", 1),
                     t.get("id_he_thong", 0),
+                    ccos_attachments,
+                    processing_content or "",
+                    t.get("status", "CHƯA PHÂN LOẠI"),
+                    ward or "",
                 ))
             conn.close()
             conn = None
@@ -496,7 +684,7 @@ def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", s
             # Nếu trên TTS đã hết sạch phiếu chờ xử lý -> toàn bộ phiếu chưa đóng trong DB thuộc nguồn này đã đóng!
             conn.execute(f"""
                 UPDATE tickets 
-                SET ticket_status = 'Đã đóng', updated_at = CURRENT_TIMESTAMP 
+                SET ticket_status = 'Đã đóng', closed_at = COALESCE(closed_at, datetime('now', '+7 hours')), updated_at = CURRENT_TIMESTAMP 
                 WHERE {source_condition}
                   AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
                   {service_sql}
@@ -508,7 +696,7 @@ def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", s
             if not raw_active_keys:
                 conn.execute(f"""
                     UPDATE tickets 
-                    SET ticket_status = 'Đã đóng', updated_at = CURRENT_TIMESTAMP 
+                    SET ticket_status = 'Đã đóng', closed_at = COALESCE(closed_at, datetime('now', '+7 hours')), updated_at = CURRENT_TIMESTAMP 
                     WHERE {source_condition}
                       AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
                       {service_sql}
@@ -517,7 +705,7 @@ def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", s
                 placeholders = ",".join(["?"] * len(raw_active_keys))
                 conn.execute(f"""
                     UPDATE tickets 
-                    SET ticket_status = 'Đã đóng', updated_at = CURRENT_TIMESTAMP 
+                    SET ticket_status = 'Đã đóng', closed_at = COALESCE(closed_at, datetime('now', '+7 hours')), updated_at = CURRENT_TIMESTAMP 
                     WHERE {source_condition}
                       AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
                       {service_sql}
@@ -527,7 +715,7 @@ def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", s
             placeholders = ",".join(["?"] * len(active_keys))
             conn.execute(f"""
                 UPDATE tickets 
-                SET ticket_status = 'Đã đóng', updated_at = CURRENT_TIMESTAMP 
+                SET ticket_status = 'Đã đóng', closed_at = COALESCE(closed_at, datetime('now', '+7 hours')), updated_at = CURRENT_TIMESTAMP 
                 WHERE {source_condition}
                   AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
                   {service_sql}
@@ -736,12 +924,34 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
         can_close, reason = check_ticket_can_close(item)
         item["can_close"] = can_close
         item["cannot_close_reason"] = reason
+        if not item.get("closed_at") and (item.get("ticket_status") in ("Đã đóng", "Da dong") or "Đã đóng" in str(item.get("ticket_status") or "")):
+            raw_up = str(item.get("updated_at") or "").strip()
+            if raw_up:
+                try:
+                    from datetime import datetime, timedelta
+                    dt = datetime.strptime(raw_up.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                    item["closed_at"] = (dt + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    item["closed_at"] = raw_up
+            else:
+                item["closed_at"] = raw_up
+        if not item.get("prechecked_at") and item.get("status") not in (None, "", "CHƯA PHÂN LOẠI"):
+            raw_up = str(item.get("updated_at") or "").strip()
+            if raw_up:
+                try:
+                    from datetime import datetime, timedelta
+                    dt = datetime.strptime(raw_up.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                    item["prechecked_at"] = (dt + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    item["prechecked_at"] = raw_up
+            else:
+                item["prechecked_at"] = raw_up
         results.append(item)
     conn.close()
     return results
 
 def update_ticket_field(phone, field, value, incident_time=None):
-    valid_fields = ["comment", "action_plan", "ticket_status", "status", "ai_summary", "closed_by", "reopen_count", "last_reopened_date"]
+    valid_fields = ["comment", "action_plan", "ticket_status", "status", "ai_summary", "closed_by", "reopen_count", "last_reopened_date", "incident_cause", "closed_at", "prechecked_at", "ward"]
     if field not in valid_fields:
         return False
 
@@ -766,6 +976,24 @@ def update_ticket_field(phone, field, value, incident_time=None):
                 f"UPDATE tickets SET {field} = ?, updated_at = CURRENT_TIMESTAMP WHERE phone = ? OR phone LIKE ?", 
                 (value, str(phone).strip(), p_suffix)
             )
+
+        # Nếu cập nhật ward, đồng bộ luôn mục 5 trong ai_summary (nếu có)
+        if field == "ward" and value:
+            try:
+                row_sum = conn.execute(
+                    "SELECT ai_summary FROM tickets WHERE (phone = ? OR phone LIKE ?) ORDER BY updated_at DESC LIMIT 1",
+                    (str(phone).strip(), p_suffix)
+                ).fetchone()
+                if row_sum and row_sum["ai_summary"] and "5. Khu vực xảy ra lỗi:" in row_sum["ai_summary"]:
+                    old_sum = row_sum["ai_summary"]
+                    new_sum = re.sub(r'5\.\s*Khu vực xảy ra lỗi:[^\n]*', f'5. Khu vực xảy ra lỗi: Tại 1 khu vực ({value})', old_sum)
+                    if new_sum != old_sum:
+                        conn.execute(
+                            "UPDATE tickets SET ai_summary = ? WHERE (phone = ? OR phone LIKE ?)",
+                            (new_sum, str(phone).strip(), p_suffix)
+                        )
+            except Exception:
+                pass
     conn.close()
     return True
 
@@ -782,12 +1010,25 @@ def delete_all_tickets(source=None):
     conn.commit()
     conn.close()
 
+def normalize_staff_name(name: str) -> str:
+    if not name:
+        return "Chưa rõ"
+    n = str(name).strip()
+    nl = n.lower()
+    if "quangvu" in nl or "quang vũ" in nl or "lê quang vũ" in nl:
+        return "Lê Quang Vũ"
+    if "nguyenhoa" in nl or "nguyễn thị hoa" in nl or "nguyen thi hoa" in nl:
+        return "Nguyễn Thị Hoa"
+    if "lan phuong" in nl or "lan phương" in nl:
+        return "Hoàng Thị Lan Phương"
+    return n
+
 def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_filter=None):
     """
     Thống kê tổng hợp số liệu phân tích chuyên sâu cho các phiếu đã đóng:
     - time_filter: 'all', 'today', '7days', '30days'
     - source_filter: 'all', 'tts_old', 'tts_new'
-    - service_filter: 'all', 'data' (Mobile Internet), 'voice_sms' (Thoại/SMS/Gói/PA Khác)
+    - service_filter: 'all', 'data' (Mobile Internet), 'voice_sms' (Thoại/SMS/Gói/PA Khác), 'call', 'sms', 'other'
     """
     init_db()
     conn = get_db_connection()
@@ -816,26 +1057,34 @@ def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_
         if service_filter and service_filter != 'all':
             if service_filter == 'data':
                 where.append(DATA_PKG_SQL)
+            elif service_filter in ('call', 'thoai'):
+                where.append(CALL_PKG_SQL)
+            elif service_filter == 'sms':
+                where.append(SMS_PKG_SQL)
+            elif service_filter in ('other', 'goi_cuoc'):
+                where.append(OTHER_PKG_SQL)
             elif service_filter == 'voice_sms':
                 where.append(VOICE_PKG_SQL)
-            elif service_filter == 'thoai':
-                where.append("(package_title LIKE '%Gọi%' OR package_title LIKE '%Cuộc gọi%')")
-            elif service_filter == 'sms':
-                where.append("(package_title LIKE '%Tin nhắn%' OR package_title LIKE '%SMS%')")
-            elif service_filter == 'goi_cuoc':
-                where.append("package_title LIKE '%Gói cước%'")
 
         where_sql = " AND ".join(where)
 
-        # 1. Tổng quan số lượng
+        # 1. Tổng quan số lượng tách bạch chuẩn xác
         q_totals = f"""
             SELECT 
                 COUNT(*) as total,
-                SUM(CASE WHEN closed_by IS NOT NULL AND closed_by != '' AND closed_by NOT LIKE '%Tự động%' THEN 1 ELSE 0 END) as manual_cnt,
-                SUM(CASE WHEN closed_by IS NULL OR closed_by = '' OR closed_by LIKE '%Tự động%' THEN 1 ELSE 0 END) as auto_cnt,
+                SUM(CASE WHEN closed_by IS NOT NULL AND closed_by != '' 
+                         AND closed_by NOT LIKE '%Tự động%' AND closed_by NOT LIKE '%Hệ thống%' AND closed_by NOT LIKE '%Bot%' 
+                    THEN 1 ELSE 0 END) as manual_cnt,
+                SUM(CASE WHEN closed_by LIKE '%Tự động%' OR closed_by LIKE '%Hệ thống%' OR closed_by LIKE '%Bot%' 
+                    THEN 1 ELSE 0 END) as auto_cnt,
+                SUM(CASE WHEN closed_by IS NULL OR closed_by = '' 
+                    THEN 1 ELSE 0 END) as synced_cnt,
                 SUM(CASE WHEN source = 'tts_new' THEN 1 ELSE 0 END) as tts_new_cnt,
                 SUM(CASE WHEN source IN ('tts_old', 'tts_old_api') OR source IS NULL THEN 1 ELSE 0 END) as tts_old_cnt,
                 SUM(CASE WHEN {DATA_PKG_SQL} THEN 1 ELSE 0 END) as data_cnt,
+                SUM(CASE WHEN {CALL_PKG_SQL} THEN 1 ELSE 0 END) as call_cnt,
+                SUM(CASE WHEN {SMS_PKG_SQL} THEN 1 ELSE 0 END) as sms_cnt,
+                SUM(CASE WHEN {OTHER_PKG_SQL} THEN 1 ELSE 0 END) as other_cnt,
                 SUM(CASE WHEN {VOICE_PKG_SQL} THEN 1 ELSE 0 END) as voice_cnt
             FROM tickets WHERE {where_sql}
         """
@@ -843,21 +1092,44 @@ def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_
         total = row["total"] or 0
         manual_cnt = row["manual_cnt"] or 0
         auto_cnt = row["auto_cnt"] or 0
+        synced_cnt = row["synced_cnt"] or 0
         tts_new_cnt = row["tts_new_cnt"] or 0
         tts_old_cnt = row["tts_old_cnt"] or 0
         data_cnt = row["data_cnt"] or 0
+        call_cnt = row["call_cnt"] or 0
+        sms_cnt = row["sms_cnt"] or 0
+        other_cnt = row["other_cnt"] or 0
         voice_cnt = row["voice_cnt"] or 0
 
-        # Hôm nay đóng bao nhiêu
-        today_q = "SELECT COUNT(*) FROM tickets WHERE (ticket_status = 'Đã đóng' OR ticket_status = 'Da dong') AND SUBSTR(updated_at, 1, 10) = ?"
-        today_row = conn.execute(today_q, [today_str]).fetchone()
-        today_cnt = today_row[0] if today_row else 0
+        tool_closed = manual_cnt + auto_cnt
+        manual_pct = round(manual_cnt * 100.0 / tool_closed, 1) if tool_closed else 0
+        auto_pct = round(auto_cnt * 100.0 / tool_closed, 1) if tool_closed else 0
+        synced_pct = round(synced_cnt * 100.0 / total, 1) if total else 0
+
+        # Hôm nay đóng bao nhiêu (Tách phiếu KTV/Tool thực đóng vs phiếu đồng bộ)
+        today_manual_q = f"""
+            SELECT COUNT(*) FROM tickets 
+            WHERE (ticket_status = 'Đã đóng' OR ticket_status = 'Da dong') 
+              AND closed_by IS NOT NULL AND closed_by != ''
+              AND SUBSTR(updated_at, 1, 10) = ?
+        """
+        today_m_row = conn.execute(today_manual_q, [today_str]).fetchone()
+        today_manual_cnt = today_m_row[0] if today_m_row else 0
+
+        today_total_q = f"""
+            SELECT COUNT(*) FROM tickets 
+            WHERE (ticket_status = 'Đã đóng' OR ticket_status = 'Da dong') 
+              AND SUBSTR(updated_at, 1, 10) = ?
+        """
+        today_t_row = conn.execute(today_total_q, [today_str]).fetchone()
+        today_total_cnt = today_t_row[0] if today_t_row else 0
+        today_synced_cnt = max(0, today_total_cnt - today_manual_cnt)
 
         # 2. Phân bổ theo nhận định
         q_diag = f"""
             SELECT 
                 CASE 
-                    WHEN status IS NULL OR TRIM(status) = '' THEN 'Khác / Chưa ghi nhận'
+                    WHEN status IS NULL OR TRIM(status) = '' THEN 'Phiếu lịch sử OneOSS (Chưa tiền kiểm)'
                     ELSE status 
                 END as diag,
                 COUNT(*) as cnt
@@ -898,25 +1170,43 @@ def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_
         """
         top_packages = [{"name": r["package_title"], "count": r["cnt"]} for r in conn.execute(q_pkg, params).fetchall()]
 
-        # 5. Danh sách KTV đóng thủ công
+        # 5. Danh sách KTV đóng thủ công (Đã gộp chuẩn hóa theo họ tên)
         q_staff = f"""
             SELECT closed_by, COUNT(*) as cnt
             FROM tickets 
-            WHERE {where_sql} AND closed_by IS NOT NULL AND closed_by != '' AND closed_by NOT LIKE '%Tự động%'
+            WHERE {where_sql} AND closed_by IS NOT NULL AND closed_by != '' 
+              AND closed_by NOT LIKE '%Tự động%' AND closed_by NOT LIKE '%Hệ thống%' AND closed_by NOT LIKE '%Bot%'
             GROUP BY closed_by ORDER BY cnt DESC
         """
-        staff_list = [{"name": r["closed_by"], "count": r["cnt"]} for r in conn.execute(q_staff, params).fetchall()]
+        staff_dict = {}
+        for r in conn.execute(q_staff, params).fetchall():
+            c_name = normalize_staff_name(r["closed_by"])
+            staff_dict[c_name] = staff_dict.get(c_name, 0) + int(r["cnt"] or 0)
+
+        staff_list = [
+            {"name": name, "count": count} 
+            for name, count in sorted(staff_dict.items(), key=lambda x: x[1], reverse=True)
+        ]
 
         return {
             "total": total,
-            "auto_cnt": auto_cnt,
-            "auto_percent": round(auto_cnt * 100.0 / total, 1) if total else 0,
             "manual_cnt": manual_cnt,
-            "manual_percent": round(manual_cnt * 100.0 / total, 1) if total else 0,
-            "today_cnt": today_cnt,
+            "manual_percent": manual_pct,
+            "auto_cnt": auto_cnt,
+            "auto_percent": auto_pct,
+            "synced_cnt": synced_cnt,
+            "synced_percent": synced_pct,
+            "tool_closed_cnt": tool_closed,
+            "today_cnt": today_manual_cnt,
+            "today_manual_cnt": today_manual_cnt,
+            "today_synced_cnt": today_synced_cnt,
+            "today_total_cnt": today_total_cnt,
             "tts_new_cnt": tts_new_cnt,
             "tts_old_cnt": tts_old_cnt,
             "data_cnt": data_cnt,
+            "call_cnt": call_cnt,
+            "sms_cnt": sms_cnt,
+            "other_cnt": other_cnt,
             "voice_cnt": voice_cnt,
             "by_diagnosis": by_diagnosis,
             "daily_trend": daily_trend,
@@ -927,11 +1217,145 @@ def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_
         print("Lỗi get_closed_tickets_analytics:", ex)
         return {
             "total": 0, "auto_cnt": 0, "auto_percent": 0, "manual_cnt": 0, "manual_percent": 0,
-            "today_cnt": 0, "tts_new_cnt": 0, "tts_old_cnt": 0, "data_cnt": 0, "voice_cnt": 0,
+            "synced_cnt": 0, "synced_percent": 0, "tool_closed_cnt": 0,
+            "today_cnt": 0, "today_manual_cnt": 0, "today_synced_cnt": 0, "today_total_cnt": 0,
+            "tts_new_cnt": 0, "tts_old_cnt": 0, "data_cnt": 0, "call_cnt": 0, "sms_cnt": 0, "other_cnt": 0, "voice_cnt": 0,
             "by_diagnosis": [], "daily_trend": [], "top_packages": [], "staff_list": []
         }
     finally:
         conn.close()
+
+def normalize_loc_string(s: str) -> str:
+    if not s:
+        return ""
+    import unicodedata
+    s = str(s).lower()
+    s = unicodedata.normalize('NFD', s)
+    s = re.sub(r'[\u0300-\u036f]', '', s)
+    s = s.replace('đ', 'd').replace('Đ', 'd')
+    s = re.sub(r'\b(phuong|xa|thi tran|quan|huyen|thi xa|thanh pho|tinh|tp\.|tp|p\.|x\.)\b', '', s)
+    s = re.sub(r'[^a-z0-9]', ' ', s)
+    return ' '.join(s.split())
+
+
+def is_loc_matched(tts_ward, tts_prov, act_ward, act_prov) -> bool:
+    nw_t = normalize_loc_string(tts_ward)
+    nw_a = normalize_loc_string(act_ward)
+    if not nw_t or not nw_a:
+        return False
+    ward_matched = (nw_t == nw_a) or (nw_t in nw_a) or (nw_a in nw_t)
+    if not ward_matched:
+        st = set(nw_t.split())
+        sa = set(nw_a.split())
+        ward_matched = len(st) > 0 and len(st.intersection(sa)) / len(st) >= 0.6
+    if not ward_matched:
+        return False
+
+    np_t = normalize_loc_string(tts_prov)
+    np_a = normalize_loc_string(act_prov)
+    if np_t and np_a:
+        hcm = ('ho chi minh', 'hcm', 'sai gon')
+        if any(x in np_t for x in hcm) and any(x in np_a for x in hcm):
+            return True
+        hn = ('ha noi', 'hni')
+        if any(x in np_t for x in hn) and any(x in np_a for x in hn):
+            return True
+        return (np_t == np_a) or (np_t in np_a) or (np_a in np_t)
+    return True
+
+
+def validate_ttsnew_ward_for_51(ticket_id=None, phone=None, ticket_code=None, ticket_dict=None) -> tuple[bool, str]:
+    """
+    Kiểm tra điều kiện địa bàn Phường/Xã trước khi chuyển bước 5.1 (Xây dựng PA xử lý) trên TTS Mới.
+    Yêu cầu:
+    1. Đã cập nhật Tỉnh/TP trên TTS Mới
+    2. Đã cập nhật Phường/Xã trên TTS Mới
+    3. Không bị sai khác so với dữ liệu trạm CEM (ngày phản ánh) hoặc Radio Status (port 1708)
+    
+    Trả về: (is_valid: bool, reason: str)
+    """
+    row = None
+    if ticket_dict and isinstance(ticket_dict, dict):
+        row = ticket_dict
+    else:
+        conn = get_db_connection()
+        if ticket_id:
+            row = conn.execute("SELECT * FROM tickets WHERE ticket_id = ? AND source = 'tts_new' ORDER BY updated_at DESC LIMIT 1", (ticket_id,)).fetchone()
+        if not row and ticket_code:
+            clean_c = ticket_code.split("\n")[0].strip()
+            row = conn.execute("SELECT * FROM tickets WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new' ORDER BY updated_at DESC LIMIT 1", (clean_c, f"{clean_c}%")).fetchone()
+        if not row and phone:
+            row = conn.execute("SELECT * FROM tickets WHERE phone = ? AND source = 'tts_new' ORDER BY updated_at DESC LIMIT 1", (phone,)).fetchone()
+        if row:
+            row = dict(row)
+        conn.close()
+
+    prov_id = row.get("province_id") if row else None
+    prov_name = (row.get("province_name") or row.get("province") or "").strip() if row else ""
+    ward_id = row.get("ward_id") if row else None
+    ward_name = (row.get("ward_name") or "").strip() if row else ""
+
+    t_id = ticket_id or (row.get("ticket_id") if row else None)
+    if t_id and (not prov_name or not ward_name):
+        try:
+            from routers.tickets import get_tts_new_ticket_boundary
+            b_res = get_tts_new_ticket_boundary(int(t_id))
+            if b_res and b_res.get("success"):
+                prov_id = b_res.get("province_id") or prov_id
+                prov_name = b_res.get("province_name") or prov_name
+                ward_id = b_res.get("ward_id") or ward_id
+                ward_name = b_res.get("ward_name") or ward_name
+        except Exception:
+            pass
+
+    if not prov_id and not prov_name:
+        return False, "chưa cập nhật Tỉnh/TP trên TTS Mới (đang bỏ trống Tỉnh/TP)"
+    if not ward_id and not ward_name:
+        return False, "chưa cập nhật Phường/Xã trên TTS Mới (đang bỏ trống Phường/Xã)"
+
+    cem_text = (row.get("cem_data") or "") if row else ""
+    cell_patterns = re.findall(r'(?:[2-5]G[-_]|UL[-_]|DL[-_])[A-Za-z0-9]+[-_][A-Za-z0-9]+', cem_text)
+
+    expected_locations = []
+    import requests
+    for c in set(cell_patterns):
+        try:
+            r = requests.get(f"http://127.0.0.1:1708/api/cell/{c}", timeout=1.5)
+            if r.status_code == 200:
+                d = r.json()
+                w = d.get("ward") or (d.get("summary") or {}).get("ward")
+                p = d.get("province") or (d.get("summary") or {}).get("province")
+                if w:
+                    expected_locations.append((w.strip(), (p or "").strip()))
+        except Exception:
+            pass
+
+    target_phone = phone or (row.get("phone") if row else "")
+    if not expected_locations and target_phone:
+        try:
+            p84 = target_phone if target_phone.startswith("84") else ("84" + target_phone.lstrip("0"))
+            r = requests.get(f"http://127.0.0.1:1708/api/msisdn/{p84}", timeout=1.5)
+            if r.status_code == 200:
+                d = r.json()
+                w = d.get("ward") or (d.get("summary") or {}).get("ward")
+                p = d.get("province") or (d.get("summary") or {}).get("province")
+                if w:
+                    expected_locations.append((w.strip(), (p or "").strip()))
+        except Exception:
+            pass
+
+    if expected_locations:
+        matched = False
+        for act_w, act_p in expected_locations:
+            if is_loc_matched(ward_name, prov_name, act_w, act_p):
+                matched = True
+                break
+        if not matched:
+            act_str = " | ".join([f"{w}, {p}" if p else w for w, p in set(expected_locations)])
+            return False, f"địa bàn trên TTS Mới ({ward_name}, {prov_name}) sai khác so với check CEM & Profile Status (Trạm thực tế: {act_str})"
+
+    return True, "Hợp lệ"
+
 
 if __name__ == "__main__":
     init_db()

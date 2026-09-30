@@ -22,7 +22,7 @@ CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH", r"C:\chromedriver\chromedrive
 from crawler_tts import get_vnpt_tickets
 from crawler_btools import extract_btools_single_phone
 from data_processor import standardize_btools_data 
-from report_bot import analyze_subscriber_status, export_diagnostics_to_excel, get_formatted_sapc_packages
+from report_bot import analyze_subscriber_status, export_diagnostics_to_excel, get_formatted_sapc_packages, extract_btools_packages_summary
 from cem_client import CEMClient, get_cem_cell_summary
 from ai_interpreter import analyze_ticket_with_ai
 from login_tts import ensure_tts_logged_in
@@ -226,26 +226,29 @@ def main():
         # Tóm tắt thông tin bằng AI / NLP Offline
         ai_summary = analyze_ticket_with_ai(json_filename)
 
-        # 🎯 TRA CỨU DỮ LIỆU CEM (TOP 3 CELL BẮT SÓNG TRONG 5 NGÀY & APP USAGE 5 NGÀY)
+        # 🎯 BÓC TÁCH THỜI ĐIỂM SỰ CỐ / TIẾP NHẬN
+        from report_bot import extract_incident_time
+        incident_time_string = ticket.get("incident_time") or extract_incident_time(content, ticket.get("created_time", ""))
+        created_time_string = ticket.get("created_time") or incident_time_string
+
+        # 🎯 TRA CỨU DỮ LIỆU CEM (NGÀY TIẾP NHẬN & 5 NGÀY GẦN NHẤT)
         cem_records = []
         app_events = []
         try:
             from cem_client import CEMClient, save_cem_data_to_file
             if cem_client is None:
                 cem_client = CEMClient(driver=driver)
-            cem_records = cem_client.get_subscriber_history_5days(phone_84, days=5)
-            cem_data_string = CEMClient.extract_top_cells_summary(cem_records)
-            app_events = cem_client.get_subscriber_app_events(phone_84, days=5)
+            cem_records = cem_client.get_subscriber_history_5days(phone_84, days=5, incident_time_str=incident_time_string)
+            app_events = cem_client.get_subscriber_app_events(phone_84, days=5, incident_time_str=incident_time_string)
+            _, _, cem_data_string = CEMClient.extract_two_period_summary(
+                cem_records, incident_time_str=incident_time_string, app_events=app_events, days=5
+            )
             app_usage_string = CEMClient.extract_top_apps_summary(app_events)
 
             # 💾 Lưu dữ liệu chi tiết CEM (Cell + App Usage 5 ngày) vào thư mục cem/
             save_cem_data_to_file(phone_84, cem_records, app_events, base_dir=BASE_DIR)
         except Exception as e:
             cem_data_string = f"Lỗi CEM: {e}"
-        # 🎯 BÓC TÁCH THỜI ĐIỂM SỰ CỐ / TIẾP NHẬN
-        from report_bot import extract_incident_time
-        incident_time_string = ticket.get("incident_time") or extract_incident_time(content, ticket.get("created_time", ""))
-        created_time_string = ticket.get("created_time") or incident_time_string
 
         # Phân tích kỹ thuật & chuẩn đoán lỗi (kết hợp BTools + SAPC + CEM + App Usage + Mốc thời gian tiếp nhận)
         status, comment, action_plan, color = analyze_subscriber_status(
@@ -257,27 +260,8 @@ def main():
         unique_rats = list(set(str(row.get("RAT_TYPE_NAME", "")) for row in clean_data if row.get("RAT_TYPE_NAME")))
         rat_types_string = ", ".join(unique_rats) if unique_rats else "Không có dữ liệu"
 
-        # Lọc mã gói hệ thống rác
-        config_path = BASE_DIR / "diagnostic_config.json"
-        excluded_system_codes = set()
-        if config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as cf:
-                config_data = json.load(cf)
-            excluded_system_codes = set(config_data.get("EXCLUDED_SYSTEM_CODES", []))
-            
-        real_package_names = set()
-        for row in clean_data:
-            s_code = str(row.get("SERVICE_ID_CODE", "")).strip()
-            s_name = str(row.get("SERVICE_NAME", "")).strip()
-            s_code_lower = s_code.lower()
-            if s_code_lower and s_code_lower not in excluded_system_codes:
-                s_name_lower = s_name.lower()
-                if s_name and "gói cước lạ" not in s_name_lower and s_name_lower not in excluded_system_codes:
-                    real_package_names.add(s_name)
-                else:
-                    real_package_names.add(s_code)
-                    
-        real_packages_string = ", ".join(list(real_package_names)) if real_package_names else "Không phát sinh gói TM"
+        # Trích xuất gói cước phát sinh từ BTools kèm max session
+        real_packages_string = extract_btools_packages_summary(clean_data)
 
         # 🎯 ĐƯA TOÀN BỘ GÓI CƯỚC SAPC (Tên gói, Ngày ĐK, HSD) VÀO CỘT GÓI CƯỚC THỰC TẾ
         final_packages_string = get_formatted_sapc_packages(phone_84, fallback_btools=real_packages_string)

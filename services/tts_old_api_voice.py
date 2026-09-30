@@ -21,10 +21,6 @@ def execute_tts_old_api_voice_cycle(driver=None):
     Thực hiện quét & tiền kiểm danh sách phiếu Thoại / SMS / Gói trên TTS Cũ.
     Không tóm tắt AI (lưu trực tiếp nội dung phản ánh khách hàng).
     """
-    if state.status == "PROCESSING":
-        state.log("WARN", "Hệ thống đang bận thực hiện chu kỳ khác.")
-        return 0
-
     state.status = "PROCESSING"
     state.stop_requested = False
     state.status_message = "Đang quét phiếu Thoại / SMS TTS Cũ..."
@@ -62,25 +58,31 @@ def execute_tts_old_api_voice_cycle(driver=None):
                 continue
             active_phones.add(phone_84)
             inc_time = t.get("incident_time") or ""
+            is_reopened_v = bool(t.get("is_reopened") or (t.get("reopen_count", 0) > 0))
+            reopen_count_v = int(t.get("reopen_count", 0) or (1 if is_reopened_v else 0))
+            reopen_cmt_v = "Phiếu mở lại, KTV kiểm tra thêm." if is_reopened_v else ""
+
             rec = {
                 "phone": phone_84,
                 "incident_time": inc_time,
                 "package_title": t.get("title", "Thoại / SMS"),
                 "ticket_content": t.get("content", ""),
-                "status": "",
+                "status": "⚠️ PHIẾU MỞ LẠI" if is_reopened_v else "",
                 "real_packages": "--",
                 "rat_types": "--",
                 "cem_data": "--",
                 "app_usage": "--",
                 "ai_summary": t.get("content", ""),
-                "comment": "",
-                "action_plan": "",
+                "comment": reopen_cmt_v,
+                "action_plan": "KTV kiểm tra và xử lý thủ công" if is_reopened_v else "",
                 "ticket_status": "Chưa đóng",
                 "source": "tts_old_api",
                 "created_time": t.get("created_time") or inc_time,
                 "ticket_id": t.get("ticket_id"),
                 "flow_id": str(t.get("id_yeu_cau") or ""),
-                "ticket_code": t.get("ma_ccos") or t.get("MaCCOS") or ""
+                "ticket_code": t.get("ma_ccos") or t.get("MaCCOS") or "",
+                "reopen_count": reopen_count_v,
+                "last_reopened_date": t.get("last_reopened_date") or ""
             }
             save_or_update_ticket(rec)
 
@@ -91,7 +93,16 @@ def execute_tts_old_api_voice_cycle(driver=None):
         return len(voice_tickets)
 
     except Exception as e:
-        state.log("ERROR", f"Lỗi chu kỳ quét Thoại/SMS TTS Cũ: {e}")
+        err_str = str(e)
+        if "401" in err_str or "Authorization has been denied" in err_str:
+            state.log("WARN", "⚠️ Token TTS Cũ đã hết hạn trên máy chủ OneOSS (401). Đã dọn dẹp cache, vui lòng đăng nhập lại.")
+            try:
+                from tts_old_api import save_cached_auth
+                save_cached_auth("", {})
+            except Exception:
+                pass
+        else:
+            state.log("ERROR", f"Lỗi chu kỳ quét Thoại/SMS TTS Cũ: {e}")
         return 0
     finally:
         state.current_step = "Hoàn tất chu kỳ"

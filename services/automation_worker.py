@@ -18,9 +18,9 @@ def automation_worker_loop():
         state.trigger_now_requested = False
 
         # Thực thi chu kỳ tự động ngầm theo danh sách phạm vi (scan_scopes) đã chọn
-        scopes = getattr(state, "scan_scopes", ["tts_old_data", "tts_new_data"])
+        scopes = getattr(state, "scan_scopes", ["tts_old_data", "tts_old_voice", "tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"])
         if not scopes:
-            scopes = ["tts_old_data"]
+            scopes = ["tts_old_data", "tts_old_voice"]
 
         state.log("INFO", f"🔄 Bắt đầu chu kỳ quét tự động. Phạm vi: {', '.join(scopes)}")
 
