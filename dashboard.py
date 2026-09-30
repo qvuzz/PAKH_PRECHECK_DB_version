@@ -19,6 +19,18 @@ import uvicorn
 BASE_DIR = Path(__file__).resolve().parent
 PORT = 1234
 
+# Fix UTF-8 encoding trên Windows console (tránh lỗi charmap UnicodeEncodeError)
+if hasattr(sys.stdout, "reconfigure") and sys.stdout is not None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure") and sys.stderr is not None:
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # Bảo vệ khi chạy ngầm bằng pythonw (tránh NoneType write error)
 if sys.stdout is None:
     try:

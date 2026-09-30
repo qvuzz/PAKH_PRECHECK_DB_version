@@ -1,7 +1,20 @@
 import os
+import sys
 import json
 import requests
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure") and sys.stdout is not None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure") and sys.stderr is not None:
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 try:
     from .config import BASE_URL
 except (ImportError, ValueError):
@@ -33,7 +46,7 @@ class SAPCClient:
             self._load_cookies(cdp_url)
 
     def load_cookies_from_selenium(self, driver):
-        """Load toàn bộ cookie của tất cả các domain qua CDP Network.getAllCookies."""
+        """Load toan bo cookie cua tat ca cac domain qua CDP Network.getAllCookies."""
         try:
             cookies = driver.execute_cdp_cmd("Network.getAllCookies", {}).get("cookies", [])
             for c in cookies:
@@ -43,7 +56,7 @@ class SAPCClient:
                     domain=c.get('domain'),
                     path=c.get('path', '/')
                 )
-            print(f"[OK] Đã tải {len(cookies)} cookies toàn cục từ Chrome CDP.")
+            print(f"[OK] Loaded {len(cookies)} global cookies from Chrome CDP.")
             return True
         except Exception as e:
             try:
@@ -57,7 +70,7 @@ class SAPCClient:
                     )
                 return True
             except Exception as ex:
-                print(f"⚠️ Lỗi load cookie từ Selenium: {ex}")
+                print(f"[WARN] Error loading cookies from Selenium: {ex}")
                 return False
 
     def _load_cookies(self, cdp_url):
@@ -88,10 +101,10 @@ class SAPCClient:
                                     path=c.get('path', '/')
                                 )
                     if self._is_cookie_valid():
-                        print(f"[OK] Đã tải và xác thực Cookie SAPC thành công từ file: {os.path.basename(cf)}")
+                        print(f"[OK] Loaded and verified SAPC cookie from file: {os.path.basename(cf)}")
                         return
                 except Exception as e:
-                    print(f"[WARN] Lỗi đọc file cookie {cf}: {e}")
+                    print(f"[WARN] Error reading cookie file {cf}: {e}")
 
         # 2. Thử lấy cookie qua Chrome CDP nếu cổng 9222 đang mở
         for u in urls_to_try:
@@ -117,7 +130,7 @@ class SAPCClient:
                             pass
                     browser.close()
                     if self._is_cookie_valid():
-                        print(f"[OK] Đã nạp Cookie SAPC qua Chrome CDP ({u})")
+                        print(f"[OK] Loaded SAPC cookie via Chrome CDP ({u})")
                         return
             except Exception:
                 pass
@@ -133,7 +146,7 @@ class SAPCClient:
                         self.session.cookies.set(c.name, c.value, domain="10.155.42.218", path="/")
                         count += 1
                     if count > 0 and self._is_cookie_valid():
-                        print(f"[OK] Đã nạp {count} SAPC cookies qua browser_cookie3 ({loader.__name__})")
+                        print(f"[OK] Loaded {count} SAPC cookies via browser_cookie3 ({loader.__name__})")
                         return
                 except Exception:
                     continue
@@ -153,7 +166,7 @@ class SAPCClient:
                 for name, val in ff_cookies.items():
                     self.session.cookies.set(name, val, domain="10.155.42.218", path="/")
                 if self._is_cookie_valid():
-                    print(f"[OK] Đã nạp và xác thực SAPC cookies từ Firefox.")
+                    print(f"[OK] Loaded and verified SAPC cookies from Firefox.")
                     return
                 else:
                     # Cookie Firefox đã hết hạn, xóa khỏi session để tránh gửi rác

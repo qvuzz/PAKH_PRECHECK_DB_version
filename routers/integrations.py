@@ -139,11 +139,14 @@ async def update_sapc_cookie(request: Request):
                     "domain": c.get("domain", "10.155.42.218"),
                     "path": c.get("path", "/")
                 })
+        elif isinstance(raw_cookies_list, dict) and raw_cookies_list:
+            for k, v in raw_cookies_list.items():
+                parts.append({"name": str(k).strip(), "value": str(v).strip(), "domain": "10.155.42.218", "path": "/"})
         else:
             for item in cookie_str.split(";"):
                 if "=" in item:
                     k, v = item.strip().split("=", 1)
-                    parts.append({"name": k, "value": v, "domain": "10.155.42.218", "path": "/"})
+                    parts.append({"name": k.strip(), "value": v.strip(), "domain": "10.155.42.218", "path": "/"})
         
         with open(cookie_file_1, "w", encoding="utf-8") as f:
             json.dump(parts, f, indent=2, ensure_ascii=False)
@@ -309,7 +312,7 @@ async def sync_all_tokens_api(request: Request):
 
     # 6. SAPC Core Profile Cookie
     sapc_raw = body.get("sapc_cookie") or (body.get("sapc") if isinstance(body.get("sapc"), str) else (body.get("sapc") or {}).get("cookieHeader") or (body.get("sapc") or {}).get("cookie"))
-    sapc_raw_cookies = (body.get("sapc") or {}).get("rawCookies") if isinstance(body.get("sapc"), dict) else None
+    sapc_raw_cookies = body.get("sapc_cookies") or body.get("cookies") or ((body.get("sapc") or {}).get("rawCookies") if isinstance(body.get("sapc"), dict) else None) or ((body.get("sapc") or {}).get("cookieMap") if isinstance(body.get("sapc"), dict) else None)
     if sapc_raw or sapc_raw_cookies:
         try:
             import json, os
@@ -325,11 +328,14 @@ async def sync_all_tokens_api(request: Request):
                         "domain": c.get("domain", "10.155.42.218"),
                         "path": c.get("path", "/")
                     })
+            elif isinstance(sapc_raw_cookies, dict) and sapc_raw_cookies:
+                for k, v in sapc_raw_cookies.items():
+                    parts.append({"name": str(k).strip(), "value": str(v).strip(), "domain": "10.155.42.218", "path": "/"})
             elif sapc_raw:
                 for item in str(sapc_raw).split(";"):
                     if "=" in item:
                         k, v = item.strip().split("=", 1)
-                        parts.append({"name": k, "value": v, "domain": "10.155.42.218", "path": "/"})
+                        parts.append({"name": k.strip(), "value": v.strip(), "domain": "10.155.42.218", "path": "/"})
             if parts:
                 with open(cookie_file_1, "w", encoding="utf-8") as f:
                     json.dump(parts, f, indent=2, ensure_ascii=False)

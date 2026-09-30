@@ -225,9 +225,9 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
         f"name={target_phone}&start_d={s_clean}&end_d={e_clean}&submit=T%C3%ACm+Ki%E1%BA%BFm"
     )
 
-    print(f"[BTools] Tra cứu ngầm cho thuê bao: {target_phone} ({s_clean} -> {e_clean})")
+    print(f"[BTools] Tra cuu ngam cho thue bao: {target_phone} ({s_clean} -> {e_clean})")
 
-    # --- PHƯƠNG ÁN 1: CHẠY NGẦM HOÀN TOÀN QUA HTTP REQUEST (SIÊU TỐC) ---
+    # --- PHUONG AN 1: CHAY NGAM HOAN TOAN QUA HTTP REQUEST (SIEU TOC) ---
     cookie_str = get_btools_cookie(driver)
     if cookie_str:
         try:
@@ -242,8 +242,8 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
                 html = resp.read().decode("utf-8", errors="ignore")
                 
             valid, err_reason = is_valid_btools_html(html)
-            if not valid and ("CAS" in err_reason or "đăng nhập" in err_reason):
-                print("[BTools] Phiên cookie hết hạn, đang lấy lại cookie mới từ Chrome...")
+            if not valid and ("CAS" in err_reason or "đăng nhập" in err_reason or "login" in err_reason.lower()):
+                print("[BTools] Phien cookie het han, dang lay lai cookie moi...")
                 cookie_str = get_btools_cookie(driver, force_refresh=True)
                 if cookie_str:
                     req = urllib.request.Request(
@@ -260,19 +260,19 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
             if valid:
                 data_rows = parse_btools_table_html(html)
                 if data_rows:
-                    print(f"[BTools HTTP Ngầm] Đã cào thành công {len(data_rows)} dòng dữ liệu.")
+                    print(f"[BTools HTTP] Da cao thanh cong {len(data_rows)} dong du lieu.")
                 else:
-                    print(f"[BTools HTTP Ngầm] Thuê bao {target_phone} không phát sinh phiên dữ liệu BTools.")
+                    print(f"[BTools HTTP] Thue bao {target_phone} khong phat sinh phien du lieu BTools.")
                 return data_rows
             else:
                 global _BTOOLS_COOKIE_CACHE
                 _BTOOLS_COOKIE_CACHE = None
-                print(f"[BTools HTTP Ngầm] Phản hồi không hợp lệ: {err_reason}")
+                print(f"[BTools HTTP] Phan hoi khong hop le: {err_reason}")
         except Exception as ex_http:
-            print(f"[BTools] Lỗi gửi request ngầm HTTP: {ex_http}")
+            print(f"[BTools] Loi gui request ngam HTTP: {ex_http}")
 
-    # BTOOLS LỖI HOẶC CHƯA ĐĂNG NHẬP -> TRẢ VỀ None ĐỂ BÁO LỖI VÀ KHÔNG TỰ ĐỘNG ĐÓNG PHIẾU (KHÔNG NHẢY TAB TRÌNH DUYỆT)
-    print(f"[BTools] ⚠️ CẢNH BÁO: Không thể truy cập dữ liệu BTools cho {target_phone} (Chưa đăng nhập hoặc lỗi máy chủ). Trả về None!")
+    # BTOOLS LOI HOAC CHUA DANG NHAP -> TRA VE None DE BAO LOI VA KHONG TU DONG DONG PHIEU
+    print(f"[BTools] CANH BAO: Khong the truy cap du lieu BTools cho {target_phone}. Tra ve None!")
     return None
 
 
