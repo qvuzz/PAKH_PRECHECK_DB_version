@@ -38,7 +38,8 @@ SPA_ROUTES = [
     "/ttsmoi/khac",
     "/ttsmoi/other",
     "/thong-ke",
-    "/lich-su"
+    "/lich-su",
+    "/kiem-tra-luong"
 ]
 
 for route_path in SPA_ROUTES:

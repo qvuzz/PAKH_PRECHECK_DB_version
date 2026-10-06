@@ -40,9 +40,12 @@ class SAPCClient:
             ),
             "Accept": "application/json, text/plain, */*"
         })
+        loaded = False
         if driver is not None:
             self.load_cookies_from_selenium(driver)
-        else:
+            if self._is_cookie_valid():
+                loaded = True
+        if not loaded:
             self._load_cookies(cdp_url)
 
     def load_cookies_from_selenium(self, driver):

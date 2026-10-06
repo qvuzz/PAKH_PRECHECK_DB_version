@@ -177,14 +177,33 @@ def _process_single_ticket(
         def _fetch_sapc():
             sapc_res = {"msisdn": phone_84, "packages": []}
             info_res = {}
+            # Fallback đọc cache cũ nếu mạng SAPC tạm thời lỗi / timeout
+            old_hss_file = os.path.join(str(BASE_DIR / "output"), f"{phone_84}.json")
+            if os.path.exists(old_hss_file):
+                try:
+                    with open(old_hss_file, "r", encoding="utf-8") as of:
+                        old_d = json.load(of)
+                        if old_d.get("packages"):
+                            sapc_res["packages"] = old_d["packages"]
+                        if old_d.get("has_ocse"):
+                            sapc_res["has_ocse"] = old_d["has_ocse"]
+                        if old_d.get("subscriber_info"):
+                            info_res = old_d["subscriber_info"]
+                except Exception:
+                    pass
+
             if sapc_client is not None:
                 try:
                     raw_sapc = sapc_client.query(phone_84)
-                    sapc_res = convert_sapc_response(raw_sapc)
+                    new_sapc_res = convert_sapc_response(raw_sapc)
+                    if new_sapc_res and "packages" in new_sapc_res:
+                        sapc_res = new_sapc_res
                 except Exception:
                     pass
                 try:
-                    info_res = tra_cell_tu_so_dien_thoai(phone_84, session=sapc_client.session)
+                    new_info = tra_cell_tu_so_dien_thoai(phone_84, session=sapc_client.session)
+                    if new_info:
+                        info_res = new_info
                 except Exception:
                     pass
             return sapc_res, info_res
@@ -231,7 +250,7 @@ def _process_single_ticket(
             from report_bot import get_sapc_package_validity
             from crawler_btools import fetch_supplementary_btools_if_needed
             active_pkgs, _ = get_sapc_package_validity(phone_84)
-            commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date")]
+            commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date") and not p.get("is_addon_app")]
             earliest_reg_dt = min([p["reg_dt"] for p in commercial_pkgs if p.get("reg_dt")], default=None)
             start_scan_date = (datetime.now() - timedelta(days=4)).date()
             if earliest_reg_dt and earliest_reg_dt.date() < start_scan_date:

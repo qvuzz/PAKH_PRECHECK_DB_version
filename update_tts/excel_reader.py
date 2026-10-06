@@ -51,7 +51,10 @@ AUTO_CLOSE_STATUSES_NO_ACCESS_CHECK = {
     "đang sử dụng vpn / 1.1.1.1",       # 6: Phát hiện app VPN / 1.1.1.1
     "chưa đăng ký gói",                 # KC chưa có gói
     "chỉ có gói paygo",                 # Thuê bao chỉ có gói PAYGO
+    "chỉ có gói tiện ích - thiếu data internet", # Chỉ có gói Add-on app
     "lỗi gói vd2 - thiếu paygo",        # Dùng VD2 nhưng không có gói PAYGO
+    "lỗi gói thả ga - thiếu paygo",     # Dùng Thả ga nhưng không có gói PAYGO
+    "trừ cước ngoài gói paygo",         # Phát sinh cước PAYGO mã 3001
     "lưu lượng yếu - tập trung 1 cell", # CEM Cell > 50%
     "gói cước đã hết hạn",              # SAPC toàn bộ gói hết hạn
     "gói còn hạn - không dùng được",    # Case 1 & Case 2A: Từ khi đăng ký gói không phát sinh data

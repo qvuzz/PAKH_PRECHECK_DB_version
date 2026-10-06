@@ -76,4 +76,13 @@ def convert_sapc_response(data):
             })
             existing_pkg_names.add(fgname.lower())
 
+    # 5. Nhận diện cờ OCSE (OCS Enterprise / hội tụ)
+    try:
+        import json
+        raw_str = json.dumps(data) if isinstance(data, (dict, list)) else str(data)
+        if "OCSE" in raw_str.upper():
+            result["has_ocse"] = True
+    except Exception:
+        pass
+
     return result

@@ -1,6 +1,6 @@
 let isRunning = false;
 let currentAutoClose = false;
-let currentSystem = 'tts_old_api';
+let currentSystem = 'tts_new';
 let currentService = 'data';
 
 // ==================== QUẢN LÝ CHẾ ĐỘ BAN NGÀY / BAN ĐÊM (THEME SYSTEM) ====================
@@ -39,10 +39,53 @@ function toggleAppTheme() {
     updateThemeUI(target);
 }
 
-// Khởi chạy cập nhật trạng thái UI theme ngay khi DOM sẵn sàng
+// Khởi chạy cập nhật trạng thái UI theme & sidebar collapse ngay khi DOM sẵn sàng
 document.addEventListener('DOMContentLoaded', function() {
-    updateThemeUI(getAppTheme());
+    const saved = getAppTheme();
+    document.documentElement.setAttribute('data-theme', saved);
+    updateThemeUI(saved);
+    initSidebarCollapseState();
 });
+
+// Điều khiển thu nhỏ / mở rộng menu danh mục bên trái
+function toggleSidebarCollapse() {
+    const sidebar = document.getElementById('sidebarNav') || document.querySelector('.sidebar-nav');
+    const layout = document.querySelector('.main-layout');
+    if (!sidebar) return;
+    const isCollapsed = sidebar.classList.toggle('collapsed');
+    if (layout) layout.classList.toggle('sidebar-collapsed', isCollapsed);
+    try {
+        localStorage.setItem('sidebar_collapsed', isCollapsed ? 'true' : 'false');
+    } catch (e) {}
+    updateSidebarToggleIcon(isCollapsed);
+}
+
+function initSidebarCollapseState() {
+    try {
+        const saved = localStorage.getItem('sidebar_collapsed');
+        if (saved === 'true') {
+            const sidebar = document.getElementById('sidebarNav') || document.querySelector('.sidebar-nav');
+            const layout = document.querySelector('.main-layout');
+            if (sidebar) sidebar.classList.add('collapsed');
+            if (layout) layout.classList.add('sidebar-collapsed');
+            updateSidebarToggleIcon(true);
+        } else {
+            updateSidebarToggleIcon(false);
+        }
+    } catch (e) {}
+}
+
+function updateSidebarToggleIcon(isCollapsed) {
+    const btn = document.getElementById('btnSidebarToggle');
+    if (!btn) return;
+    const iconCollapse = btn.querySelector('.icon-collapse');
+    const iconExpand = btn.querySelector('.icon-expand');
+    if (iconCollapse && iconExpand) {
+        iconCollapse.style.display = isCollapsed ? 'none' : 'block';
+        iconExpand.style.display = isCollapsed ? 'block' : 'none';
+    }
+    btn.setAttribute('title', isCollapsed ? 'Mở rộng menu bên trái' : 'Thu nhỏ menu bên trái');
+}
 
 
 // Xác định quyền Admin đồng bộ ngay lập tức dựa trên Hostname (Localhost hoặc dải IP 127.x.x.x)
@@ -528,6 +571,15 @@ async function fetchStatus() {
 
 let lastTicketsSignature = "";
 let currentTableTab = 'chua_dong';
+let currentRegion = localStorage.getItem('pakh_region') || 'ALL';
+
+function onRegionChange(val) {
+    currentRegion = val || 'ALL';
+    localStorage.setItem('pakh_region', currentRegion);
+    lastTicketsSignature = "";
+    loadTickets(true, true);
+}
+window.onRegionChange = onRegionChange;
 
 // SẮP XẾP DANH SÁCH PHIẾU THEO NGÀY TIẾP NHẬN
 let sortIncidentTimeOrder = 'none'; // 'none', 'desc' (mới nhất trước), 'asc' (cũ nhất trước)
@@ -865,6 +917,8 @@ function selectHistoryStats(updateUrl = true) {
     // Ẩn hoàn toàn bảng danh sách phiếu
     const tableDataView = document.getElementById('tableDataView');
     if (tableDataView) tableDataView.style.display = 'none';
+    const faContainer = document.getElementById('flowAuditContainer');
+    if (faContainer) faContainer.style.display = 'none';
 
     const sel = document.getElementById('caServiceSelect');
     if (sel) sel.value = currentClosedService;
@@ -899,6 +953,8 @@ function selectModule(sys, srv, updateUrl = true) {
     if (analyticsBox) analyticsBox.style.display = 'none';
     const tableDataView = document.getElementById('tableDataView');
     if (tableDataView) tableDataView.style.display = 'block';
+    const faContainer = document.getElementById('flowAuditContainer');
+    if (faContainer) faContainer.style.display = 'none';
 
     // Highlight nav item
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.remove('active'));
@@ -997,6 +1053,8 @@ function selectHistoryModule(tab = 'all', updateUrl = true) {
     if (analyticsBox) analyticsBox.style.display = 'none';
     const tableDataView = document.getElementById('tableDataView');
     if (tableDataView) tableDataView.style.display = 'block';
+    const faContainer = document.getElementById('flowAuditContainer');
+    if (faContainer) faContainer.style.display = 'none';
 
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.remove('active'));
     const activeBtn = document.getElementById('nav-all-history');
@@ -1047,15 +1105,19 @@ function handleSpaRoute(pathname) {
         selectModule('tts_new', 'other', false);
     } else if (p === '/ttsmoi/voice' || p === '/ttsmoi/voice_sms') {
         selectModule('tts_new', 'call', false);
-    } else if (p === '/ttscu/voice' || p === '/ttscu/voice_sms') {
-        selectModule('tts_old_api', 'voice_sms', false);
+    } else if (p.startsWith('/ttscu')) {
+        selectModule('tts_new', 'data', false);
     } else if (p === '/thong-ke' || p === '/analytics') {
         selectHistoryStats(false);
     } else if (p === '/lich-su' || p === '/history') {
         selectHistoryModule('all', false);
+    } else if (p === '/kiem-tra-luong' || p === '/flow-audit' || p === '/doi-soat-luong') {
+        if (typeof selectFlowAuditModule === 'function') {
+            selectFlowAuditModule(false);
+        }
     } else {
-        // Mặc định: / hoặc /ttscu/data
-        selectModule('tts_old_api', 'data', false);
+        // Mặc định: TTS Mới - Mobile Internet
+        selectModule('tts_new', 'data', false);
     }
 }
 
@@ -1197,6 +1259,29 @@ async function startNewVoiceScan(srvType = null) {
     }
 }
 
+let activeTicketsAbortController = null;
+
+function renderTicketsSkeleton(tbody, totalCols = 12) {
+    if (!tbody) return;
+    const rows = [1, 2, 3, 4, 5, 6].map(i => `
+        <tr class="table-skeleton-row">
+            <td style="text-align:center;"><div class="skeleton-bar" style="width:20px; margin:auto;"></div></td>
+            <td><div class="skeleton-bar" style="width:110px;"></div><div class="skeleton-bar" style="width:70px; margin-top:4px;"></div></td>
+            ${totalCols === 12 ? '<td><div class="skeleton-bar" style="width:75px; margin:auto;"></div></td>' : ''}
+            <td><div class="skeleton-bar" style="width:90px; margin:auto;"></div></td>
+            <td><div class="skeleton-bar" style="width:65px; margin:auto;"></div></td>
+            <td><div class="skeleton-bar" style="width:70px; margin:auto;"></div></td>
+            <td><div class="skeleton-bar" style="width:115px;"></div></td>
+            <td><div class="skeleton-bar" style="width:55px; margin:auto;"></div></td>
+            <td><div class="skeleton-bar" style="width:85px;"></div></td>
+            <td><div class="skeleton-bar" style="width:140px;"></div></td>
+            <td><div class="skeleton-bar" style="width:105px;"></div></td>
+            <td><div class="skeleton-bar" style="width:65px; margin:auto;"></div></td>
+        </tr>
+    `).join('');
+    tbody.innerHTML = rows;
+}
+
 function switchTableTab(tab) {
     currentTableTab = tab;
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -1248,6 +1333,35 @@ function switchTableTab(tab) {
         titleElem.innerHTML = `<span>${escapeHtml(title)}</span>`;
     }
 
+    // Đồng bộ ngay tiêu đề cột Tóm tắt / Thời điểm đóng
+    const thAiSummary = document.getElementById('thAiSummary');
+    if (thAiSummary) {
+        if (tab === 'da_dong') {
+            thAiSummary.innerText = 'Thời Điểm Đóng';
+            thAiSummary.style.textAlign = 'center';
+            thAiSummary.title = 'Thời gian KTV bấm đóng 2.6 / 5.1 hoặc hệ thống tự động đóng';
+        } else {
+            thAiSummary.innerText = (currentService === 'call' || currentService === 'sms' || currentService === 'other') ? 'Nội Dung Phản Ánh' : 'Tóm Tắt Nội Dung PAKH';
+            thAiSummary.style.textAlign = '';
+            thAiSummary.title = '';
+        }
+    }
+
+    // Khi chuyển tab, reset dropdown filterStatus về 'all' để không bị ẩn dữ liệu ngoài ý muốn
+    const filterStatus = document.getElementById('filterStatus');
+    if (filterStatus && filterStatus.value !== 'all') {
+        filterStatus.value = 'all';
+    }
+
+    // Hiển thị ngay hiệu ứng Skeleton mượt mà trong tbody
+    const tbody = document.getElementById('ticketsBody');
+    const isDataService = (currentService === 'data');
+    const totalCols = isDataService ? 12 : 11;
+    if (tbody) {
+        renderTicketsSkeleton(tbody, totalCols);
+    }
+
+    lastTicketsSignature = "";
     loadTickets(true, true);
 }
 
@@ -1300,10 +1414,50 @@ async function loadTickets(force = false, resetPage = false) {
             return;
         }
 
-        const search = document.getElementById('searchInput').value;
-        const statusFilter = document.getElementById('filterStatus').value;
-        const res = await fetch(`/api/tickets?search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusFilter)}&tab=${encodeURIComponent(currentTableTab)}&source=${encodeURIComponent(currentSystem)}&service_type=${encodeURIComponent(currentService)}`);
+        // Hủy bỏ request trước đó nếu đang chạy dở để tránh Race Condition khi bấm nhanh
+        if (activeTicketsAbortController) {
+            try { activeTicketsAbortController.abort(); } catch (e) {}
+        }
+        activeTicketsAbortController = new AbortController();
+        const signal = activeTicketsAbortController.signal;
+        const requestedTab = currentTableTab;
+        const requestedSystem = currentSystem;
+        const requestedService = currentService;
+
+        const search = document.getElementById('searchInput') ? document.getElementById('searchInput').value : '';
+        const filterStatusElem = document.getElementById('filterStatus');
+        // Chỉ áp dụng filterStatus cho dịch vụ data (Mobile Internet), các nghiệp vụ khác luôn để 'all'
+        const statusFilter = (currentService === 'data' && filterStatusElem) ? filterStatusElem.value : 'all';
+
+        const res = await fetch(`/api/tickets?search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusFilter)}&tab=${encodeURIComponent(requestedTab)}&source=${encodeURIComponent(requestedSystem)}&service_type=${encodeURIComponent(requestedService)}&region=${encodeURIComponent(currentRegion || 'ALL')}`, { signal });
         const data = await res.json();
+
+        // Kiểm tra tính hợp lệ: Nếu người dùng đã chuyển sang tab hoặc module khác trong lúc fetch thì bỏ qua kết quả cũ
+        if (requestedTab !== currentTableTab || requestedSystem !== currentSystem || requestedService !== currentService) {
+            return;
+        }
+
+        // 🎯 Đồng bộ Widget Phân vùng 3 Miền trên Header
+        if (data.user_role === 'admin') {
+            const regWrap = document.getElementById('regionSelectWrapper');
+            if (regWrap) regWrap.style.display = 'flex';
+            const regSelect = document.getElementById('regionSelect');
+            if (regSelect && data.region && regSelect.value !== data.region) {
+                regSelect.value = data.region;
+            }
+            const regBadge = document.getElementById('regionBadgeKtv');
+            if (regBadge) regBadge.style.display = 'none';
+        } else {
+            const regWrap = document.getElementById('regionSelectWrapper');
+            if (regWrap) regWrap.style.display = 'none';
+            const regBadge = document.getElementById('regionBadgeKtv');
+            if (regBadge) {
+                regBadge.style.display = 'inline-flex';
+                const regLabels = { 'MB': 'Miền Bắc', 'MT': 'Miền Trung', 'MN': 'Miền Nam', 'ALL': 'Toàn quốc' };
+                regBadge.innerText = regLabels[data.region] || data.region;
+            }
+        }
+
         const tickets = data.tickets || [];
 
         if (data.system_counts) {
@@ -1346,6 +1500,9 @@ async function loadTickets(force = false, resetPage = false) {
         renderTicketsTable(force);
 
     } catch (e) {
+        if (e.name === 'AbortError') {
+            return; // Request bị hủy có chủ đích do người dùng chuyển tab nhanh
+        }
         console.error("Lỗi fetch tickets:", e);
     }
 }
@@ -1483,17 +1640,31 @@ function renderRadioLocation(phone, ticketKey = '', incidentTime = '') {
     if (!cleanPhone) return '';
     const info = cellInfoClientCache[cleanPhone];
     if (info && (info.ward || info.province || info.location_str)) {
-        const loc = info.location_str || (info.ward + (info.ward && info.province ? ', ' : '') + info.province);
-        const quickWardBtn = (info.ward || loc) ? `
-            <button type="button" class="btn-quick-apply-ward" onclick="quickApplyWardFromCell('${escapeHtml(cleanPhone)}', '${escapeHtml(incidentTime || '')}', '${escapeHtml(ticketKey || '')}', '${escapeHtml(info.ward || loc)}', '${escapeHtml(info.province || '')}', this, event)" style="margin-left:4px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:3px; padding:0 4px; font-size:11px; cursor:pointer; line-height:1.2; color:#1d4ed8; font-weight:700; transition:all 0.15s;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(info.ward || loc)}) vào Tóm tắt Nội dung & TTS Mới">⬆️</button>
+        const loc = info.location_str || (info.ward && info.province ? `${info.ward}, ${info.province}` : (info.ward || info.province || ''));
+        const wardVal = info.ward || loc;
+        const quickWardBtn = wardVal ? `
+            <button type="button" class="btn-quick-apply-ward" onclick="quickApplyWardFromCell('${escapeHtml(cleanPhone)}', '${escapeHtml(incidentTime || '')}', '${escapeHtml(ticketKey || '')}', '${escapeHtml(wardVal)}', '${escapeHtml(info.province || '')}', this, event)" style="margin-left:4px; display:inline-flex; align-items:center; justify-content:center; background:#eff6ff; border:1px solid #bfdbfe; border-radius:3px; padding:1px 5px; height:18px; cursor:pointer; color:#1d4ed8; transition:all 0.15s;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(wardVal)}) vào Tóm tắt Nội dung & TTS Mới">
+                <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+            </button>
+        ` : '';
+        const mapLink = info.map_url ? `
+            <a href="${escapeHtml(info.map_url)}" target="_blank" rel="noopener noreferrer" style="font-size:9.5px; color:#2563eb; text-decoration:none; margin-left:3px; display:inline-flex; align-items:center; gap:2px; font-weight:600;" title="Mở tọa độ trạm trên Google Maps">
+                <span>Bản đồ</span>
+                <svg viewBox="0 0 24 24" width="8" height="8" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+            </a>
         ` : '';
         return `
             <div style="display:flex; align-items:center; gap:3px; margin-top:2px; color:#0f172a; flex-wrap:wrap;">
                 <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="#0369a1" stroke-width="2" style="flex-shrink:0; margin-top:1px;"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"></path><circle cx="12" cy="10" r="3"></circle></svg>
                 <span style="font-weight:600; color:#0f172a; font-size:10.5px;">${escapeHtml(loc)}</span>
+                ${mapLink}
                 ${quickWardBtn}
             </div>
         `;
+    }
+    // Nếu chưa có thông tin hoặc đang thiếu ward, kích hoạt truy vấn ngầm từ port 1708
+    if (cleanPhone && ticketKey) {
+        triggerAsyncCellLookup(ticketKey, cleanPhone, '');
     }
     return '';
 }
@@ -1531,9 +1702,9 @@ async function triggerAsyncCellLookup(ticketKey, phone, currentRadio) {
                         return key === ticketKey;
                     }) : null;
                     const incTime = t ? t.incident_time : '';
-                    const loc = data.location_str || (data.ward + (data.ward && data.province ? ', ' : '') + data.province);
+                    const loc = data.location_str || (data.ward && data.province ? `${data.ward}, ${data.province}` : (data.ward || data.province || ''));
                     const wardVal = data.ward || loc;
-                    const quickBtn = wardVal ? ` <button type="button" onclick="quickApplyWardFromCell('${escapeHtml(phone)}', '${escapeHtml(incTime)}', '${escapeHtml(ticketKey)}', '${escapeHtml(wardVal)}', '${escapeHtml(data.province || '')}', this, event)" style="background:transparent; border:none; cursor:pointer; font-size:10px; padding:0; line-height:1; vertical-align:middle;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(wardVal)}) vào Tóm tắt Nội dung">⬆️</button>` : '';
+                    const quickBtn = wardVal ? ` <button type="button" onclick="quickApplyWardFromCell('${escapeHtml(phone)}', '${escapeHtml(incTime)}', '${escapeHtml(ticketKey)}', '${escapeHtml(wardVal)}', '${escapeHtml(data.province || '')}', this, event)" style="background:transparent; border:none; cursor:pointer; font-size:10px; padding:0; line-height:1; vertical-align:middle; color:#1d4ed8;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(wardVal)}) vào Tóm tắt Nội dung"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg></button>` : '';
                     compactLocEl.innerHTML = ` (${escapeHtml(loc)})${quickBtn}`;
                 }
                 updateAllWardAudits();
@@ -1582,13 +1753,17 @@ function renderCemIncidentLocation(ticketKey, rawCemIncident, phone = '', incide
             const quickWardBtn = (info.ward || locText) ? `
                 <button type="button" class="btn-quick-apply-ward" onclick="quickApplyWardFromCell('${escapeHtml(phone || '')}', '${escapeHtml(incidentTime || '')}', '${escapeHtml(ticketKey || '')}', '${escapeHtml(info.ward || locText)}', '${escapeHtml(info.province || '')}', this, event)" style="margin-left:4px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:3px; padding:0 4px; font-size:11px; cursor:pointer; line-height:1.2; color:#1d4ed8; font-weight:700; transition:all 0.15s;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(info.ward || locText)}) vào Tóm tắt Nội dung & TTS Mới">⬆️</button>
             ` : '';
+            const mapLink = info.map_url ? `
+                <a href="${escapeHtml(info.map_url)}" target="_blank" rel="noopener noreferrer" style="margin-left:4px; font-size:10px; color:#0284c7; font-weight:600; text-decoration:underline;" title="Xem vị trí Cell trên bản đồ Google Maps">Bản đồ</a>
+            ` : '';
             return `
                 <div style="display:flex; align-items:flex-start; gap:4px; margin-top:5px; padding-top:4px; border-top:1px dashed #cbd5e1; font-size:10.5px; color:#334155; line-height:1.35;">
                     <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#0284c7" stroke-width="2" style="flex-shrink:0; margin-top:2px;"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"></path><circle cx="12" cy="10" r="3"></circle></svg>
                     <div>
-                        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:3px;">
+                        <div style="display:flex; align-items:center; flex-wrap:gap; gap:3px;">
                             <span style="font-weight:700; color:#0284c7;">Địa bàn Cell (${escapeHtml(cellName)}):</span>
                             ${quickWardBtn}
+                            ${mapLink}
                         </div>
                         <div style="font-weight:600; color:#0f172a; margin-top:1px;">${escapeHtml(locText)}</div>
                     </div>
@@ -1598,7 +1773,7 @@ function renderCemIncidentLocation(ticketKey, rawCemIncident, phone = '', incide
         return '';
     }
 
-    triggerAsyncCellLocationLookup(ticketKey, cellName);
+    triggerAsyncCellLocationLookup(ticketKey, cellName, phone);
     return `
         <div id="cem-incident-loc-spin-${ticketKey}" style="margin-top:5px; padding-top:4px; border-top:1px dashed #cbd5e1; font-size:10px; color:#64748b; font-style:italic; display:flex; align-items:center; gap:4px;">
             <span>Đang tra cứu địa bàn Cell ${escapeHtml(cellName)}...</span>
@@ -1606,26 +1781,31 @@ function renderCemIncidentLocation(ticketKey, rawCemIncident, phone = '', incide
     `;
 }
 
-async function triggerAsyncCellLocationLookup(ticketKey, cellName) {
+async function triggerAsyncCellLocationLookup(ticketKey, cellName, phone = '') {
     if (!cellName || pendingCellLocationLookups.has(cellName)) return;
     pendingCellLocationLookups.add(cellName);
     try {
-        const res = await fetch(`/api/cell_location/${encodeURIComponent(cellName)}`);
+        let t = (typeof cachedTickets !== 'undefined') ? cachedTickets.find((item, idx) => {
+            const key = (item.phone + '_' + (item.incident_time || item.ticket_code || idx)).replace(/[^a-zA-Z0-9]/g, '_');
+            return key === ticketKey;
+        }) : null;
+        const targetPhone = phone || (t ? t.phone : '');
+        const qParams = targetPhone ? `?phone=${encodeURIComponent(targetPhone)}` : '';
+        const res = await fetch(`/api/cell_location/${encodeURIComponent(cellName)}${qParams}`);
         if (res.ok) {
             const data = await res.json();
             if (data && (data.ward || data.province || data.location_str)) {
                 cellLocationClientCache[cellName] = data;
                 const el = document.getElementById(`cem-incident-loc-${ticketKey}`);
                 if (el) {
-                    let t = (typeof cachedTickets !== 'undefined') ? cachedTickets.find((item, idx) => {
-                        const key = (item.phone + '_' + (item.incident_time || item.ticket_code || idx)).replace(/[^a-zA-Z0-9]/g, '_');
-                        return key === ticketKey;
-                    }) : null;
-                    const phone = t ? t.phone : '';
+                    const phoneVal = t ? t.phone : targetPhone;
                     const incTime = t ? t.incident_time : '';
                     const locText = data.location_str || (data.ward + (data.ward && data.province ? ', ' : '') + data.province);
                     const quickWardBtn = (data.ward || locText) ? `
-                        <button type="button" class="btn-quick-apply-ward" onclick="quickApplyWardFromCell('${escapeHtml(phone)}', '${escapeHtml(incTime)}', '${escapeHtml(ticketKey)}', '${escapeHtml(data.ward || locText)}', '${escapeHtml(data.province || '')}', this, event)" style="margin-left:4px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:3px; padding:0 4px; font-size:11px; cursor:pointer; line-height:1.2; color:#1d4ed8; font-weight:700; transition:all 0.15s;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(data.ward || locText)}) vào Tóm tắt Nội dung & TTS Mới">⬆️</button>
+                        <button type="button" class="btn-quick-apply-ward" onclick="quickApplyWardFromCell('${escapeHtml(phoneVal)}', '${escapeHtml(incTime)}', '${escapeHtml(ticketKey)}', '${escapeHtml(data.ward || locText)}', '${escapeHtml(data.province || '')}', this, event)" style="margin-left:4px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:3px; padding:0 4px; font-size:11px; cursor:pointer; line-height:1.2; color:#1d4ed8; font-weight:700; transition:all 0.15s;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(data.ward || locText)}) vào Tóm tắt Nội dung & TTS Mới">⬆️</button>
+                    ` : '';
+                    const mapLink = data.map_url ? `
+                        <a href="${escapeHtml(data.map_url)}" target="_blank" rel="noopener noreferrer" style="margin-left:4px; font-size:10px; color:#0284c7; font-weight:600; text-decoration:underline;" title="Xem vị trí Cell trên bản đồ Google Maps">Bản đồ</a>
                     ` : '';
                     el.innerHTML = `
                         <div style="display:flex; align-items:flex-start; gap:4px; margin-top:5px; padding-top:4px; border-top:1px dashed #cbd5e1; font-size:10.5px; color:#334155; line-height:1.35;">
@@ -1634,12 +1814,14 @@ async function triggerAsyncCellLocationLookup(ticketKey, cellName) {
                                 <div style="display:flex; align-items:center; flex-wrap:wrap; gap:3px;">
                                     <span style="font-weight:700; color:#0284c7;">Địa bàn Cell (${escapeHtml(cellName)}):</span>
                                     ${quickWardBtn}
+                                    ${mapLink}
                                 </div>
                                 <div style="font-weight:600; color:#0f172a; margin-top:1px;">${escapeHtml(locText)}</div>
                             </div>
                         </div>
                     `;
                 }
+
                 updateAllWardAudits();
             } else {
                 cellLocationClientCache[cellName] = { ward: '', province: '', location_str: '' };
@@ -1735,7 +1917,7 @@ function evaluateTicketWardStatus(t, ticketKey, rawCemIncident) {
                     <span id="display-ward-${ticketKey}" style="font-weight:600; font-size:11.5px; color:#475569; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(wardLocation)}">${escapeHtml(wardLocation)}</span>
                 </div>
             ` : '',
-            compactBadge: wardLocation ? `<span class="badge-status" style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">${escapeHtml(wardLocation)}</span>` : ''
+            compactBadge: wardLocation ? `<span class="badge-status compact-ward-pill" style="background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; font-weight:700; font-size:9.5px; padding:1px 6px; max-width:none; width:fit-content; white-space:nowrap; margin-right:4px;">${escapeHtml(wardLocation)}</span>` : ''
         };
     }
 
@@ -1762,7 +1944,7 @@ function evaluateTicketWardStatus(t, ticketKey, rawCemIncident) {
                     </div>
                 </div>
             `,
-            compactBadge: `<span class="badge-status" style="background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">Đang tải P/Xã...</span>`
+            compactBadge: `<span class="badge-status compact-ward-pill" style="background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1; font-weight:700; font-size:9.5px; padding:1px 6px; max-width:none; width:fit-content; white-space:nowrap; margin-right:4px;">Đang tải P/Xã...</span>`
         };
     }
 
@@ -1786,7 +1968,7 @@ function evaluateTicketWardStatus(t, ticketKey, rawCemIncident) {
                     </button>
                 </div>
             `,
-            compactBadge: `<span class="badge-status" style="background:#fff7ed; color:#c2410c; border:1px solid #fdba74; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">Chưa có Tỉnh/TP</span>`
+            compactBadge: `<span class="badge-status compact-ward-pill" style="background:#fff7ed; color:#c2410c; border:1px solid #fdba74; font-weight:700; font-size:9.5px; padding:1px 6px; max-width:none; width:fit-content; white-space:nowrap; margin-right:4px;">Chưa có Tỉnh/TP</span>`
         };
     }
 
@@ -1806,7 +1988,7 @@ function evaluateTicketWardStatus(t, ticketKey, rawCemIncident) {
                     </button>
                 </div>
             `,
-            compactBadge: `<span class="badge-status" style="background:#fff7ed; color:#c2410c; border:1px solid #fdba74; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">Chưa có P/Xã</span>`
+            compactBadge: `<span class="badge-status compact-ward-pill" style="background:#fff7ed; color:#c2410c; border:1px solid #fdba74; font-weight:700; font-size:9.5px; padding:1px 6px; max-width:none; width:fit-content; white-space:nowrap; margin-right:4px;">Chưa có P/Xã</span>`
         };
     }
 
@@ -1871,7 +2053,7 @@ function evaluateTicketWardStatus(t, ticketKey, rawCemIncident) {
                     </button>
                 </div>
             `,
-            compactBadge: `<span class="badge-status" style="background:#f1f5f9; color:#0369a1; border:1px solid #bae6fd; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">${escapeHtml(ttsDisplayText)}</span>`
+            compactBadge: `<span class="badge-status compact-ward-pill" style="background:#f1f5f9; color:#0369a1; border:1px solid #bae6fd; font-weight:700; font-size:9.5px; padding:1px 6px; max-width:none; width:fit-content; white-space:nowrap; margin-right:4px;">${escapeHtml(ttsDisplayText)}</span>`
         };
     }
 
@@ -1891,7 +2073,7 @@ function evaluateTicketWardStatus(t, ticketKey, rawCemIncident) {
                     </button>
                 </div>
             `,
-            compactBadge: `<span class="badge-status" style="background:#f1f5f9; color:#0369a1; border:1px solid #bae6fd; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">${escapeHtml(ttsDisplayText)}</span>`
+            compactBadge: `<span class="badge-status compact-ward-pill" style="background:#f1f5f9; color:#0369a1; border:1px solid #bae6fd; font-weight:700; font-size:9.5px; padding:1px 6px; max-width:none; width:fit-content; white-space:nowrap; margin-right:4px;">${escapeHtml(ttsDisplayText)}</span>`
         };
     }
 
@@ -1920,7 +2102,7 @@ function evaluateTicketWardStatus(t, ticketKey, rawCemIncident) {
                     </button>
                 </div>
             `,
-            compactBadge: `<span class="badge-status" style="background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;">${escapeHtml(ttsDisplayText)}</span>`
+            compactBadge: `<span class="badge-status compact-ward-pill" style="background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; font-weight:700; font-size:9.5px; padding:1px 6px; max-width:none; width:fit-content; white-space:nowrap; margin-right:4px;">${escapeHtml(ttsDisplayText)}</span>`
         };
     } else {
         // Sai khác (Màu đỏ)
@@ -1944,7 +2126,7 @@ function evaluateTicketWardStatus(t, ticketKey, rawCemIncident) {
                     </button>
                 </div>
             `,
-            compactBadge: `<span class="badge-status" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-weight:700; font-size:9.5px; padding:1px 5px; margin-right:4px;" title="Sai khác so với check CEM&PROFILE Status (Trạm: ${escapeHtml(actualNames)})">Sai khác CEM/Profile</span>`
+            compactBadge: `<span class="badge-status compact-ward-pill" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-weight:700; font-size:9.5px; padding:1px 6px; max-width:none; width:fit-content; white-space:nowrap; margin-right:4px;" title="Sai khác so với check CEM&PROFILE Status (Trạm: ${escapeHtml(actualNames)})">Sai khác CEM/Profile</span>`
         };
     }
 }
@@ -2019,6 +2201,36 @@ function getPredictedIncidentCause(status) {
     return "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường";
 }
 
+// Chuẩn hóa chuỗi tiếng Việt bỏ dấu để tìm kiếm không dấu
+function removeVietnameseTones(str) {
+    if (!str) return '';
+    str = String(str);
+    str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
+    str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");
+    str = str.replace(/ì|í|ị|ỉ|ĩ/g, "i");
+    str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, "o");
+    str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u");
+    str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y");
+    str = str.replace(/đ/g, "d");
+    str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "A");
+    str = str.replace(/È|É|Ẹ|Ẻ|Ẽ|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "E");
+    str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "I");
+    str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "O");
+    str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "U");
+    str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "Y");
+    str = str.replace(/Đ/g, "D");
+    return str.toLowerCase().trim();
+}
+
+function getIncidentCauseGroups() {
+    if (window.TTS_INCIDENT_CAUSE_GROUPS && window.TTS_INCIDENT_CAUSE_GROUPS.length > 0) {
+        return window.TTS_INCIDENT_CAUSE_GROUPS;
+    }
+    return [
+        { group: "Nguyên nhân phổ biến", items: TTS_INCIDENT_CAUSES.map((c, i) => ({ id: i, name: c })) }
+    ];
+}
+
 function handleCauseChange(ticketKey, phone, incidentTime, val) {
     updateTicket(phone, incidentTime, 'incident_cause', val);
     const item = cachedTickets.find(t => {
@@ -2028,7 +2240,177 @@ function handleCauseChange(ticketKey, phone, incidentTime, val) {
     if (item) {
         item.incident_cause = val;
     }
+    const indicator = document.getElementById(`save-cause-${ticketKey}`);
+    if (indicator) {
+        indicator.classList.add('visible');
+        setTimeout(() => indicator.classList.remove('visible'), 1500);
+    }
 }
+
+function handleCauseInputChange(ticketKey, phone, incidentTime, val) {
+    const hidden = document.getElementById(`select-detail-cause-${ticketKey}`);
+    if (hidden) hidden.value = val;
+    handleCauseChange(ticketKey, phone, incidentTime, val);
+}
+
+function selectCauseItem(ticketKey, phone, incidentTime, causeName) {
+    const input = document.getElementById(`input-detail-cause-${ticketKey}`);
+    if (input) {
+        input.value = causeName;
+        input.title = causeName;
+    }
+    const hidden = document.getElementById(`select-detail-cause-${ticketKey}`);
+    if (hidden) hidden.value = causeName;
+    handleCauseChange(ticketKey, phone, incidentTime, causeName);
+    hideCauseDropdown(ticketKey);
+}
+
+function showCauseDropdown(ticketKey, forceAll = true) {
+    document.querySelectorAll('.cause-dropdown-menu').forEach(m => {
+        if (m.id !== `dropdown-cause-menu-${ticketKey}`) m.style.display = 'none';
+    });
+    const menu = document.getElementById(`dropdown-cause-menu-${ticketKey}`);
+    if (!menu) return;
+    const input = document.getElementById(`input-detail-cause-${ticketKey}`);
+    
+    // Mặc định luôn bung toàn bộ (ALL) 73 nguyên nhân (10 nhóm) để KTV duyệt và chọn chi tiết
+    const query = forceAll ? '' : (input ? input.value : '');
+    renderCauseDropdownMenu(ticketKey, query);
+    menu.style.display = 'block';
+
+    if (input) {
+        // Tự động bôi đen chữ để KTV có thể gõ ngay ký tự bất kỳ để tìm kiếm nếu muốn
+        setTimeout(() => {
+            try { input.select(); } catch (e) {}
+        }, 50);
+    }
+
+    // Tự động cuộn đến vị trí mục đang được chọn để KTV thấy vị trí trong danh mục
+    setTimeout(() => {
+        const sel = menu.querySelector('.cause-dropdown-item.is-selected');
+        if (sel) {
+            sel.scrollIntoView({ block: 'nearest' });
+        }
+    }, 60);
+}
+
+function hideCauseDropdown(ticketKey) {
+    const menu = document.getElementById(`dropdown-cause-menu-${ticketKey}`);
+    if (menu) menu.style.display = 'none';
+}
+
+function toggleCauseDropdown(ticketKey, event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    const menu = document.getElementById(`dropdown-cause-menu-${ticketKey}`);
+    if (!menu) return;
+    if (menu.style.display === 'block') {
+        menu.style.display = 'none';
+    } else {
+        showCauseDropdown(ticketKey, true);
+        const input = document.getElementById(`input-detail-cause-${ticketKey}`);
+        if (input) input.focus();
+    }
+}
+
+function filterCauseDropdown(ticketKey, query) {
+    const menu = document.getElementById(`dropdown-cause-menu-${ticketKey}`);
+    if (menu && menu.style.display !== 'block') {
+        menu.style.display = 'block';
+    }
+    renderCauseDropdownMenu(ticketKey, query);
+}
+
+function showAllCauses(ticketKey) {
+    renderCauseDropdownMenu(ticketKey, '');
+    const menu = document.getElementById(`dropdown-cause-menu-${ticketKey}`);
+    if (menu) menu.style.display = 'block';
+    const input = document.getElementById(`input-detail-cause-${ticketKey}`);
+    if (input) {
+        try { input.select(); } catch (e) {}
+    }
+}
+
+function renderCauseDropdownMenu(ticketKey, query) {
+    const menu = document.getElementById(`dropdown-cause-menu-${ticketKey}`);
+    if (!menu) return;
+
+    const currentVal = (document.getElementById(`input-detail-cause-${ticketKey}`)?.value || '').trim();
+    const groups = getIncidentCauseGroups();
+    const cleanQ = removeVietnameseTones(query || '');
+    const tokens = cleanQ.split(/\s+/).filter(t => t.length > 0);
+    const safePhone = menu.getAttribute('data-phone') || '';
+    const safeTime = menu.getAttribute('data-time') || '';
+
+    const totalAllCount = groups.reduce((acc, g) => acc + (g.items ? g.items.length : 0), 0);
+    const isFiltered = tokens.length > 0;
+
+    let itemsHtml = '';
+    let matchCount = 0;
+
+    groups.forEach(g => {
+        if (!g.items || g.items.length === 0) return;
+        const gNameClean = removeVietnameseTones(g.group || '');
+
+        const matchedItems = g.items.filter(it => {
+            if (!isFiltered) return true;
+            const itClean = removeVietnameseTones(it.name || '');
+            return tokens.every(tok => itClean.includes(tok) || gNameClean.includes(tok));
+        });
+
+        if (matchedItems.length === 0) return;
+        matchCount += matchedItems.length;
+
+        itemsHtml += `<div class="cause-group-header" style="position:sticky; top:28px; z-index:5;">${escapeHtml(g.group)} (${matchedItems.length})</div>`;
+        matchedItems.forEach(it => {
+            const isSelected = (currentVal && it.name.trim().toLowerCase() === currentVal.toLowerCase());
+            const safeName = escapeHtml(it.name);
+            const escapedForAttr = it.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            
+            itemsHtml += `<div class="cause-dropdown-item ${isSelected ? 'is-selected' : ''}" 
+                               title="${safeName}"
+                               style="white-space:normal; word-break:break-word; line-height:1.4; padding:7px 12px;"
+                               onmousedown="selectCauseItem('${ticketKey}', '${safePhone}', '${safeTime}', '${escapedForAttr}')">
+                            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
+                                <span style="flex:1;">${safeName}</span>
+                                <div style="display:flex; align-items:center; gap:4px; flex-shrink:0;">
+                                    ${it.id ? `<span style="font-size:9.5px; color:#94a3b8; font-family:'JetBrains Mono', monospace;">#${it.id}</span>` : ''}
+                                    ${isSelected ? '<span style="color:#0284c7; font-size:11px; font-weight:700;">✓</span>' : ''}
+                                </div>
+                            </div>
+                        </div>`;
+        });
+    });
+
+    if (matchCount === 0) {
+        itemsHtml = `<div style="padding:14px; text-align:center; color:#94a3b8; font-size:11px; font-style:italic;">
+                    Không tìm thấy nguyên nhân phù hợp với từ khóa "${escapeHtml(query)}"
+                    <div style="margin-top:8px;">
+                        <button type="button" onmousedown="showAllCauses('${ticketKey}')" style="background:#0284c7; color:#fff; border:none; padding:4px 12px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer;">Xem toàn bộ ${totalAllCount} nguyên nhân</button>
+                    </div>
+                </div>`;
+    }
+
+    const headerHtml = `
+        <div style="padding:5px 10px; background:#f1f5f9; border-bottom:1px solid #cbd5e1; display:flex; align-items:center; justify-content:space-between; font-size:10px; font-weight:700; color:#475569; position:sticky; top:0; z-index:10;">
+            <span>${isFiltered ? `Tìm thấy <b>${matchCount}</b> / ${totalAllCount} nguyên nhân` : `Toàn bộ danh mục OneOSS: <b>${totalAllCount} nguyên nhân</b> (${groups.length} nhóm)`}</span>
+            <div style="display:flex; align-items:center; gap:8px;">
+                ${isFiltered ? `<span style="cursor:pointer; color:#0284c7; text-decoration:underline;" onmousedown="showAllCauses('${ticketKey}')">Xem tất cả</span>` : '<span style="font-weight:400; color:#94a3b8; font-size:9.5px;">(Gõ để tìm kiếm)</span>'}
+            </div>
+        </div>
+    `;
+
+    menu.innerHTML = headerHtml + itemsHtml;
+}
+
+// Lắng nghe sự kiện click bên ngoài để tự động đóng dropdown combobox
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.cause-combobox-wrapper')) {
+        document.querySelectorAll('.cause-dropdown-menu').forEach(m => m.style.display = 'none');
+    }
+});
 
 function formatPrecheckTimeDisplay(precheckedAtStr) {
     if (!precheckedAtStr || precheckedAtStr === '--' || precheckedAtStr === 'null') {
@@ -2913,9 +3295,9 @@ function renderTicketsTable(force = false) {
                     if (m) {
                         const rText = m[1].trim();
                         const pInfo = cellInfoClientCache[t.phone] || {};
-                        const pLocStr = pInfo.location_str || pInfo.ward || '';
+                        const pLocStr = pInfo.location_str || (pInfo.ward && pInfo.province ? `${pInfo.ward}, ${pInfo.province}` : (pInfo.ward || pInfo.province || ''));
                         const pWardVal = pInfo.ward || pLocStr;
-                        const quickBtn = pWardVal ? ` <button type="button" onclick="quickApplyWardFromCell('${escapeHtml(t.phone)}', '${escapeHtml(t.incident_time || '')}', '${escapeHtml(ticketKey)}', '${escapeHtml(pWardVal)}', '${escapeHtml(pInfo.province || '')}', this, event)" style="background:transparent; border:none; cursor:pointer; font-size:10px; padding:0; line-height:1; vertical-align:middle;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(pWardVal)}) vào Tóm tắt Nội dung">⬆️</button>` : '';
+                        const quickBtn = pWardVal ? ` <button type="button" onclick="quickApplyWardFromCell('${escapeHtml(t.phone)}', '${escapeHtml(t.incident_time || '')}', '${escapeHtml(ticketKey)}', '${escapeHtml(pWardVal)}', '${escapeHtml(pInfo.province || '')}', this, event)" style="background:transparent; border:none; cursor:pointer; font-size:10px; padding:0; line-height:1; vertical-align:middle; color:#1d4ed8;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(pWardVal)}) vào Tóm tắt Nội dung"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg></button>` : '';
                         cParts.push(`<span style="color:#0369a1; font-weight:700; font-family:'JetBrains Mono', monospace;">Radio: <span id="compact-radio-${ticketKey}">${formatRadioCellHtml(rText, pInfo.cell_name)}</span><span id="compact-radio-loc-${ticketKey}" style="color:#475569; font-weight:500; font-family:inherit;">${pLocStr ? ` (${escapeHtml(pLocStr)})` : ''}</span>${quickBtn}</span>`);
                     }
                 }
@@ -3266,7 +3648,13 @@ function renderTicketsTable(force = false) {
                             </div>
                         </td>
                         <td style="vertical-align:middle; padding:2px 4px;">
-                            ${(currentTableTab === 'da_dong') ? formatClosedTimeDisplay(t.closed_at || t.updated_at, t.closed_by, t.ticket_status) : compactSummaryHtml}
+                            ${(currentTableTab === 'da_dong') 
+                                ? `<div>${formatClosedTimeDisplay(t.closed_at || t.updated_at, t.closed_by, t.ticket_status)}${(() => {
+                                    const shortDesc = (t.ticket_content || t.ai_summary || '').replace(/\n/g, ' ').trim();
+                                    return shortDesc ? `<div class="compact-ellipsis" style="font-size:10px; color:#64748b; max-width:210px; margin:3px auto 0; text-align:center; line-height:1.25;" title="${escapeHtml(shortDesc)}">${escapeHtml(shortDesc)}</div>` : '';
+                                })()}</div>`
+                                : compactSummaryHtml
+                            }
                         </td>
                         ${(() => {
                             let displayComment = (t.comment !== null && t.comment !== undefined) ? t.comment : '';
@@ -3382,30 +3770,38 @@ function renderTicketsTable(force = false) {
                                                 : [{ group: "Nguyên nhân phổ biến", items: TTS_INCIDENT_CAUSES.map((c, i) => ({ id: i, name: c })) }];
 
                                             const totalCausesCount = groups.reduce((acc, g) => acc + (g.items ? g.items.length : 0), 0);
-                                            let causeOptionsHtml = `<option value="" ${!currentCause ? 'selected' : ''}>-- Chọn nguyên nhân sự cố (Full ${totalCausesCount} danh mục) --</option>`;
-                                            let hasMatchedCause = false;
-
-                                            groups.forEach(g => {
-                                                if (!g.items || g.items.length === 0) return;
-                                                causeOptionsHtml += `<optgroup label="${escapeHtml(g.group)}">`;
-                                                g.items.forEach(it => {
-                                                    const isSel = (currentCause && currentCause.trim().toLowerCase() === it.name.trim().toLowerCase()) ? 'selected' : '';
-                                                    if (isSel) hasMatchedCause = true;
-                                                    causeOptionsHtml += `<option value="${escapeHtml(it.name)}" ${isSel}>${escapeHtml(it.name)}</option>`;
-                                                });
-                                                causeOptionsHtml += `</optgroup>`;
-                                            });
-
-                                            if (currentCause && !hasMatchedCause) {
-                                                causeOptionsHtml = `<option value="${escapeHtml(currentCause)}" selected>📌 ${escapeHtml(currentCause)}</option>` + causeOptionsHtml;
-                                            }
 
                                             return `
                                         <div style="display:flex; align-items:center; gap:6px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:5px; padding:3px 8px; margin-bottom:2px; min-width:0; width:100%; box-sizing:border-box;">
                                             <span style="font-size:10.5px; font-weight:700; color:#475569; white-space:nowrap; flex-shrink:0;">Nguyên nhân:</span>
-                                            <select id="select-detail-cause-${ticketKey}" style="flex:1; min-width:0; width:100%; height:24px; padding:1px 6px; font-size:11px; font-weight:600; color:#0f172a; border-radius:4px; border:1px solid #cbd5e1; background:#ffffff; cursor:pointer; outline:none; text-overflow:ellipsis; overflow:hidden;" onchange="handleCauseChange('${ticketKey}', '${t.phone}', '${t.incident_time}', this.value)">
-                                                ${causeOptionsHtml}
-                                            </select>
+                                            <div class="cause-combobox-wrapper" style="position:relative; flex:1; min-width:0;">
+                                                <input type="text"
+                                                       id="input-detail-cause-${ticketKey}"
+                                                       class="searchable-cause-input"
+                                                       style="width:100%; height:24px; padding:1px 24px 1px 6px; font-size:11px; font-weight:600; color:#0f172a; border-radius:4px; border:1px solid #cbd5e1; background:#ffffff; outline:none; text-overflow:ellipsis; box-sizing:border-box;"
+                                                       placeholder="-- Gõ tìm kiếm nguyên nhân (${totalCausesCount} mục) --"
+                                                       value="${escapeHtml(currentCause)}"
+                                                       autocomplete="off"
+                                                       onfocus="showCauseDropdown('${ticketKey}')"
+                                                       oninput="filterCauseDropdown('${ticketKey}', this.value)"
+                                                       onchange="handleCauseInputChange('${ticketKey}', '${t.phone}', '${t.incident_time}', this.value)"
+                                                       title="${escapeHtml(currentCause || 'Gõ để tìm kiếm hoặc chọn nguyên nhân sự cố')}"
+                                                />
+                                                <button type="button"
+                                                        style="position:absolute; right:2px; top:50%; transform:translateY(-50%); border:none; background:transparent; padding:2px 4px; cursor:pointer; color:#64748b; display:flex; align-items:center; justify-content:center;"
+                                                        onclick="toggleCauseDropdown('${ticketKey}', event)"
+                                                        tabindex="-1"
+                                                        title="Mở toàn bộ danh mục nguyên nhân">
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                                                </button>
+                                                <input type="hidden" id="select-detail-cause-${ticketKey}" value="${escapeHtml(currentCause)}" />
+                                                <div id="dropdown-cause-menu-${ticketKey}"
+                                                     class="cause-dropdown-menu"
+                                                     data-phone="${escapeHtml(t.phone)}"
+                                                     data-time="${escapeHtml(t.incident_time || '')}"
+                                                     style="display:none; position:absolute; top:calc(100% + 2px); left:0; width:100%; min-width:480px; max-width:720px; max-height:380px; overflow-y:auto; background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; box-shadow:0 14px 28px -5px rgba(0,0,0,0.25), 0 10px 10px -5px rgba(0,0,0,0.1); z-index:99999; box-sizing:border-box;">
+                                                </div>
+                                            </div>
                                             <div id="save-cause-${ticketKey}" class="save-indicator" style="margin:0; font-size:9.5px; padding:1px 6px; white-space:nowrap; flex-shrink:0;">Đã lưu</div>
                                         </div>
                                         <div>
@@ -3790,13 +4186,13 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
     }
 
     let incidentCauseVal = '';
-    const causeSel = row ? row.querySelector('select[id^="select-detail-cause-"]') : null;
-    if (causeSel && causeSel.value) {
-        incidentCauseVal = causeSel.value.trim();
+    const causeInput = row ? (row.querySelector('input[id^="input-detail-cause-"]') || row.querySelector('input[id^="select-detail-cause-"]') || row.querySelector('select[id^="select-detail-cause-"]')) : null;
+    if (causeInput && causeInput.value) {
+        incidentCauseVal = causeInput.value.trim();
     } else {
-        const anyCauseSel = document.querySelector(`select[id^="select-detail-cause-${phone}"]`);
-        if (anyCauseSel && anyCauseSel.value) {
-            incidentCauseVal = anyCauseSel.value.trim();
+        const anyCause = document.querySelector(`input[id^="input-detail-cause-${phone}"]`) || document.querySelector(`input[id^="select-detail-cause-${phone}"]`) || document.querySelector(`select[id^="select-detail-cause-${phone}"]`);
+        if (anyCause && anyCause.value) {
+            incidentCauseVal = anyCause.value.trim();
         }
     }
 
@@ -4208,7 +4604,7 @@ async function openEditWardModal(phone, incidentTime, ticketKey) {
     provSelect.innerHTML = '<option value="">-- Đang tải danh sách Tỉnh/TP từ TTS Mới... --</option>';
     document.getElementById('editWardWardSelect').innerHTML = '<option value="">-- Chọn Phường / Xã --</option>';
     document.getElementById('filterWardSearch').value = '';
-    document.getElementById('editWardDetailInput').value = '';
+    document.getElementById('editWardDetailInput').value = 'null';
     document.getElementById('editWardPreviewText').innerText = '--';
 
     // Nạp danh mục Lĩnh vực từ OneOSS TTS Mới (mặc định Chất lượng mạng)
@@ -4395,7 +4791,12 @@ function onWardWardChange() {
 function updateWardPreview() {
     const pSelect = document.getElementById('editWardProvinceSelect');
     const wSelect = document.getElementById('editWardWardSelect');
-    const detail = (document.getElementById('editWardDetailInput').value || '').trim();
+    const detailInp = document.getElementById('editWardDetailInput');
+    let detail = detailInp ? (detailInp.value || '').trim() : '';
+    if (!detail) {
+        detail = 'null';
+        if (detailInp) detailInp.value = 'null';
+    }
 
     const pText = pSelect.selectedIndex > 0 ? pSelect.options[pSelect.selectedIndex].text : '';
     const wText = wSelect.selectedIndex > 0 ? wSelect.options[wSelect.selectedIndex].text : '';
@@ -4423,7 +4824,7 @@ async function submitEditWard() {
     const pSelect = document.getElementById('editWardProvinceSelect');
     const wSelect = document.getElementById('editWardWardSelect');
     const fSelect = document.getElementById('editWardFieldSelect');
-    const detailInput = (document.getElementById('editWardDetailInput').value || '').trim();
+    const detailInput = (document.getElementById('editWardDetailInput').value || '').trim() || 'null';
 
     const provinceId = pSelect.value;
     const wardId = wSelect.value;
@@ -4454,7 +4855,7 @@ async function submitEditWard() {
             province_name: pSelect.selectedIndex > 0 ? pSelect.options[pSelect.selectedIndex].text : '',
             ward_name: wSelect.selectedIndex > 0 ? wSelect.options[wSelect.selectedIndex].text : '',
             ward: finalAddress,
-            address: detailInput || finalAddress,
+            address: detailInput || 'null',
             token: ttsNewToken
         };
 
@@ -5253,7 +5654,8 @@ async function checkSapcPopupStatus() {
     try {
         const res = await fetch('/api/services/status');
         const data = await res.json();
-        const isOk = !!(data && data.sapc);
+        const svcs = (data && data.services) ? data.services : data;
+        const isOk = !!(svcs && svcs.sapc);
         if (isOk) {
             box.style.background = '#dcfce7';
             box.style.color = '#166534';
@@ -6604,7 +7006,14 @@ async function executeSmscCdrQuery() {
     if (phoneInput) phoneInput.value = cleanPhone;
 
     const direction = dirSelect ? dirSelect.value : 'both';
-    const limit = limitSelect ? parseInt(limitSelect.value, 10) || 50 : 50;
+    let limit = 1000;
+    if (limitSelect) {
+        if (limitSelect.value === 'all') {
+            limit = 10000;
+        } else {
+            limit = parseInt(limitSelect.value, 10) || 1000;
+        }
+    }
 
     let isCustom = (hoursSelect && hoursSelect.value === 'custom');
     let fromDateVal = '';
@@ -6663,7 +7072,8 @@ async function executeSmscCdrQuery() {
         if (!data.success) {
             if (emptyState) {
                 emptyState.style.display = 'block';
-                emptyState.innerHTML = `<div style="color:#dc2626; font-weight:700;">⚠️ Tra cứu thất bại: ${escapeHtml(data.error || 'Lỗi không xác định')}</div>`;
+                const errMsg = data.message || data.error || 'Lỗi không xác định từ hệ thống SMSC CDR';
+                emptyState.innerHTML = `<div style="color:#dc2626; font-weight:700; line-height:1.5;">Tra cứu thất bại: ${escapeHtml(errMsg)}</div>`;
             }
             if (sourceText) sourceText.innerText = 'Lỗi kết nối';
             if (sourceDot) sourceDot.style.background = '#ef4444';
@@ -6713,8 +7123,8 @@ async function executeSmscCdrQuery() {
         if (kpiSuccess) kpiSuccess.innerText = `${successRate}% (${successCount}/${total})`;
         if (kpiFailed) kpiFailed.innerText = failedCount.toLocaleString();
         if (badgeFailed) badgeFailed.innerText = failedCount;
-        if (boxFilter) boxFilter.style.display = failedCount > 0 ? 'block' : 'none';
-        if (kpiSection) kpiSection.style.display = 'grid';
+        if (boxFilter) boxFilter.style.display = failedCount > 0 ? 'inline-flex' : 'none';
+        if (kpiSection) kpiSection.style.display = 'flex';
 
         if (summaryText) {
             const failedNotice = failedCount > 0 ? `, <span style="color:#dc2626; font-weight:700;">(Phát hiện ${failedCount} tin nhắn lỗi)</span>` : '';

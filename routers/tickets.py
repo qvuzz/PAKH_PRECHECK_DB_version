@@ -8,6 +8,7 @@ import time
 import threading
 from datetime import datetime, timedelta, timezone
 ICT = timezone(timedelta(hours=7))
+from typing import Optional
 from pathlib import Path
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import FileResponse
@@ -15,6 +16,7 @@ from fastapi.responses import FileResponse
 from db_manager import (
     get_all_tickets, 
     get_system_counts, 
+    get_ticket_counts,
     get_closed_tickets_analytics, 
     get_db_connection, 
     update_ticket_field, 
@@ -31,36 +33,66 @@ router = APIRouter(prefix="/api", tags=["Quản lý Phiếu Sự Cố (Tickets)"
 
 @router.get("/tickets")
 def get_tickets_api(
+    request: Request,
     search: str = None, 
     status: str = None, 
     tab: str = None, 
     source: str = "tts_old", 
-    service_type: str = "data"
+    service_type: str = "data",
+    region: str = None
 ):
     src_f = None if source == "all" else source
     srv_f = None if service_type == "all" else service_type
 
+    # Chỉ phân hệ Data (Mobile Internet) mới áp dụng bộ lọc nhận định kỹ thuật
+    status_f = status if (srv_f == "data" and status != "all") else None
+
+    # 🎯 Nhận diện quyền truy cập và Phân vùng 3 Miền
+    client_ip = request.client.host if request and request.client else "127.0.0.1"
+    is_local = client_ip in ("127.0.0.1", "::1", "localhost", "testclient")
+
+    effective_region = "ALL"
+    user_role = "admin"
+    current_user_name = "Quản trị viên"
+
+    if is_local:
+        # Super Admin quản trị code: Xem được toàn quốc hoặc chủ động lọc miền
+        user_role = "admin"
+        effective_region = (region or "ALL").upper()
+    else:
+        # Client KTV mạng ngoài / LAN: Bắt buộc lọc theo vùng miền của user
+        user_role = "ktv"
+        _, uinfo = resolve_ttsnew_token(client_ip, is_local=False)
+        from region_detector import detect_user_region
+        user_reg = detect_user_region(uinfo)
+        effective_region = user_reg  # Ép cứng theo miền của KTV
+        current_user_name = uinfo.get("displayName") or uinfo.get("userName") or "KTV"
+
     tickets = get_all_tickets(
         search=search, 
-        status_filter=status, 
+        status_filter=status_f, 
         tab_filter=tab, 
         source=src_f, 
-        service_type=srv_f
+        service_type=srv_f,
+        region=effective_region
     )
     sys_counts = get_system_counts()
-    if not search and not status and not tab:
-        all_raw = tickets
-    else:
-        all_raw = get_all_tickets(source=src_f, service_type=srv_f)
-    closed_cnt = sum(1 for t in all_raw if t.get("ticket_status") == "Đã đóng")
-    active_cnt = len(all_raw) - closed_cnt
+    total_cnt, closed_cnt, active_cnt = get_ticket_counts(
+        source=src_f, 
+        service_type=srv_f, 
+        search=search,
+        region=effective_region
+    )
 
     return {
         "tickets": tickets,
-        "total_count": len(all_raw),
+        "total_count": total_cnt,
         "closed_count": closed_cnt,
         "active_count": active_cnt,
-        "system_counts": sys_counts
+        "system_counts": sys_counts,
+        "region": effective_region,
+        "user_role": user_role,
+        "user_name": current_user_name
     }
 
 
@@ -102,6 +134,78 @@ def export_excel_api(source: str = "tts_old"):
 _CELL_INFO_CACHE = {}
 _CELL_LOCATION_CACHE = {}
 
+
+VNPT_PROVINCE_MAP = {
+    'AGG': 'An Giang', 'BDG': 'Bình Dương', 'BDH': 'Bình Định', 'BGG': 'Bắc Giang', 'BKN': 'Bắc Kạn',
+    'BLU': 'Bạc Liêu', 'BNH': 'Bắc Ninh', 'BPC': 'Bình Phước', 'BTE': 'Bến Tre', 'BTN': 'Bình Thuận',
+    'CBG': 'Cao Bằng', 'CMU': 'Cà Mau', 'CTO': 'Cần Thơ', 'CTH': 'Cần Thơ', 'DBN': 'Điện Biên',
+    'DLK': 'Đắk Lắk', 'DNG': 'Đà Nẵng', 'DNI': 'Đồng Nai', 'DNO': 'Đắk Nông', 'DTP': 'Đồng Tháp',
+    'GLI': 'Gia Lai', 'HBH': 'Hòa Bình', 'HCM': 'TP. Hồ Chí Minh', 'HDG': 'Hải Dương', 'HGG': 'Hà Giang',
+    'HNI': 'Hà Nội', 'HNO': 'Hà Nội', 'HNM': 'Hà Nam', 'HPG': 'Hải Phòng', 'HTH': 'Hà Tĩnh',
+    'HUE': 'Thừa Thiên Huế', 'HUG': 'Hậu Giang', 'HYN': 'Hưng Yên', 'KGG': 'Kiên Giang', 'KHA': 'Khánh Hòa',
+    'KTM': 'Kon Tum', 'LAN': 'Long An', 'LCI': 'Lào Cai', 'LCU': 'Lai Châu', 'LDG': 'Lâm Đồng',
+    'LSN': 'Lạng Sơn', 'NAN': 'Nghệ An', 'NBH': 'Ninh Bình', 'NDH': 'Nam Định', 'NTN': 'Ninh Thuận',
+    'PTO': 'Phú Thọ', 'PYN': 'Phú Yên', 'QBH': 'Quảng Bình', 'QNH': 'Quảng Ninh', 'QNI': 'Quảng Ngãi',
+    'QNM': 'Quảng Nam', 'QTI': 'Quảng Trị', 'SLA': 'Sơn La', 'STG': 'Sóc Trăng', 'TBH': 'Thái Bình',
+    'TGG': 'Tiền Giang', 'THA': 'Thanh Hóa', 'TNH': 'Tây Ninh', 'TNN': 'Thái Nguyên', 'TQG': 'Tuyên Quang',
+    'TVH': 'Trà Vinh', 'VLG': 'Vĩnh Long', 'VPC': 'Vĩnh Phúc', 'YBI': 'Yên Bái'
+}
+
+
+def normalize_vn_commune_and_province(ward, district, province, address):
+    """
+    Chuẩn hóa cấp hành chính Việt Nam:
+    CHỈ LẤY DUY NHẤT: Phường/Xã và Tỉnh/TP (loại bỏ hoàn toàn cấp Thôn/Ấp/Xóm và mã trạm viễn thông như PLO, DLI...).
+    """
+    import re
+    COMMUNE_PREFIXES = ('xã ', 'phường ', 'thị trấn ', 'tt. ', 'p. ', 'x. ', 'tt ', 'p ')
+    HAMLET_PREFIXES = ('thôn ', 'ấp ', 'bản ', 'xóm ', 'tổ ', 'khu phố ', 'tổ dân phố ', 'kdc ', 'kdt ')
+
+    w = (ward or '').strip()
+    d = (district or '').strip()
+    p = (province or '').strip()
+    addr = (address or '').strip()
+
+    # 1. Trích xuất Tỉnh/TP chuẩn: ưu tiên từ chuỗi address đầy đủ (VD: '... Tỉnh Cà Mau, Việt Nam')
+    if addr:
+        m_prov = re.search(r'(?:,\s*)(Tỉnh\s+[^,]+|Thành phố\s+[^,]+)', addr, re.I)
+        if m_prov:
+            p = m_prov.group(1).strip()
+
+    # 🎯 Chuẩn hóa về 34 Tỉnh/Thành phố mới của Việt Nam
+    from region_detector import normalize_to_new_province
+    new_prov, _ = normalize_to_new_province(p)
+    if not new_prov and addr:
+        new_prov, _ = normalize_to_new_province(addr)
+    if new_prov:
+        p = new_prov
+    elif p.upper() in VNPT_PROVINCE_MAP:
+        mapped, _ = normalize_to_new_province(VNPT_PROVINCE_MAP[p.upper()])
+        p = mapped or VNPT_PROVINCE_MAP[p.upper()]
+
+    # 2. Trích xuất Phường/Xã chuẩn:
+    # 2.1 Nếu district thực chất là Phường/Xã (VD: district = 'Xã Phong Hiệp', 'Xã Hòa Bắc')
+    if any(d.lower().startswith(prefix) for prefix in COMMUNE_PREFIXES):
+        w = d
+    # 2.2 Hoặc nếu ward hiện tại không phải Phường/Xã (là Thôn/Ấp hoặc địa danh nhỏ như 'Chủ Chí')
+    elif not any(w.lower().startswith(prefix) for prefix in COMMUNE_PREFIXES) and addr:
+        m_commune = re.search(r'(?:,\s*|\b)(Xã\s+[^,]+|Phường\s+[^,]+|Thị trấn\s+[^,]+)', addr, re.I)
+        if m_commune:
+            w = m_commune.group(1).strip()
+        else:
+            if any(w.lower().startswith(prefix) for prefix in HAMLET_PREFIXES):
+                w = ''
+
+    # 3. YÊU CẦU: ONLY PHƯỜNG/XÃ VÀ TỈNH/TP (Không lấy Quận/Huyện, không lấy Thôn/Ấp, không lấy mã trạm như PLO)
+    loc_parts = []
+    if w:
+        loc_parts.append(w)
+    if p:
+        loc_parts.append(p)
+
+    return w, p, ', '.join(loc_parts)
+
+
 @router.get("/cell_info/{phone}")
 def get_cell_info_api(phone: str):
     """
@@ -123,7 +227,11 @@ def get_cell_info_api(phone: str):
     now_t = time.time()
     cached = _CELL_INFO_CACHE.get(phone_84)
     if cached and (now_t - cached.get("time", 0) < 600):
-        return cached["data"]
+        # Chỉ trả về ngay từ cache nếu đã có Phường/Xã chuẩn (Xã, Phường, Thị trấn)
+        c_ward = (cached.get("data", {}).get("ward") or "").lower()
+        COMMUNE_PREFIXES = ('xã ', 'phường ', 'thị trấn ', 'tt. ', 'p. ', 'x. ', 'tt ', 'p ')
+        if any(c_ward.startswith(pfx) for pfx in COMMUNE_PREFIXES):
+            return cached["data"]
 
     import requests
     target_urls = [
@@ -183,23 +291,46 @@ def get_cell_info_api(phone: str):
         except Exception:
             pass
 
-    loc_parts = []
-    if ward:
-        loc_parts.append(ward)
-    if province:
-        loc_parts.append(province)
-    location_str = ", ".join(loc_parts)
+    coord_lat = None
+    coord_lng = None
+    map_url = None
+
+    # 🎯 Nếu có cell_name, ưu tiên lấy Phường/Xã và Tỉnh/TP chuẩn từ Google Maps (reverse-geocode port 1708) qua get_cell_location_api
+    if cell_name:
+        try:
+            loc_res = get_cell_location_api(cell_name, phone=phone_84)
+            if loc_res and (loc_res.get("ward") or loc_res.get("province") or loc_res.get("location_str")):
+                if loc_res.get("ward"):
+                    ward = loc_res.get("ward")
+                if loc_res.get("province"):
+                    province = loc_res.get("province")
+                if loc_res.get("district"):
+                    district = loc_res.get("district")
+                if loc_res.get("address"):
+                    address = loc_res.get("address")
+                if loc_res.get("site"):
+                    site_name = loc_res.get("site")
+                coord_lat = loc_res.get("latitude")
+                coord_lng = loc_res.get("longitude")
+                map_url = loc_res.get("map_url")
+        except Exception as e:
+            print(f"⚠️ [CellInfo] Lỗi gọi get_cell_location_api cho cell {cell_name}: {e}")
+
+    norm_w, norm_p, loc_str = normalize_vn_commune_and_province(ward, district, province, address)
 
     result = {
-        "success": bool(cell_name or ward or province),
+        "success": bool(cell_name or norm_w or norm_p),
         "cell_name": cell_name,
         "radio": radio,
         "site_name": site_name,
-        "ward": ward,
-        "province": province,
-        "district": district,
+        "ward": norm_w,
+        "province": norm_p,
+        "district": "",
         "address": address,
-        "location_str": location_str,
+        "location_str": loc_str,
+        "latitude": coord_lat,
+        "longitude": coord_lng,
+        "map_url": map_url,
         "cell_url": f"http://127.0.0.1:1708/cellid/{cell_name}" if cell_name else None
     }
     _CELL_INFO_CACHE[phone_84] = {"time": now_t, "data": result}
@@ -207,10 +338,18 @@ def get_cell_info_api(phone: str):
 
 
 @router.get("/cell_location/{cell_id:path}")
-def get_cell_location_api(cell_id: str):
+def get_cell_location_api(
+    cell_id: str,
+    lat: Optional[str] = None,
+    long: Optional[str] = None,
+    lng: Optional[str] = None,
+    phone: Optional[str] = None
+):
     """
     Tra cứu Phường/Xã, Tỉnh/TP từ Cell ID service CustomerPosition (Link 2).
-    URL: http://127.0.0.1:1708/api/cell/{cell_id}
+    - URL chính: http://127.0.0.1:1708/api/cell/{cell_id}
+    - Fallback khi thiếu data: Sử dụng tọa độ (lat/long) từ CEM gọi
+      http://127.0.0.1:1708/api/reverse-geocode?lat=...&long=...
     """
     clean_cell = str(cell_id or "").strip()
     if not clean_cell:
@@ -219,7 +358,11 @@ def get_cell_location_api(cell_id: str):
     now_t = time.time()
     cached = _CELL_LOCATION_CACHE.get(clean_cell)
     if cached and (now_t - cached.get("time", 0) < 3600):
-        return cached["data"]
+        # Chỉ trả về ngay từ cache nếu đã có Phường/Xã chuẩn (bắt đầu bằng Xã, Phường, Thị trấn)
+        c_ward = (cached.get("data", {}).get("ward") or "").lower()
+        COMMUNE_PREFIXES = ('xã ', 'phường ', 'thị trấn ', 'tt. ', 'p. ', 'x. ', 'tt ', 'p ')
+        if any(c_ward.startswith(pfx) for pfx in COMMUNE_PREFIXES):
+            return cached["data"]
 
     import requests
     import re
@@ -229,6 +372,8 @@ def get_cell_location_api(cell_id: str):
     address = None
     site = None
     cell_name = clean_cell
+    coord_lat = lat
+    coord_lng = long or lng
 
     def _fetch_from_1708(query_target):
         nonlocal ward, province, district, address, site, cell_name
@@ -268,23 +413,58 @@ def get_cell_location_api(cell_id: str):
         if not found and site_code:
             found = _fetch_from_1708(site_code)
 
-    loc_parts = []
-    if ward:
-        loc_parts.append(ward)
-    if province:
-        loc_parts.append(province)
-    location_str = ", ".join(loc_parts)
+    # 3. 🎯 Fallback Reverse-Geocode qua tọa độ lat/long từ CEM nếu 1708 thiếu data Phường/Xã/Địa chỉ
+    if not ward or not address:
+        if not coord_lat or not coord_lng:
+            try:
+                from cem_client import get_cell_coordinates
+                c_lat, c_lng = get_cell_coordinates(clean_cell, phone=phone)
+                if c_lat and c_lng:
+                    coord_lat, coord_lng = c_lat, c_lng
+            except Exception as e:
+                print(f"⚠️ [Location] Lỗi lấy tọa độ CEM cho Cell {clean_cell}: {e}")
+
+        if coord_lat and coord_lng:
+            try:
+                geo_resp = requests.get(
+                    "http://127.0.0.1:1708/api/reverse-geocode",
+                    params={"lat": coord_lat, "long": coord_lng, "lng": coord_lng},
+                    timeout=4.5
+                )
+                if geo_resp.status_code == 200:
+                    geo_data = geo_resp.json()
+                    if geo_data and geo_data.get("success") is not False:
+                        g_ward = (geo_data.get("ward") or "").strip()
+                        g_prov = (geo_data.get("province") or "").strip()
+                        g_dist = (geo_data.get("district") or "").strip()
+                        g_addr = (geo_data.get("address") or "").strip()
+
+                        if g_ward and not ward:
+                            ward = g_ward
+                        if g_prov and (not province or len(province) <= 3):
+                            province = g_prov
+                        if g_dist and not district:
+                            district = g_dist
+                        if g_addr and not address:
+                            address = g_addr
+            except Exception as e:
+                print(f"⚠️ [Location] Lỗi gọi reverse-geocode port 1708 cho Cell {clean_cell}: {e}")
+
+    norm_w, norm_p, loc_str = normalize_vn_commune_and_province(ward, district, province, address)
 
     result = {
-        "success": bool(ward or province or address),
+        "success": bool(norm_w or norm_p or address),
         "cell": cell_name,
-        "ward": ward,
-        "province": province,
-        "district": district,
+        "ward": norm_w,
+        "province": norm_p,
+        "district": "",
         "address": address,
         "site": site,
-        "location_str": location_str,
-        "cell_url": f"http://127.0.0.1:1708/cellid/{cell_name}" if cell_name else None
+        "latitude": coord_lat,
+        "longitude": coord_lng,
+        "location_str": loc_str,
+        "cell_url": f"http://127.0.0.1:1708/cellid/{cell_name}" if cell_name else None,
+        "map_url": f"https://www.google.com/maps?q={coord_lat},{coord_lng}" if (coord_lat and coord_lng) else None
     }
     _CELL_LOCATION_CACHE[clean_cell] = {"time": now_t, "data": result}
     return result
@@ -1512,6 +1692,8 @@ def sync_update_ticket_boundary_tts_new(ticket_id: int, province_id: int, ward_i
 
         target_field_id = field_id if field_id else (d.get("clFieldId") or 71)
 
+        safe_addr = (address or "").strip() or "null"
+
         # 2. Tạo payload chuẩn cập nhật phiếu
         payload = {
             "id": ticket_id,
@@ -1521,13 +1703,13 @@ def sync_update_ticket_boundary_tts_new(ticket_id: int, province_id: int, ward_i
             "customerPhone": d.get("customerPhone"),
             "customerProvinceId": province_id or d.get("customerProvinceId"),
             "customerWardId": ward_id or d.get("customerWardId"),
-            "customerAddress": address or d.get("customerAddress"),
+            "customerAddress": safe_addr,
             "subject": d.get("title") or "PAKH",
             "incidentDate": None,
             "customerCompletionDate": None,
             "provinceId": province_id,
             "wardId": ward_id,
-            "address": address or d.get("address") or "Địa chỉ khách hàng",
+            "address": safe_addr,
             "clFieldId": target_field_id,  # Tự động chọn Chất lượng mạng (ID 71)
             "clGeneralFieldId": d.get("clGeneralFieldId"),
             "clSubfieldId": d.get("clSubFieldId"),

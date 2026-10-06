@@ -302,7 +302,7 @@ def execute_tts_old_api_data_cycle(driver=None, force_recheck: bool = False):
                     from report_bot import get_sapc_package_validity
                     from crawler_btools import fetch_supplementary_btools_if_needed
                     active_pkgs, _ = get_sapc_package_validity(phone_84)
-                    commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date")]
+                    commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date") and not p.get("is_addon_app")]
                     earliest_reg_dt = min([p["reg_dt"] for p in commercial_pkgs if p.get("reg_dt")], default=None)
                     start_scan_date = (datetime.now() - timedelta(days=4)).date()
                     if earliest_reg_dt and earliest_reg_dt.date() < start_scan_date:

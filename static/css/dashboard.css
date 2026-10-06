@@ -108,6 +108,10 @@
             grid-template-columns: 240px 1fr;
             gap: 16px;
             align-items: start;
+            transition: grid-template-columns 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .main-layout.sidebar-collapsed {
+            grid-template-columns: 66px 1fr;
         }
 
         /* CONTROL PANEL */
@@ -687,16 +691,59 @@
             background: #ffffff;
             border: 1px solid var(--border-color);
             border-radius: var(--radius-lg);
-            padding: 14px 10px;
+            padding: 12px 10px;
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 14px;
             box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+            transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
         }
+
+        /* HEADER & NÚT THU NHỎ / MỞ RỘNG */
+        .sidebar-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 2px 4px 8px 6px;
+            border-bottom: 1px dashed var(--border-color);
+            margin-bottom: -4px;
+            transition: all 0.2s ease;
+        }
+        .sidebar-header-label {
+            font-size: 11px;
+            font-weight: 800;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            white-space: nowrap;
+        }
+        .btn-sidebar-toggle {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: #f8fafc;
+            color: #475569;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            padding: 0;
+            flex-shrink: 0;
+        }
+        .btn-sidebar-toggle:hover {
+            background: #eff6ff;
+            color: #1d4ed8;
+            border-color: #93c5fd;
+        }
+
         .nav-section {
             display: flex;
             flex-direction: column;
             gap: 4px;
+            transition: all 0.2s ease;
         }
         .nav-section-title {
             font-size: 11px;
@@ -709,6 +756,7 @@
             display: flex;
             align-items: center;
             gap: 6px;
+            white-space: nowrap;
         }
         .nav-item {
             display: flex;
@@ -725,6 +773,7 @@
             font-family: inherit;
             width: 100%;
             text-align: left;
+            position: relative;
         }
         .nav-item:hover {
             background: #f8fafc;
@@ -744,16 +793,34 @@
         .nav-item-left {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 10px;
+            min-width: 0;
         }
         .nav-item-icon {
-            font-size: 16px;
-            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            flex-shrink: 0;
+            color: #64748b;
+            transition: color 0.15s ease;
+        }
+        .nav-item:hover .nav-item-icon {
+            color: #0f172a;
+        }
+        .nav-item.active .nav-item-icon {
+            color: #1d4ed8;
+        }
+        .nav-item.active.new .nav-item-icon {
+            color: #15803d;
         }
         .nav-item-text {
             display: flex;
             flex-direction: column;
             line-height: 1.25;
+            white-space: nowrap;
+            overflow: hidden;
         }
         .nav-item-title {
             font-size: 12.5px;
@@ -762,6 +829,71 @@
         .nav-item-sub {
             font-size: 10.5px;
             color: #64748b;
+        }
+
+        /* TRẠNG THÁI SIDEBAR THU NHỎ (COLLAPSED) */
+        .sidebar-nav.collapsed {
+            padding: 10px 6px;
+            gap: 12px;
+            align-items: center;
+        }
+        .sidebar-nav.collapsed .sidebar-header-row {
+            justify-content: center;
+            padding: 0 0 6px 0;
+            width: 100%;
+            border-bottom: 1px dashed var(--border-color);
+        }
+        .sidebar-nav.collapsed .sidebar-header-label {
+            display: none;
+        }
+        .sidebar-nav.collapsed .nav-section {
+            width: 100%;
+            align-items: center;
+            gap: 6px;
+        }
+        .sidebar-nav.collapsed .nav-section-title {
+            display: none;
+        }
+        .sidebar-nav.collapsed .nav-item {
+            padding: 9px 0;
+            justify-content: center;
+            border-radius: 8px;
+            width: 46px;
+            height: 42px;
+            margin: 0 auto;
+        }
+        .sidebar-nav.collapsed .nav-item-left {
+            justify-content: center;
+            gap: 0;
+        }
+        .sidebar-nav.collapsed .nav-item-text {
+            display: none;
+        }
+        .sidebar-nav.collapsed .nav-item-icon {
+            width: 24px;
+            height: 24px;
+        }
+        .sidebar-nav.collapsed .nav-item-icon svg {
+            width: 20px;
+            height: 20px;
+        }
+        .sidebar-nav.collapsed .nav-badge {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            min-width: 17px;
+            height: 17px;
+            padding: 0 4px;
+            font-size: 9.5px;
+            line-height: 17px;
+            border-radius: 9px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+        .sidebar-nav.collapsed .nav-badge.has-new {
+            display: inline-flex !important;
         }
         .nav-badge {
             padding: 2px 7px;
@@ -980,6 +1112,17 @@
             display: inline-block; padding: 3px 6px; border-radius: 4px;
             font-size: 10.5px; font-weight: 600; line-height: 1.3; text-align: center;
             max-width: 90px; word-break: normal; overflow-wrap: break-word;
+        }
+        .badge-status.compact-ward-pill,
+        .compact-ward-pill {
+            display: inline-block !important;
+            max-width: none !important;
+            width: fit-content !important;
+            white-space: nowrap !important;
+            word-break: normal !important;
+            overflow-wrap: normal !important;
+            line-height: 1.25 !important;
+            box-sizing: border-box !important;
         }
         .badge-green { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
         .badge-yellow { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
@@ -2425,6 +2568,31 @@
             background: #161b22;
             border-color: #30363d;
         }
+        [data-theme="dark"] .sidebar-header-row {
+            border-color: #30363d;
+        }
+        [data-theme="dark"] .sidebar-header-label {
+            color: #8b949e;
+        }
+        [data-theme="dark"] .btn-sidebar-toggle {
+            background: #21262d;
+            border-color: #30363d;
+            color: #c9d1d9;
+        }
+        [data-theme="dark"] .btn-sidebar-toggle:hover {
+            background: #30363d;
+            color: #58a6ff;
+            border-color: #58a6ff;
+        }
+        [data-theme="dark"] .nav-item-icon {
+            color: #8b949e;
+        }
+        [data-theme="dark"] .nav-item:hover .nav-item-icon {
+            color: #58a6ff;
+        }
+        [data-theme="dark"] .nav-item.active .nav-item-icon {
+            color: #58a6ff;
+        }
         [data-theme="dark"] .nav-section-title {
             color: #58a6ff !important;
             letter-spacing: 0.04em;
@@ -2969,4 +3137,98 @@
             border-color: #30363d !important;
             color: #c9d1d9 !important;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7) !important;
+        }
+
+        /* SHIMMER SKELETON LOADING CHO BẢNG PHIẾU */
+        .table-skeleton-row td {
+            padding: 9px 8px !important;
+            vertical-align: middle;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .skeleton-bar {
+            height: 13px;
+            border-radius: 4px;
+            background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+            background-size: 200% 100%;
+            animation: skeleton-shimmer 1.2s infinite ease-in-out;
+        }
+        @keyframes skeleton-shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        [data-theme="dark"] .table-skeleton-row td {
+            border-bottom-color: #21262d;
+        }
+        [data-theme="dark"] .skeleton-bar {
+            background: linear-gradient(90deg, #161b22 25%, #21262d 50%, #161b22 75%);
+            background-size: 200% 100%;
+        }
+
+        /* SEARCHABLE CAUSE DROPDOWN (FULL DANH MỤC & TÌM KIẾM GỢI Ý) */
+        .cause-dropdown-menu {
+            scrollbar-width: thin;
+            scrollbar-color: #cbd5e1 transparent;
+        }
+        .cause-dropdown-menu::-webkit-scrollbar {
+            width: 6px;
+        }
+        .cause-dropdown-menu::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 3px;
+        }
+        .cause-group-header {
+            padding: 5px 10px;
+            font-size: 10px;
+            font-weight: 700;
+            color: #0369a1;
+            background: #f0f9ff;
+            border-bottom: 1px solid #e0f2fe;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .cause-dropdown-item {
+            padding: 6px 12px;
+            cursor: pointer;
+            color: #1e293b;
+            border-bottom: 1px solid #f8fafc;
+            transition: background 0.12s ease;
+            line-height: 1.35;
+            font-size: 11px;
+        }
+        .cause-dropdown-item:hover, .cause-dropdown-item.is-selected {
+            background: #eff6ff;
+            color: #1d4ed8;
+            font-weight: 600;
+        }
+        .cause-dropdown-item mark {
+            background: #fef08a;
+            color: #854d0e;
+            padding: 0 1px;
+            border-radius: 2px;
+        }
+        [data-theme="dark"] .cause-dropdown-menu {
+            background: #161b22 !important;
+            border-color: #30363d !important;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6) !important;
+        }
+        [data-theme="dark"] .cause-group-header {
+            background: #0d1117 !important;
+            color: #38bdf8 !important;
+            border-bottom-color: #21262d !important;
+        }
+        [data-theme="dark"] .cause-dropdown-item {
+            color: #e2e8f0 !important;
+            border-bottom-color: #21262d !important;
+        }
+        [data-theme="dark"] .cause-dropdown-item:hover, [data-theme="dark"] .cause-dropdown-item.is-selected {
+            background: #1e293b !important;
+            color: #60a5fa !important;
+        }
+        [data-theme="dark"] .searchable-cause-input {
+            background: #0d1117 !important;
+            border-color: #30363d !important;
+            color: #f0f6fc !important;
         }

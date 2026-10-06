@@ -56,7 +56,7 @@ def standardize_btools_data(btools_data):
 
         # Tra cứu dịch nghĩa từ 2 file thư viện JSON của bạn
         translated_rat = rat_lib.get(raw_rat, "Mã mạng lạ") if raw_rat else ""
-        translated_service = service_lib.get(raw_service, "Gói cước lạ") if raw_service else ""
+        translated_service = (service_lib.get(raw_service) or service_lib.get(raw_service.zfill(10)) or service_lib.get(raw_service.lstrip("0")) or "Gói cước lạ") if raw_service else ""
 
         # 🎯 ĐÓNG GÓI BẢN GHI: Phải giữ nguyên cả Code lẫn Tên dịch nghĩa
         clean_row = {

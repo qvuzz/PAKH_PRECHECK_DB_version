@@ -156,16 +156,20 @@ def init_db():
         except Exception:
             pass
         try:
-            conn.execute("ALTER TABLE tickets ADD COLUMN ward TEXT;")
+            conn.execute("ALTER TABLE tickets ADD COLUMN region TEXT DEFAULT 'MN';")
         except Exception:
             pass
         try:
-            # Tự động trích xuất Phường/Xã/Tỉnh/TP cho các phiếu mới chưa có thông tin ward
-            old_rows = conn.execute("SELECT phone, incident_time, ticket_content FROM tickets WHERE (ward IS NULL OR ward = '') AND ticket_content IS NOT NULL AND ticket_content != '';").fetchall()
-            for r in old_rows:
-                w = extract_ward_address(r["ticket_content"])
-                if w:
-                    conn.execute("UPDATE tickets SET ward = ? WHERE phone = ? AND incident_time = ?", (w, r["phone"], r["incident_time"]))
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_region ON tickets(region);")
+        except Exception:
+            pass
+        try:
+            from region_detector import detect_ticket_region
+            # Cập nhật miền cho các phiếu chưa có region
+            rows_reg = conn.execute("SELECT phone, incident_time, ward, ticket_content FROM tickets WHERE region IS NULL OR region = '';").fetchall()
+            for r in rows_reg:
+                rg = detect_ticket_region({"province": r["ward"], "ticket_content": r["ticket_content"]}, default_region="MN")
+                conn.execute("UPDATE tickets SET region = ? WHERE phone = ? AND incident_time = ?", (rg, r["phone"], r["incident_time"]))
         except Exception:
             pass
 
@@ -513,14 +517,21 @@ def save_or_update_ticket(t):
                 if not ward:
                     ward = extract_ward_address(t.get("ticket_content", ""))
 
+                region = t.get("region")
+                if not region and existing and "region" in existing.keys() and existing["region"]:
+                    region = existing["region"]
+                if not region:
+                    from region_detector import detect_ticket_region
+                    region = detect_ticket_region({"province": ward, "ticket_content": t.get("ticket_content", "")}, default_region="MN")
+
                 conn.execute("""
                     INSERT INTO tickets (
                         phone, incident_time, package_title, real_packages, rat_types,
                         cem_data, app_usage, ticket_content, status, comment,
                         action_plan, color, ticket_status, created_time, ai_summary,
                         source, ticket_code, ticket_id, flow_id, reopen_count, last_reopened_date,
-                        phan_hoi_he_thong, id_he_thong, ccos_attachments, processing_content, prechecked_at, ward, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? NOT IN ('', 'CHƯA PHÂN LOẠI') THEN datetime('now', '+7 hours') ELSE NULL END, ?, CURRENT_TIMESTAMP)
+                        phan_hoi_he_thong, id_he_thong, ccos_attachments, processing_content, prechecked_at, ward, region, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? NOT IN ('', 'CHƯA PHÂN LOẠI') THEN datetime('now', '+7 hours') ELSE NULL END, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(phone, incident_time) DO UPDATE SET
                         package_title = excluded.package_title,
                         real_packages = excluded.real_packages,
@@ -547,6 +558,7 @@ def save_or_update_ticket(t):
                         processing_content = COALESCE(NULLIF(excluded.processing_content, ''), tickets.processing_content),
                         prechecked_at = CASE WHEN excluded.status NOT IN ('', 'CHƯA PHÂN LOẠI') THEN datetime('now', '+7 hours') ELSE COALESCE(tickets.prechecked_at, datetime('now', '+7 hours')) END,
                         ward = COALESCE(NULLIF(excluded.ward, ''), tickets.ward),
+                        region = COALESCE(NULLIF(excluded.region, ''), tickets.region),
                         updated_at = CURRENT_TIMESTAMP;
                 """, (
                     phone,
@@ -576,6 +588,7 @@ def save_or_update_ticket(t):
                     processing_content or "",
                     t.get("status", "CHƯA PHÂN LOẠI"),
                     ward or "",
+                    region or "MN",
                 ))
             conn.close()
             conn = None
@@ -851,7 +864,60 @@ def get_system_counts():
         conn.close()
     return counts
 
-def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=None, service_type=None):
+def get_ticket_counts(source=None, service_type=None, search=None, region=None):
+    """
+    Truy vấn đếm tổng số phiếu, đã đóng, chưa đóng siêu tốc qua SQL (1-2ms),
+    thay thế việc duyệt toàn bộ mảng Python get_all_tickets.
+    """
+    init_db()
+    conn = get_db_connection()
+    try:
+        query = """
+            SELECT 
+                COUNT(*),
+                SUM(CASE WHEN ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%' THEN 1 ELSE 0 END)
+            FROM tickets WHERE 1=1
+        """
+        params = []
+        if source:
+            if source in ("tts_old", "tts_old_api"):
+                query += " AND (source = 'tts_old_api' OR source = 'tts_old' OR source IS NULL OR source = '')"
+            else:
+                query += " AND source = ?"
+                params.append(source)
+        if service_type == "data":
+            query += f" AND {DATA_PKG_SQL}"
+        elif service_type in ("call", "voice", "cuoc_goi"):
+            query += f" AND {CALL_PKG_SQL}"
+        elif service_type in ("sms", "tin_nhan"):
+            query += f" AND {SMS_PKG_SQL}"
+        elif service_type in ("other", "khac"):
+            query += f" AND {OTHER_PKG_SQL}"
+        elif service_type == "voice_sms":
+            query += f" AND {VOICE_PKG_SQL}"
+
+        # 🎯 Phân vùng miền (MB / MN / MT)
+        if region and region != "ALL":
+            query += " AND region = ?"
+            params.append(region)
+
+        if search:
+            query += " AND (phone LIKE ? OR ticket_content LIKE ? OR package_title LIKE ?)"
+            s = f"%{search}%"
+            params.extend([s, s, s])
+
+        row = conn.execute(query, params).fetchone()
+        total = row[0] or 0
+        closed = row[1] or 0
+        active = total - closed
+        return total, closed, active
+    except Exception as e:
+        print("Lỗi get_ticket_counts:", e)
+        return 0, 0, 0
+    finally:
+        conn.close()
+
+def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=None, service_type=None, region=None):
     init_db()
     conn = get_db_connection()
     query = "SELECT * FROM tickets WHERE 1=1"
@@ -864,6 +930,11 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
         else:
             query += " AND source = ?"
             params.append(source)
+
+    # 🎯 Phân vùng miền (MB / MN / MT)
+    if region and region != "ALL":
+        query += " AND region = ?"
+        params.append(region)
 
     # Lọc theo loại nghiệp vụ (data / call / sms / other / voice_sms)
     if service_type == "data":

@@ -16,6 +16,9 @@ _cem_memory_cache = {}
 _cem_cache_lock = threading.Lock()
 _CEM_CACHE_TTL = 900
 
+# Cache tọa độ Cell (cell_name -> (latitude, longitude)) từ các bản ghi CEM
+_CELL_COORDS_MAP = {}
+
 # Khắc phục lỗi [SSL: DH_KEY_TOO_SMALL] trên server VNPT Media
 class LegacySSLAdapter(HTTPAdapter):
     def init_poolmanager(self, *args, **kwargs):
@@ -255,6 +258,17 @@ class CEMClient:
                             if isinstance(row, dict):
                                 row["_query_date"] = date_str
                                 day_records.append(row)
+                                c_name = (
+                                    row.get("cell_name")
+                                    or row.get("cell_name_5g")
+                                    or row.get("cellName")
+                                    or row.get("cell_id")
+                                    or row.get("cellId")
+                                )
+                                lat = row.get("latitude") or row.get("lat")
+                                lng = row.get("longitude") or row.get("long") or row.get("lng")
+                                if c_name and lat and lng:
+                                    _CELL_COORDS_MAP[str(c_name).strip()] = (str(lat).strip(), str(lng).strip())
                 except Exception as e:
                     safe_log(f"[CEM] Lỗi parse dữ liệu ngày {date_str} cho {clean_phone}: {e}")
             elif err:
@@ -316,7 +330,12 @@ class CEMClient:
                 or (f"ECI:{r.get('eci')}" if r.get('eci') else None)
             )
             if cell_name:
-                cell_identifiers.append(str(cell_name).strip())
+                c_clean = str(cell_name).strip()
+                cell_identifiers.append(c_clean)
+                lat = r.get("latitude") or r.get("lat")
+                lng = r.get("longitude") or r.get("long") or r.get("lng")
+                if lat and lng:
+                    _CELL_COORDS_MAP[c_clean] = (str(lat).strip(), str(lng).strip())
                 q_date = r.get("_query_date") or r.get("start_date") or r.get("date") or r.get("time")
                 if q_date:
                     active_dates.add(str(q_date)[:10])
@@ -609,3 +628,65 @@ def get_cem_app_usage_summary(msisdn, days=5, date_str=None, driver=None):
         return CEMClient.extract_top_apps_summary(app_data)
     except Exception as e:
         return f"Lỗi truy vấn App Usage: {e}"
+
+
+def get_cell_coordinates(cell_name: str, phone: str = None) -> tuple:
+    """
+    Tìm tọa độ (latitude, longitude) của Cell từ memory cache hoặc file cem/{phone}.json.
+    Trả về (lat, lng) dạng chuỗi (str, str) hoặc (None, None).
+    """
+    clean_c = str(cell_name or "").strip()
+    if not clean_c:
+        return None, None
+
+    if clean_c in _CELL_COORDS_MAP:
+        return _CELL_COORDS_MAP[clean_c]
+
+    # Kiểm tra theo phone nếu có
+    candidate_phones = []
+    if phone:
+        p_clean = "".join(filter(str.isdigit, str(phone).strip()))
+        if p_clean.startswith("0") and len(p_clean) == 10:
+            candidate_phones.append("84" + p_clean[1:])
+        elif len(p_clean) == 9:
+            candidate_phones.append("84" + p_clean)
+        elif p_clean.startswith("84"):
+            candidate_phones.append(p_clean)
+
+    from pathlib import Path
+    import json
+
+    cem_dir = Path("cem")
+    files_to_check = []
+    for p in candidate_phones:
+        f = cem_dir / f"{p}.json"
+        if f.exists():
+            files_to_check.append(f)
+
+    # Nếu không tìm thấy bằng phone cụ thể, kiểm tra các file json gần nhất trong thư mục cem/
+    if not files_to_check and cem_dir.exists():
+        files_to_check = sorted(cem_dir.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:15]
+
+    for fpath in files_to_check:
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                d = json.load(f)
+                for r in d.get("cell_history_5days", []):
+                    c_name = (
+                        r.get("cell_name")
+                        or r.get("cell_name_5g")
+                        or r.get("cellName")
+                        or r.get("cell_id")
+                        or r.get("cellId")
+                    )
+                    lat = r.get("latitude") or r.get("lat")
+                    lng = r.get("longitude") or r.get("long") or r.get("lng")
+                    if c_name and lat and lng:
+                        c_str = str(c_name).strip()
+                        _CELL_COORDS_MAP[c_str] = (str(lat).strip(), str(lng).strip())
+                        if c_str == clean_c:
+                            return _CELL_COORDS_MAP[c_str]
+        except Exception:
+            pass
+
+    return None, None

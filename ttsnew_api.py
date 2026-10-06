@@ -243,7 +243,10 @@ except Exception:
         "SÓNG 4G CHẬP CHỜN / YẾU": "Thông tin đầu vào chưa chính xác, trùng lặp",
         "CHƯA ĐĂNG KÝ GÓI": "Lỗi do gói cước",
         "CHỈ CÓ GÓI PAYGO": "Lỗi do gói cước",
+        "CHỈ CÓ GÓI TIỆN ÍCH - THIẾU DATA INTERNET": "Lỗi do gói cước",
         "LỖI GÓI VD2 - THIẾU PAYGO": "Lỗi do gói cước",
+        "LỖI GÓI THẢ GA - THIẾU PAYGO": "Lỗi do gói cước",
+        "TRỪ CƯỚC NGOÀI GÓI PAYGO": "Lỗi do gói cước",
         "GÓI CƯỚC ĐÃ HẾT HẠN": "Lỗi do gói cước",
         "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC": "Lỗi do gói cước",
         "KHÔNG CÓ LƯU LƯỢNG ĐÁNG KỂ": "Do thiết bị đầu cuối",
@@ -853,7 +856,9 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
                     r_get = requests.get(url_get_edit, headers=headers, timeout=8)
                     if r_get.status_code == 200:
                         d_edit = r_get.json().get("data", {})
-                        if d_edit and d_edit.get("clFieldId") != 71:
+                        curr_addr = (d_edit.get("address") or "").strip() if d_edit else ""
+                        need_update = d_edit and ((d_edit.get("clFieldId") != 71) or (not curr_addr or curr_addr == "None"))
+                        if need_update:
                             payload_edit = {
                                 "id": ticket_id,
                                 "customerId": d_edit.get("customerId"),
@@ -862,13 +867,13 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
                                 "customerPhone": d_edit.get("customerPhone"),
                                 "customerProvinceId": d_edit.get("customerProvinceId"),
                                 "customerWardId": d_edit.get("customerWardId"),
-                                "customerAddress": d_edit.get("customerAddress"),
+                                "customerAddress": d_edit.get("customerAddress") or "null",
                                 "subject": d_edit.get("title") or "PAKH",
                                 "incidentDate": None,
                                 "customerCompletionDate": None,
                                 "provinceId": d_edit.get("provinceId"),
                                 "wardId": d_edit.get("wardId"),
-                                "address": d_edit.get("address") or "Địa chỉ khách hàng",
+                                "address": d_edit.get("address") or "null",
                                 "clFieldId": 71,  # 71: Chất lượng mạng
                                 "clGeneralFieldId": d_edit.get("clGeneralFieldId"),
                                 "clSubfieldId": d_edit.get("clSubFieldId"),

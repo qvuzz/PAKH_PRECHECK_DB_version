@@ -386,8 +386,12 @@ def get_sapc_package_validity(phone_84, incident_time_str=None):
             reg_str = str(pkg.get("register_date") or "").strip()
             exp_str = str(pkg.get("expire_date") or "").strip()
 
+            pkg_name_upper = pkg_name.upper()
             is_home = "home" in pkg_name.lower()
             is_paygo = "paygo" in pkg_name.lower() or pkg_name.lower() == "m0"
+
+            addon_keywords = ("DE-FREE", "DE_FREE", "ZALO", "BAOMOI", "ZINGMP3", "KM5GZONE", "NHOM3DICHVU", "TIKTOK", "YOUTUBE", "MYTV")
+            is_addon_app = any(k in pkg_name_upper for k in addon_keywords) or pkg_name_upper.startswith("ODA_") or "GAME" in pkg_name_upper
 
             # Trường hợp đặc biệt: Gói PAYGO hoặc gói hoàn toàn không có ngày tháng
             if is_paygo:
@@ -400,6 +404,7 @@ def get_sapc_package_validity(phone_84, incident_time_str=None):
                     "exp_dt": None,
                     "is_no_date": True,
                     "is_paygo": True,
+                    "is_addon_app": False,
                     "is_home": False
                 })
                 continue
@@ -415,6 +420,7 @@ def get_sapc_package_validity(phone_84, incident_time_str=None):
                     "exp_dt": None,
                     "is_no_date": True,
                     "is_paygo": False,
+                    "is_addon_app": is_addon_app,
                     "is_home": is_home
                 })
                 continue
@@ -450,6 +456,7 @@ def get_sapc_package_validity(phone_84, incident_time_str=None):
                 "exp_dt": exp_dt,
                 "is_no_date": False,
                 "is_paygo": False,
+                "is_addon_app": is_addon_app,
                 "is_home": is_home
             }
 
@@ -667,9 +674,9 @@ def get_expected_service_codes_for_pkg(pkg_name, group_name=None):
 
     p_clean = pkg_name.strip().upper()
 
-    # Nhóm HOME / Gia đình / GD
-    if "HOME" in p_clean or "GD" in p_clean or "GIA DINH" in p_clean or "GIADINH" in p_clean:
-        codes.update({"5000", "0000005000", "3605", "0000003605", "9301", "0000009301", "10002", "0000010002", "10003", "0000010003"})
+    # Nhóm HOME / Gia đình / GD / OCSE
+    if "HOME" in p_clean or "GD" in p_clean or "GIA DINH" in p_clean or "GIADINH" in p_clean or "OCSE" in p_clean:
+        codes.update({"5000", "0000005000", "6000", "0000006000", "3605", "0000003605", "9301", "0000009301", "10002", "0000010002", "10003", "0000010003"})
 
     # Nhóm VD (VD120, VD120N, VD90, VD150, VD89...)
     if "VD" in p_clean:
@@ -1304,19 +1311,128 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     active_vpn_name = detected_vpn_incident or detected_vpn_any
     vpn_advice_suffix = ""
 
-    # 🎯 KỊCH BẢN ĐẶC THÙ 2: Khách hàng phản ánh dùng gói VD2 nhưng SAPC không thấy có gói PAYGO
+    # 🎯 ƯU TIÊN KIỂM TRA GÓI CƯỚC KHÁCH BÁO ĐỐI CHIẾU PCRF (SAPC):
+    # Khách hàng phản ánh dùng gói cụ thể (YOLO125, VD120, D159V, HOME...), ưu tiên check xem trên PCRF có gói này không.
+    # Lưu ý: Các gói HOME (code 5000, 6000) trên PCRF có thể không hiển thị tên gói mà có cờ OCSE thay thế.
+    combined_full_text = f"{package_title} {ticket_content}"
+    if phone_84:
+        try:
+            from db_manager import get_db_connection
+            conn = get_db_connection()
+            with conn:
+                row_t = conn.execute("SELECT ai_summary, ticket_content FROM tickets WHERE phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1", (phone_84, f"%{phone_84[-9:]}%")).fetchone()
+                if row_t:
+                    combined_full_text = f"{combined_full_text} {row_t[0] or ''} {row_t[1] or ''}"
+        except Exception:
+            pass
+
+    extracted_reported_pkgs = extract_packages_from_text(combined_full_text)
+    m_vol = re.search(r'(?:dung lượng còn|còn|đã sử dụng)[:\s]*([\d.,]+)\s*(gb|mb|g)\b', combined_full_text.lower())
+    vol_reported = f"{m_vol.group(1)}{m_vol.group(2).upper()}" if m_vol else ""
+
+    act_pkgs_all, exp_pkgs_all = get_sapc_package_validity(phone_84, incident_time_str=incident_time_str) if phone_84 else ([], [])
+    all_sapc_pkgs = act_pkgs_all + exp_pkgs_all
+
+    # Kiểm tra cờ OCSE hoặc gói HOME từ SAPC / HSS Profile
+    has_ocse_flag = any(
+        p.get("is_home") or "ocse" in p.get("name", "").lower() or "ocse" in str(p.get("group_name", "")).lower()
+        for p in all_sapc_pkgs
+    )
+    if not has_ocse_flag and phone_84:
+        try:
+            hss_p = os.path.join(HSS_PROFILE_DIR, f"{phone_84}.json")
+            if os.path.exists(hss_p):
+                with open(hss_p, "r", encoding="utf-8") as f_h:
+                    if "OCSE" in f_h.read().upper():
+                        has_ocse_flag = True
+        except Exception:
+            pass
+
+    if extracted_reported_pkgs and not has_normal_btools_after:
+        for rep_p in extracted_reported_pkgs:
+            is_home_req = "HOME" in rep_p.upper() or "GD" in rep_p.upper()
+
+            # 1. Gói HOME thì chắc chắn phải có cờ OCSE trên PCRF (SAPC)
+            if is_home_req:
+                if has_ocse_flag:
+                    # Gói HOME đã có cờ OCSE trên hệ thống -> hợp lệ
+                    continue
+                else:
+                    # Gói HOME nhưng hoàn toàn KHÔNG CÓ cờ OCSE -> Lỗi thiếu cờ OCSE
+                    return (
+                        "GÓI HOME THIẾU CỜ OCSE",
+                        f"Khách hàng phản ánh đang sử dụng gói {rep_p}, tuy nhiên tra cứu hệ thống PCRF (SAPC) không ghi nhận cờ OCSE (gói cước HOME bắt buộc phải có cờ OCSE để cấp lưu lượng data chia sẻ).",
+                        f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {rep_p} và kích hoạt bổ sung cờ OCSE cho thuê bao trên hệ thống PCRF/OCS." + action_suffix,
+                        "FFF2CC"
+                    )
+
+            # 2. Gói cước khác (YOLO, VD, D159...): Có cờ OCSE chưa chắc đã là gói HOME và không thay thế cho gói data chính độc lập
+            def _pkg_match(t_pkg, s_pkg_name):
+                t_c = re.sub(r'[^A-Za-z0-9]', '', t_pkg).upper()
+                s_c = re.sub(r'[^A-Za-z0-9]', '', s_pkg_name).upper()
+                if not t_c or not s_c:
+                    return False
+                if t_c in s_c or s_c in t_c:
+                    return True
+                t_b = re.sub(r'[A-Z]+$', '', t_c)
+                s_b = re.sub(r'[A-Z]+$', '', s_c)
+                if t_b and s_b and t_b == s_b and len(t_b) >= 3:
+                    return True
+                return False
+
+            matched_in_exp = any(_pkg_match(rep_p, p["name"]) for p in exp_pkgs_all)
+            matched_in_act = any(_pkg_match(rep_p, p["name"]) for p in act_pkgs_all)
+
+            if matched_in_exp and not matched_in_act:
+                exp_matched = [p for p in exp_pkgs_all if _pkg_match(rep_p, p["name"])]
+                exp_names_str = ", ".join([p["name"] for p in exp_matched])
+                exp_dates_str = ", ".join([p["exp_str"] for p in exp_matched])
+                return (
+                    "GÓI CƯỚC ĐÃ HẾT HẠN",
+                    f"Gói cước data {exp_names_str} của thuê bao đã hết hạn từ ngày {exp_dates_str} (trước thời điểm phản ánh), tài khoản không còn dung lượng ưu đãi.",
+                    f"Thông báo khách hàng gói cước ({exp_names_str}) đã hết hạn sử dụng vào ngày {exp_dates_str}. Tư vấn khách hàng gia hạn hoặc đăng ký gói cước mới phù hợp." + action_suffix,
+                    "FFF2CC"
+                )
+
+            if not matched_in_act and not matched_in_exp:
+                oda_pkgs = [p["name"] for p in act_pkgs_all if p["name"].upper().startswith("ODA_") or "GAME" in p["name"].upper()]
+                main_pkgs = [p["name"] for p in act_pkgs_all if not p.get("is_paygo") and not p["name"].upper().startswith("ODA_") and "GAME" not in p["name"].upper()]
+                if not main_pkgs:
+                    vol_str = f" (dung lượng báo còn: {vol_reported})" if vol_reported else ""
+                    oda_str = f" (SAPC chỉ có các gói tiện ích ODA: {', '.join(oda_pkgs)}, không có gói data Internet chính)" if oda_pkgs else " (SAPC không có gói data Internet chính)"
+                    return (
+                        "CHƯA ĐĂNG KÝ GÓI KHÁCH BÁO",
+                        f"Khách hàng phản ánh đang sử dụng gói {rep_p}{vol_str}, tuy nhiên tra cứu hệ thống PCRF (SAPC) không ghi nhận gói cước này trên thuê bao{oda_str}. Do đó thuê bao không có quyền truy cập dữ liệu di động Internet.",
+                        f"Kính chuyển VNP kiểm tra lại lịch sử đăng ký gói {rep_p} của khách hàng (chưa đăng ký thành công, đã hủy hoặc khách phản ánh nhầm số), tư vấn khách hàng kiểm tra lại trạng thái gói cước hoặc hướng dẫn đăng ký mới." + action_suffix,
+                        "FFF2CC"
+                    )
+
+    # 🎯 KỊCH BẢN ĐẶC THÙ 2: Thuê bao sử dụng gói cước phụ thuộc mã 3001 (VD2, THẢ GA...) nhưng SAPC thiếu gói nền PAYGO
     combined_report_text = f"{package_title} {ticket_content}".lower()
     is_vd2_reported = bool(re.search(r"\bvd2\b|\bvd2k\b|gói vd2|goi vd2", combined_report_text))
-    if is_vd2_reported:
-        active_pkgs, _ = get_sapc_package_validity(phone_84, incident_time_str=incident_time_str)
-        has_paygo = any(p.get("is_paygo") or "paygo" in p.get("name", "").lower() for p in active_pkgs)
-        if not has_paygo:
-            return (
-                "LỖI GÓI VD2 - THIẾU PAYGO",
-                "Thuê bao đăng ký gói VD2 nhưng hệ thống SAPC chưa được khai báo gói nền PAYGO (M0), dẫn đến mất kết nối dữ liệu di động.",
-                "Chuyển bộ phận IT/Khai thác cước kiểm tra và kích hoạt bổ sung gói nền PAYGO cho thuê bao trên hệ thống." + action_suffix,
-                "FFF2CC"
-            )
+    is_thaga_reported = bool(re.search(r"thả ga|tha ga|\bthaga\b", combined_report_text))
+
+    active_pkgs_pre, _ = get_sapc_package_validity(phone_84, incident_time_str=incident_time_str)
+    has_paygo = any(p.get("is_paygo") or "paygo" in p.get("name", "").lower() for p in active_pkgs_pre)
+
+    # Nghiệp vụ chuẩn: Gói THẢ GA nếu check SAPCCHECK thấy code gói (như MI_THAGA70, mã 3000...)
+    # thì đó là gói khai báo trực tiếp trên PCRF, hoạt động bình thường mà KHÔNG CẦN gói nền PAYGO!
+    # Chỉ coi là lỗi thiếu PAYGO nếu khách báo gói THẢ GA nhưng trên SAPC KHÔNG có code gói PCRF nào và thiếu PAYGO.
+    has_pcrf_thaga = any(("thaga" in p.get("name", "").lower() or "thả ga" in p.get("name", "").lower()) for p in active_pkgs_pre)
+
+    dep_pkg_name = None
+    if is_vd2_reported or any("vd2" in p.get("name", "").lower() for p in active_pkgs_pre):
+        dep_pkg_name = "VD2"
+    elif is_thaga_reported and not has_pcrf_thaga:
+        dep_pkg_name = "THẢ GA"
+
+    if dep_pkg_name and not has_paygo:
+        return (
+            f"LỖI GÓI {dep_pkg_name} - THIẾU PAYGO",
+            f"Thuê bao đăng ký gói {dep_pkg_name} (gói cước phụ thuộc mã dịch vụ 3001) nhưng hệ thống PCRF/SAPC chưa được khai báo gói nền PAYGO (M0), dẫn đến mất kết nối dữ liệu di động.",
+            f"Chuyển bộ phận IT/Khai thác cước kiểm tra và kích hoạt bổ sung gói nền PAYGO cho thuê bao trên hệ thống." + action_suffix,
+            "FFF2CC"
+        )
 
     # 🎯 KỊCH BẢN ĐẶC THÙ 3: KH phản ánh trong ngày, hồ sơ Radio: 3G & IP: null, đi nhiều nơi lỗi, BTools có data < 10MB
     radio_str = str(sub_info.get("Radio") or "").strip().upper()
@@ -1384,8 +1500,9 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
 
     if not clean_data_5d or len(clean_data_5d) == 0:
         active_pkgs, expired_pkgs = get_sapc_package_validity(phone_84, incident_time_str=incident_time_str)
-        act_commercial = [p for p in active_pkgs if not p.get("is_paygo")]
-        exp_commercial = [p for p in expired_pkgs if not p.get("is_paygo")]
+        act_commercial = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_addon_app")]
+        exp_commercial = [p for p in expired_pkgs if not p.get("is_paygo") and not p.get("is_addon_app")]
+        addon_apps = [p for p in active_pkgs if p.get("is_addon_app")]
         
         # 1. TẤT CẢ GÓI ĐỀU ĐÃ HẾT HẠN TRƯỚC NGÀY TIẾP NHẬN PHẢN ÁNH
         if not act_commercial and exp_commercial:
@@ -1398,8 +1515,18 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 f"Gói cước của Khách hàng ({exp_names}) đã hết hạn vào ngày {exp_dates}. Nhờ VNP kiểm tra lại, tư vấn khách hàng gia hạn/đăng ký gói cước mới.",
                 "FFF2CC"
             )
+
+        # 2. CHỈ CÓ GÓI TIỆN ÍCH / ADD-ON (KHÔNG CÓ GÓI DATA INTERNET TOÀN PHẦN)
+        if not act_commercial and not exp_commercial and addon_apps:
+            addon_names = ", ".join([p["name"] for p in addon_apps])
+            return (
+                "CHỈ CÓ GÓI TIỆN ÍCH - THIẾU DATA INTERNET",
+                f"Hồ sơ SAPC ghi nhận thuê bao chỉ đăng ký gói tiện ích ứng dụng ({addon_names}) chạy trên nền PAYGO/M0, không có gói cước Data Internet toàn phần. Do tài khoản chính không đủ tiền duy trì cước ngoài gói nên thuê bao không thể truy cập các dịch vụ mạng ngoài phạm vi ưu đãi của gói.",
+                f"Tư vấn khách hàng kiểm tra số dư tài khoản chính, đồng thời hướng dẫn đăng ký các gói cước Data VinaPhone chính thức (như VD120N, YOLO, D159V...) để truy cập mạng toàn diện." + action_suffix,
+                "FFF2CC"
+            )
         
-        # 2. CHƯA ĐĂNG KÝ GÓI (Dựa vào SAPCCheck: chỉ có PAYGO / không có gói thương mại)
+        # 3. CHƯA ĐĂNG KÝ GÓI (Dựa vào SAPCCheck: chỉ có PAYGO / không có gói thương mại)
         if not act_commercial and not exp_commercial:
             return (
                 "CHƯA ĐĂNG KÝ GÓI",
@@ -1616,16 +1743,44 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     SYSTEM_CODES = {"300", "302", "330", "2042"}
 
     act_p, exp_p = get_sapc_package_validity(phone_84, incident_time_str=incident_time_str) if phone_84 else ([], [])
-    act_commercial = [p for p in act_p if not p.get("is_paygo")]
-    exp_commercial = [p for p in exp_p if not p.get("is_paygo")]
+    act_commercial = [p for p in act_p if not p.get("is_paygo") and not p.get("is_addon_app") and not p.get("name", "").upper().startswith("ODA_")]
+    exp_commercial = [p for p in exp_p if not p.get("is_paygo") and not p.get("is_addon_app")]
+    addon_apps = [p for p in act_p if p.get("is_addon_app")]
+
+    # 🎯 KỊCH BẢN KHIẾU NẠI TRỪ TIỀN / TRỪ CƯỚC NGOÀI GÓI KHI BTOOLS CÓ MÃ 3001 (PAYGO)
+    is_charge_complaint = bool(re.search(r"trừ tiền|tru tien|trừ cước|tru cuoc|mất tiền|mat tien|trừ tkc|bị trừ|bi tru|hao tiền|tính cước|tinh cuoc", combined_report_text))
+    has_paygo_charge = ("3001" in norm_service_codes) or ("0000003001" in all_days_service_codes)
+    if is_charge_complaint and has_paygo_charge and not act_commercial:
+        exp_names = ", ".join([p["name"] for p in exp_commercial]) if exp_commercial else ""
+        addon_names = ", ".join([p["name"] for p in addon_apps]) if addon_apps else ""
+        if exp_names:
+            reason_str = f"gói cước data chính ({exp_names}) đã hết hạn sử dụng"
+        elif addon_names:
+            reason_str = f"thuê bao chỉ có gói tiện ích ({addon_names}) và đã truy cập các dịch vụ Internet ngoài phạm vi miễn cước của gói"
+        else:
+            reason_str = "thuê bao không có gói cước data ưu đãi"
+        return (
+            "TRỪ CƯỚC NGOÀI GÓI PAYGO",
+            f"Khách hàng khiếu nại trừ tiền do {reason_str}. BTools ghi nhận các phiên truy cập dữ liệu di động tính cước theo gói mặc định PAYGO (Service ID 3001) trừ vào tài khoản chính.",
+            f"Giải thích cho khách hàng về nguyên nhân phát sinh lưu lượng ngoài gói theo cước PAYGO và tư vấn đăng ký gói cước data mới để tránh bị trừ tiền tài khoản chính." + action_suffix,
+            "FFF2CC"
+        )
 
     is_pure_system_codes_only = bool(all_days_service_codes) and (
         all(code in excluded_system_codes for code in all_days_service_codes) or
         (norm_service_codes and norm_service_codes.issubset(SYSTEM_CODES))
     )
 
-    # 1. QUY TẮC "CHƯA ĐĂNG KÝ GÓI" (Dựa vào SAPCCheck: chỉ có PAYGO / không có gói thương mại)
+    # 1. QUY TẮC "CHỈ CÓ GÓI TIỆN ÍCH" HOẶC "CHƯA ĐĂNG KÝ GÓI" (Dựa vào SAPCCheck: chỉ có PAYGO / không có gói thương mại)
     if is_pure_system_codes_only and not act_commercial and not exp_commercial:
+        if addon_apps:
+            addon_names = ", ".join([p["name"] for p in addon_apps])
+            return (
+                "CHỈ CÓ GÓI TIỆN ÍCH - THIẾU DATA INTERNET",
+                f"Lịch sử dữ liệu chỉ xuất hiện các mã hệ thống do thuê bao chỉ đăng ký gói tiện ích ứng dụng ({addon_names}) chạy trên nền PAYGO/M0, không có gói data Internet chính và tài khoản chính không đủ tiền để duy trì truy cập ngoài gói.",
+                f"Tư vấn khách hàng kiểm tra số dư tài khoản chính, đồng thời hướng dẫn đăng ký các gói cước Data VinaPhone ưu đãi để sử dụng Internet toàn diện." + action_suffix,
+                "FFF2CC"
+            )
         return (
             "CHƯA ĐĂNG KÝ GÓI",
             "Hồ sơ SAPC ghi nhận thuê bao chưa đăng ký gói cước di động (chỉ có gói nền PAYGO/M0), lịch sử dữ liệu không tồn tại gói cước thương mại phát sinh data.",
@@ -2231,8 +2386,17 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             "FFF2CC"
         )
 
-    # B: Chỉ có gói cước mặc định PAYGO
-    if active_pkgs and all(p.get("is_paygo") for p in active_pkgs):
+    # B: Chỉ có gói cước mặc định PAYGO hoặc gói tiện ích Add-on
+    addon_pkgs = [p for p in active_pkgs if p.get("is_addon_app")]
+    if active_pkgs and all(p.get("is_paygo") or p.get("is_addon_app") for p in active_pkgs) and not [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_addon_app")]:
+        if addon_pkgs:
+            addon_names = ", ".join([p["name"] for p in addon_pkgs])
+            return (
+                "CHỈ CÓ GÓI TIỆN ÍCH - THIẾU DATA INTERNET",
+                f"Thuê bao hiện chỉ có gói tiện ích ({addon_names}) chạy trên nền PAYGO/M0, không có gói data Internet chính thức.",
+                f"Tư vấn khách hàng đăng ký thêm các gói Data VinaPhone (VD120N, YOLO...) để truy cập mạng bình thường." + action_suffix,
+                "FFF2CC"
+            )
         return (
             "CHỈ CÓ GÓI PAYGO",
             f"Thuê bao hiện chỉ có gói cước mặc định (PAYGO/M0), không có gói data ưu đãi và tài khoản chính không đủ để trừ cước truy cập ngoài gói.",
@@ -2241,7 +2405,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         )
 
     # C: XỬ LÝ CASE 1 & CASE 2 THEO GÓI CƯỚC THƯƠNG MẠI SAPC VÀ LƯU LƯỢNG BTOOLS
-    commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date")]
+    commercial_pkgs = [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_home") and not p.get("is_no_date") and not p.get("is_addon_app")]
     earliest_reg_dt = min([p["reg_dt"] for p in commercial_pkgs if p.get("reg_dt")], default=None)
     act_names = ", ".join([p["name"] for p in commercial_pkgs])
     act_exp_dates = ", ".join([p["exp_str"] for p in commercial_pkgs])

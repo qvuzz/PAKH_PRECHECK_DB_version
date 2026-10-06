@@ -25,9 +25,58 @@ Tài liệu này là chỉ dẫn bắt buộc cho mọi trợ lý AI (Antigravit
    * **CẤM TUYỆT ĐỐI THÊM EMOJI / ICON VÔ NGHĨA VÀO WEBAPP** (như 🤖, ⚡, 🚀, 🎉, 🔥, ⭐... vào nhãn, nút bấm, ô chọn select, tiêu đề, bảng hay modal thông báo).
    * Giao diện phục vụ khối Kỹ thuật Viễn thông VNPT, yêu cầu tính chuyên nghiệp, trang trọng, chỉn chu và tối giản chuẩn doanh nghiệp. Chỉ dùng chữ tiếng Việt rõ nghĩa hoặc icon SVG chức năng chuyên dụng.
 
-6. **Quy chuẩn địa giới hành chính (Sáp nhập tỉnh/thành & Đặc khu - BẮT BUỘC)**:
-   * **Lưu ý nghiệp vụ**: Tất cả các tỉnh/thành của Việt Nam đều đã được sáp nhập / điều chỉnh theo địa giới hành chính mới (bao gồm các mô hình Đặc khu, sáp nhập tỉnh/thành như Đặc khu Phú Quốc thuộc tỉnh An Giang, v.v.).
-   * AI/Agents tuyệt đối **KHÔNG được nhầm lẫn, KHÔNG coi việc ghi nhận địa danh/tỉnh thành mới là lỗi nhập liệu hay nhầm lẫn của điện thoại viên**, mà phải công nhận và tuân thủ tuyệt đối cấu trúc địa bàn hành chính hiện hành trong hệ thống dữ liệu.
+6. **Quy chuẩn địa giới hành chính mới (Phường/Xã & 34 Tỉnh/TP mới — BẮT BUỘC TUÂN THỦ)**:
+   * **Chuẩn định dạng bắt buộc (DUY NHẤT 2 CẤP)**:
+     * Định dạng chuẩn duy nhất: `[Phường/Xã/Thị trấn], [Tỉnh/Thành phố]` (hoặc `Đặc khu`).
+     * **TUYỆT ĐỐI KHÔNG** lấy cấp thôn, ấp, bản, khóm, xóm, tổ dân phố (như *Thôn 3*, *Chủ Chí*, *Ấp 1*, *Tổ 5*...).
+     * **TUYỆT ĐỐI KHÔNG** dùng mã trạm rút gọn hay viết tắt viễn thông (như *PLO*, *DLI*, *BLU*, *TDM*...) làm tên địa bàn.
+   * **Bảng Chuẩn 34 Tỉnh / Thành phố mới & Phân chia 3 Miền (BẮT BUỘC TUÂN THỦ TUYỆT ĐỐI)**:
+
+| STT | Tỉnh / Thành phố mới | Các tỉnh sáp nhập vào | Khu vực (Miền) |
+| :---: | :--- | :--- | :---: |
+| 1 | **TP. Hà Nội** | Giữ nguyên | **Miền Bắc (`MB`)** |
+| 2 | **TP. Hải Phòng** | TP. Hải Phòng + Hải Dương | **Miền Bắc (`MB`)** |
+| 3 | **Tỉnh Cao Bằng** | Giữ nguyên | **Miền Bắc (`MB`)** |
+| 4 | **Tỉnh Lạng Sơn** | Giữ nguyên | **Miền Bắc (`MB`)** |
+| 5 | **Tỉnh Lai Châu** | Giữ nguyên | **Miền Bắc (`MB`)** |
+| 6 | **Tỉnh Điện Biên** | Giữ nguyên | **Miền Bắc (`MB`)** |
+| 7 | **Tỉnh Sơn La** | Giữ nguyên | **Miền Bắc (`MB`)** |
+| 8 | **Tỉnh Quảng Ninh** | Giữ nguyên | **Miền Bắc (`MB`)** |
+| 9 | **Tỉnh Tuyên Quang** | Hà Giang + Tuyên Quang | **Miền Bắc (`MB`)** |
+| 10 | **Tỉnh Lào Cai** | Yên Bái + Lào Cai | **Miền Bắc (`MB`)** |
+| 11 | **Tỉnh Thái Nguyên** | Bắc Kạn + Thái Nguyên | **Miền Bắc (`MB`)** |
+| 12 | **Tỉnh Phú Thọ** | Vĩnh Phúc + Hòa Bình + Phú Thọ | **Miền Bắc (`MB`)** |
+| 13 | **Tỉnh Bắc Ninh** | Bắc Giang + Bắc Ninh | **Miền Bắc (`MB`)** |
+| 14 | **Tỉnh Hưng Yên** | Thái Bình + Hưng Yên | **Miền Bắc (`MB`)** |
+| 15 | **Tỉnh Ninh Bình** | Hà Nam + Nam Định + Ninh Bình | **Miền Bắc (`MB`)** |
+| 16 | **Tỉnh Thanh Hóa** | Giữ nguyên | **Miền Bắc (`MB`)** |
+| 17 | **Tỉnh Nghệ An** | Giữ nguyên | **Miền Bắc (`MB`)** |
+| 18 | **Tỉnh Hà Tĩnh** | Giữ nguyên | **Miền Bắc (`MB`)** |
+| 19 | **Tỉnh Lâm Đồng** | Đắk Nông + Bình Thuận + Lâm Đồng | **Miền Nam (`MN`)** |
+| 20 | **TP. Hồ Chí Minh** | TP.HCM + Bình Dương + Bà Rịa – Vũng Tàu | **Miền Nam (`MN`)** |
+| 21 | **TP. Cần Thơ** | TP. Cần Thơ + Sóc Trăng + Hậu Giang | **Miền Nam (`MN`)** |
+| 22 | **Tỉnh Đồng Nai** | Bình Phước + Đồng Nai | **Miền Nam (`MN`)** |
+| 23 | **Tỉnh Tây Ninh** | Long An + Tây Ninh | **Miền Nam (`MN`)** |
+| 24 | **Tỉnh Vĩnh Long** | Bến Tre + Trà Vinh + Vĩnh Long | **Miền Nam (`MN`)** |
+| 25 | **Tỉnh Đồng Tháp** | Tiền Giang + Đồng Tháp | **Miền Nam (`MN`)** |
+| 26 | **Tỉnh Cà Mau** | Bạc Liêu + Cà Mau | **Miền Nam (`MN`)** |
+| 27 | **Tỉnh An Giang** | Kiên Giang + An Giang *(gồm Đặc khu Phú Quốc)* | **Miền Nam (`MN`)** |
+| 28 | **TP. Huế** | Giữ nguyên *(nâng cấp từ Thừa Thiên Huế)* | **Miền Trung (`MT`)** |
+| 29 | **TP. Đà Nẵng** | TP. Đà Nẵng + Quảng Nam | **Miền Trung (`MT`)** |
+| 30 | **Tỉnh Quảng Trị** | Quảng Bình + Quảng Trị | **Miền Trung (`MT`)** |
+| 31 | **Tỉnh Quảng Ngãi** | Kon Tum + Quảng Ngãi | **Miền Trung (`MT`)** |
+| 32 | **Tỉnh Gia Lai** | Bình Định + Gia Lai | **Miền Trung (`MT`)** |
+| 33 | **Tỉnh Khánh Hòa** | Ninh Thuận + Khánh Hòa | **Miền Trung (`MT`)** |
+| 34 | **Tỉnh Đắk Lắk** | Phú Yên + Đắk Lắk | **Miền Trung (`MT`)** |
+
+   * **Tổng kết phân bổ 3 Miền**:
+     * **Miền Bắc (`MB`)**: **18 đơn vị** (2 TP: Hà Nội, Hải Phòng + 16 Tỉnh: Cao Bằng, Lạng Sơn, Lai Châu, Điện Biên, Sơn La, Quảng Ninh, Tuyên Quang, Lào Cai, Thái Nguyên, Phú Thọ, Bắc Ninh, Hưng Yên, Ninh Bình, Thanh Hóa, Nghệ An, Hà Tĩnh).
+     * **Miền Nam (`MN`)**: **9 đơn vị** (2 TP: TP. Hồ Chí Minh, TP. Cần Thơ + 7 Tỉnh: Lâm Đồng, Đồng Nai, Tây Ninh, Vĩnh Long, Đồng Tháp, Cà Mau, An Giang).
+     * **Miền Trung (`MT`)**: **7 đơn vị** (2 TP: Huế, Đà Nẵng + 5 Tỉnh: Quảng Trị, Quảng Ngãi, Gia Lai, Khánh Hòa, Đắk Lắk).
+   * **Nguồn chân lý xác thực địa bàn (Port 1708 Google Maps Geocoding)**:
+     * Luôn lấy kết quả địa bàn tham chiếu chuẩn từ API Google Maps của service nội bộ:
+       `http://127.0.0.1:1708/api/reverse-geocode?lat=...&long=...` kết hợp tọa độ GPS (lat/long) từ CEM.
+     * Hàm chuẩn hóa lõi: [`normalize_vn_commune_and_province()`](routers/tickets.py) tự động trích xuất đúng `Phường/Xã` và `Tỉnh/TP`.
 
 ---
 
