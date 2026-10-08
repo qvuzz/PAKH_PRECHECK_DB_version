@@ -2,16 +2,40 @@ import os
 import json
 from datetime import datetime
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DEFAULT_RAT_LIB = {
+    "0": "Báo hiệu",
+    "1": "Sóng 3G",
+    "2": "Sóng 2G",
+    "6": "Sóng 4G",
+    "7": "Sóng 5G"
+}
+
 def load_json_library(file_path):
     """Hàm phụ dùng để đọc file json thư viện an toàn"""
-    if not os.path.exists(file_path):
-        print(f"⚠️ Không tìm thấy file thư viện: {file_path}. Sẽ dùng dữ liệu thô.")
+    full_path = file_path if os.path.isabs(file_path) else os.path.join(BASE_DIR, file_path)
+    if not os.path.exists(full_path):
+        # Chống lỗi phân biệt hoa/thường trên Linux Docker (vd: RATTYPE.JSON vs rattype.json)
+        dir_name = os.path.dirname(full_path) or "."
+        base_name = os.path.basename(full_path).lower()
+        if os.path.exists(dir_name):
+            for f in os.listdir(dir_name):
+                if f.lower() == base_name:
+                    full_path = os.path.join(dir_name, f)
+                    break
+
+    if not os.path.exists(full_path):
+        if "rattype" in file_path.lower():
+            return dict(DEFAULT_RAT_LIB)
         return {}
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(full_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        print(f"❌ Lỗi đọc file thư viện {file_path}: {e}")
+        print(f"❌ Lỗi đọc file thư viện {full_path}: {e}")
+        if "rattype" in file_path.lower():
+            return dict(DEFAULT_RAT_LIB)
         return {}
 
 def standardize_btools_data(btools_data):
@@ -26,7 +50,7 @@ def standardize_btools_data(btools_data):
         return []
 
     # Nạp 2 file thư viện danh mục của bạn
-    rat_lib = load_json_library("rattype.json")
+    rat_lib = load_json_library("rattype.json") or dict(DEFAULT_RAT_LIB)
     service_lib = load_json_library("serviceid.json")
 
     standardized_list = []

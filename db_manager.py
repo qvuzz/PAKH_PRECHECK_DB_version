@@ -8,6 +8,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "tickets.db"
 
+import threading
+_DB_WRITE_LOCK = threading.RLock()
+
 _db_initialized = False
 
 def extract_ward_address(text: str) -> str:
@@ -55,18 +58,75 @@ def extract_ward_address(text: str) -> str:
         cleaned = cleaned.split('.')[0].strip()
     return cleaned
 
-def get_db_connection():
-    conn = sqlite3.connect(str(DB_PATH), timeout=60.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")  # Tăng tốc độ và chống khóa file
-    conn.execute("PRAGMA busy_timeout=60000;")
-    return conn
-
-def init_db():
+def _recover_corrupted_db(reason: str = ""):
+    """
+    Tự động xử lý khi file SQLite bị malformed hoặc lỗi cấu trúc:
+    - Backup file hỏng sang .bak để bảo toàn dữ liệu cho KTV
+    - Xóa các file phụ wal / shm / journal xung đột
+    - Khởi tạo lại database mới sạch sẽ
+    """
     global _db_initialized
-    if _db_initialized:
-        return
-    conn = get_db_connection()
+    _db_initialized = False
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    print(f"[DB REPAIR] Phát hiện database bị lỗi hỏng ({reason}). Bắt đầu tự động khắc phục...")
+    
+    # 1. Nếu Docker volume mount nhầm file DB thành thư mục
+    if DB_PATH.exists() and DB_PATH.is_dir():
+        dir_bak = BASE_DIR / f"tickets_dir_corrupt_{timestamp}.bak"
+        try:
+            DB_PATH.rename(dir_bak)
+            print(f"[DB REPAIR] Đã đổi tên thư mục xung đột tickets.db -> {dir_bak.name}")
+        except Exception as e:
+            print(f"[DB REPAIR ERROR] Không thể đổi tên thư mục tickets.db: {e}")
+
+    # 2. Nếu file tickets.db tồn tại (Lưu ý: Không dùng rename/unlink vì Docker bind-mount sẽ báo Device or resource busy)
+    if DB_PATH.exists() and DB_PATH.is_file():
+        bak_file = BASE_DIR / f"tickets.db.malformed_{timestamp}.bak"
+        try:
+            import shutil
+            shutil.copy2(DB_PATH, bak_file)
+            print(f"[DB REPAIR] Đã sao lưu database lỗi sang: {bak_file.name}")
+        except Exception as e:
+            print(f"[DB REPAIR WARN] Sao lưu copy2 thất bại: {e}")
+
+        try:
+            # Ghi đè file rỗng (truncate 0) để giữ nguyên inode mountpoint của Docker container
+            with open(DB_PATH, "wb") as f:
+                f.truncate(0)
+            print("[DB REPAIR] Đã làm sạch file tickets.db (truncate 0) thành công!")
+        except Exception as e:
+            print(f"[DB REPAIR ERROR] Truncate file thất bại: {e}")
+
+    # 3. Dọn dẹp triệt để các file journal, wal, shm cũ
+    for ext in ["-wal", "-shm", "-journal"]:
+        side_file = BASE_DIR / f"tickets.db{ext}"
+        try:
+            if side_file.exists():
+                side_file.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def get_db_connection(retry_count: int = 1):
+    try:
+        conn = sqlite3.connect(str(DB_PATH), timeout=60.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")  # Tăng tốc độ và chống khóa file
+        conn.execute("PRAGMA busy_timeout=60000;")
+        return conn
+    except sqlite3.DatabaseError as e:
+        err_msg = str(e).lower()
+        if "malformed" in err_msg or "file is not a database" in err_msg or "corrupt" in err_msg:
+            print(f"[DB ERROR] SQLite database bị lỗi ({e}). Đang tự động khôi phục...")
+            if retry_count > 0:
+                with _DB_WRITE_LOCK:
+                    _recover_corrupted_db(reason=str(e))
+                return get_db_connection(retry_count=retry_count - 1)
+        raise
+
+
+def _run_init_schema(conn):
     with conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS tickets (
@@ -199,8 +259,31 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
-    conn.close()
-    _db_initialized = True
+
+
+def init_db():
+    global _db_initialized
+    if _db_initialized:
+        return
+    with _DB_WRITE_LOCK:
+        if _db_initialized:
+            return
+        try:
+            conn = get_db_connection()
+            _run_init_schema(conn)
+            conn.close()
+            _db_initialized = True
+        except sqlite3.DatabaseError as e:
+            err_msg = str(e).lower()
+            if "malformed" in err_msg or "file is not a database" in err_msg or "corrupt" in err_msg:
+                print(f"[DB INIT ERROR] Phát hiện lỗi database lúc khởi động ({e}). Đang tự động backup và tạo lại DB sạch...")
+                _recover_corrupted_db(reason=str(e))
+                conn = get_db_connection(retry_count=0)
+                _run_init_schema(conn)
+                conn.close()
+                _db_initialized = True
+            else:
+                raise
 
 
 def save_ai_feedback_sample(ticket_id=None, phone="", package_title="", ticket_content="", summary_content="", verified_by="KTV"):
@@ -354,6 +437,10 @@ def check_ticket_can_close(t):
         return False, f"Lỗi kiểm tra điều kiện: {e}"
 
 def save_or_update_ticket(t):
+    with _DB_WRITE_LOCK:
+        return _save_or_update_ticket_internal(t)
+
+def _save_or_update_ticket_internal(t):
     """
     Lưu hoặc cập nhật phiếu vào database theo cặp (phone, incident_time).
     Mỗi lần phản ánh ở các mốc thời gian khác nhau sẽ là một bản ghi riêng biệt.
@@ -522,7 +609,13 @@ def save_or_update_ticket(t):
                     region = existing["region"]
                 if not region:
                     from region_detector import detect_ticket_region
-                    region = detect_ticket_region({"province": ward, "ticket_content": t.get("ticket_content", "")}, default_region="MN")
+                    region = detect_ticket_region({
+                        "ticket_code": t.get("ticket_code", ""),
+                        "step_name": t.get("step_name", ""),
+                        "process_name": t.get("process_name", ""),
+                        "province": ward,
+                        "ticket_content": t.get("ticket_content", "")
+                    }, default_region="MN")
 
                 conn.execute("""
                     INSERT INTO tickets (
@@ -599,8 +692,18 @@ def save_or_update_ticket(t):
                     conn.close()
                 except Exception:
                     pass
-            if "locked" in str(e).lower() and attempt < 4:
+            err_msg = str(e).lower()
+            if "locked" in err_msg and attempt < 4:
                 time.sleep(0.2 * (attempt + 1))
+                continue
+            if "malformed" in err_msg and attempt < 4:
+                try:
+                    r_conn = sqlite3.connect(str(DB_PATH), timeout=30.0)
+                    r_conn.execute("REINDEX;")
+                    r_conn.close()
+                except Exception:
+                    pass
+                time.sleep(0.3 * (attempt + 1))
                 continue
             raise
         except Exception:
@@ -1388,10 +1491,14 @@ def validate_ttsnew_ward_for_51(ticket_id=None, phone=None, ticket_code=None, ti
     cell_patterns = re.findall(r'(?:[2-5]G[-_]|UL[-_]|DL[-_])[A-Za-z0-9]+[-_][A-Za-z0-9]+', cem_text)
 
     expected_locations = []
-    import requests
+    try:
+        from routers.tickets import get_1708_base_url
+        base_1708 = get_1708_base_url()
+    except Exception:
+        base_1708 = (os.getenv("PORT_1708_URL") or "http://vnpt_customer_position_app:1708").rstrip("/")
     for c in set(cell_patterns):
         try:
-            r = requests.get(f"http://127.0.0.1:1708/api/cell/{c}", timeout=1.5)
+            r = requests.get(f"{base_1708}/api/cell/{c}", timeout=1.5)
             if r.status_code == 200:
                 d = r.json()
                 w = d.get("ward") or (d.get("summary") or {}).get("ward")
@@ -1405,7 +1512,7 @@ def validate_ttsnew_ward_for_51(ticket_id=None, phone=None, ticket_code=None, ti
     if not expected_locations and target_phone:
         try:
             p84 = target_phone if target_phone.startswith("84") else ("84" + target_phone.lstrip("0"))
-            r = requests.get(f"http://127.0.0.1:1708/api/msisdn/{p84}", timeout=1.5)
+            r = requests.get(f"{base_1708}/api/msisdn/{p84}", timeout=1.5)
             if r.status_code == 200:
                 d = r.json()
                 w = d.get("ward") or (d.get("summary") or {}).get("ward")

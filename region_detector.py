@@ -456,19 +456,40 @@ def normalize_to_new_province(raw_input: Optional[str]) -> Tuple[Optional[str], 
 def detect_ticket_region(ticket_data: dict, default_region: str = "MN") -> str:
     """
     Tự động nhận diện Miền (MB, MN, MT) của một phiếu phản ánh.
-    Dựa trên:
-    1. Trực tiếp từ `province` đã lưu
-    2. Bóc tách từ Cell ID (ví dụ: mã tỉnh 3 chữ cái ở đuôi cell: 4G-TDM074-BDG)
-    3. Địa chỉ phản ánh (address / noi_dung)
+    NGUỒN 1 (CHÍNH XÁC NHẤT):
+    - Tên quy trình / Tên bước / Mã phiếu chứa SOC1 -> MB (Miền Bắc)
+    - Tên quy trình / Tên bước / Mã phiếu chứa SOC2 -> MT (Miền Trung)
+    - Tên quy trình / Tên bước / Mã phiếu chứa SOC3 -> MN (Miền Nam)
+    NGUỒN 2:
+    - Bóc tách từ Tỉnh/Thành phố hoặc địa bàn chuẩn 34 Tỉnh mới
+    - Bóc tách từ Cell ID mã tỉnh
     """
-    # 1. Thử từ province
-    prov = ticket_data.get("province") or ticket_data.get("tinh_tp") or ""
+    # 🌟 ƯU TIÊN SỐ 1: Bóc tách từ Tên bước / Tên quy trình / Mã phiếu / Đơn vị tiếp nhận (SOC1 / SOC2 / SOC3)
+    search_text = " ".join([
+        str(ticket_data.get("ticket_code") or ""),
+        str(ticket_data.get("step_name") or ""),
+        str(ticket_data.get("process_name") or ""),
+        str(ticket_data.get("processNodeName") or ""),
+        str(ticket_data.get("processDefinitionName") or ""),
+        str(ticket_data.get("assigned_unit") or ""),
+        str(ticket_data.get("assignedUnitName") or "")
+    ]).upper()
+
+    if "SOC1" in search_text or "SOC 1" in search_text or "MIỀN BẮC" in search_text or "MIEN BAC" in search_text:
+        return "MB"
+    if "SOC2" in search_text or "SOC 2" in search_text or "MIỀN TRUNG" in search_text or "MIEN TRUNG" in search_text:
+        return "MT"
+    if "SOC3" in search_text or "SOC 3" in search_text or "MIỀN NAM" in search_text or "MIEN NAM" in search_text:
+        return "MN"
+
+    # 2. Thử từ province
+    prov = ticket_data.get("province") or ticket_data.get("tinh_tp") or ticket_data.get("ward") or ""
     if prov:
         _, reg = normalize_to_new_province(prov)
         if reg:
             return reg
 
-    # 2. Thử từ Cell Name
+    # 3. Thử từ Cell Name
     cell_name = ticket_data.get("cell_name") or ticket_data.get("cell_id") or ""
     if cell_name:
         m = re.search(r'[-_]([A-Za-z]{3})(?:[-_]|$)', cell_name)
@@ -478,8 +499,8 @@ def detect_ticket_region(ticket_data: dict, default_region: str = "MN") -> str:
             if reg:
                 return reg
 
-    # 3. Thử từ địa chỉ / địa bàn
-    addr = ticket_data.get("dia_chi") or ticket_data.get("address") or ticket_data.get("noi_dung") or ""
+    # 4. Thử từ địa chỉ / địa bàn / nội dung
+    addr = ticket_data.get("dia_chi") or ticket_data.get("address") or ticket_data.get("noi_dung") or ticket_data.get("ticket_content") or ""
     if addr:
         _, reg = normalize_to_new_province(addr)
         if reg:
@@ -488,17 +509,51 @@ def detect_ticket_region(ticket_data: dict, default_region: str = "MN") -> str:
     return default_region
 
 
+def is_superadmin(user_info: dict) -> bool:
+    """
+    Kiểm tra tài khoản KTV có quyền Super Admin toàn quyền (Quản trị viên 3 Miền).
+    Cụ thể: account 'quangvu', email 'quangvu@vnpt.vn', hoặc các tài khoản admin/root.
+    """
+    if not user_info:
+        return False
+    username = str(
+        user_info.get("userName") or 
+        user_info.get("username") or 
+        user_info.get("ma_nd") or 
+        ""
+    ).lower().strip()
+    
+    email = str(
+        user_info.get("email") or 
+        user_info.get("mail") or 
+        ""
+    ).lower().strip()
+
+    # 1. Khớp chính xác username quangvu hoặc email quangvu@vnpt.vn
+    if username == "quangvu" or email == "quangvu@vnpt.vn":
+        return True
+
+    # 2. Khớp các biến thể email quangvu@... hoặc quangvu....@vnpt.vn
+    if email.startswith("quangvu@") or email.startswith("quangvu."):
+        return True
+
+    # 3. Whitelist tài khoản Quản trị viên hệ thống
+    if username in ("admin", "superadmin", "quantri", "root", "dev"):
+        return True
+
+    return False
+
+
 def detect_user_region(user_info: dict) -> str:
     """
     Nhận diện vùng miền của User KTV khi đăng nhập TTS Mới (OneOSS).
-    Nếu user thuộc Admin hoặc Dev localhost -> Trả về 'ALL'
+    Nếu user thuộc Super Admin (quangvu, quangvu@vnpt.vn, admin localhost) -> Trả về 'ALL'
     Nếu không -> Trả về 'MB', 'MN' hoặc 'MT'.
     """
-    username = str(user_info.get("username") or user_info.get("ma_nd") or "").lower()
-    
-    # Quyền Super Admin (Người quản trị localhost)
-    if username in ("admin", "superadmin", "quantri", "root", "dev"):
+    if is_superadmin(user_info):
         return "ALL"
+
+    username = str(user_info.get("userName") or user_info.get("username") or user_info.get("ma_nd") or "").lower()
 
     # Nhận diện theo tên tỉnh hoặc mã đơn vị trong thông tin KTV
     full_text = " ".join([
@@ -510,11 +565,11 @@ def detect_user_region(user_info: dict) -> str:
         username
     ]).lower()
 
-    if any(k in full_text for k in ("mienbac", "mb", "hanoi", "haiphong", "bacninh", "thainguyen")):
+    if any(k in full_text for k in ("soc1", "soc 1", "mienbac", "miền bắc", "mb", "hanoi", "haiphong", "bacninh", "thainguyen")):
         return "MB"
-    if any(k in full_text for k in ("mientrung", "mt", "danang", "hue", "quangnam", "gialai", "daklak")):
+    if any(k in full_text for k in ("soc2", "soc 2", "mientrung", "miền trung", "mt", "danang", "hue", "quangnam", "gialai", "daklak")):
         return "MT"
-    if any(k in full_text for k in ("miennam", "mn", "hcm", "cantho", "dongnai", "tayninh", "camau", "angiang", "lamdong")):
+    if any(k in full_text for k in ("soc3", "soc 3", "miennam", "miền nam", "mn", "hcm", "cantho", "dongnai", "tayninh", "camau", "angiang", "lamdong")):
         return "MN"
 
     # Mặc định theo tỉnh của user nếu có

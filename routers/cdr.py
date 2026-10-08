@@ -10,13 +10,21 @@ router = APIRouter(prefix="/api/cdr", tags=["Tra cứu SMSC CDR"])
 
 @router.get("/status")
 def get_cdr_integration_status():
+    try:
+        import paramiko
+        has_paramiko = True
+    except ImportError:
+        has_paramiko = False
+
     has_winscp = os.path.exists(WINSCP_PATH)
     return {
         "success": True,
+        "paramiko_available": has_paramiko,
         "winscp_available": has_winscp,
         "winscp_path": WINSCP_PATH,
         "elastic_target": "10.204.57.26",
-        "sftp_target": "10.165.15.84 (VHKT Bridge)"
+        "sftp_target": "10.165.15.84 (VHKT Bridge)",
+        "method": "paramiko_pure_python" if has_paramiko else ("winscp" if has_winscp else "elastic_direct")
     }
 
 

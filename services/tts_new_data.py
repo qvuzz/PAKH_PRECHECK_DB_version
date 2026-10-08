@@ -348,7 +348,8 @@ def _process_single_ticket(
         "ai_summary": ai_summary if ai_summary else "null",
         "reopen_count": reopen_count,
         "last_reopened_date": last_reopened_date,
-        "processing_content": ticket.get("processing_content", "")
+        "processing_content": ticket.get("processing_content", ""),
+        "region": ticket.get("region") or "MN"
     }
 
     with list_lock:
@@ -581,9 +582,9 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False):
             "lock": threading.Lock()
         }
 
-        # XỬ LÝ ĐA LUỒNG TICKET LEVEL (TỐI ĐA 8 WORKERS ĐỒNG THỜI)
+        # XỬ LÝ ĐA LUỒNG TICKET LEVEL (TỐI ĐA 3 WORKERS ĐỒNG THỜI TRÁNH QUÁ TẢI SERVER)
         state.current_step = f"Đang xử lý 0/{total_tickets} thuê bao..."
-        max_ticket_workers = min(8, total_tickets)
+        max_ticket_workers = min(3, total_tickets)
 
         with ThreadPoolExecutor(max_workers=max_ticket_workers) as outer_exec:
             future_to_ticket = {

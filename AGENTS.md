@@ -78,6 +78,13 @@ Tài liệu này là chỉ dẫn bắt buộc cho mọi trợ lý AI (Antigravit
        `http://127.0.0.1:1708/api/reverse-geocode?lat=...&long=...` kết hợp tọa độ GPS (lat/long) từ CEM.
      * Hàm chuẩn hóa lõi: [`normalize_vn_commune_and_province()`](routers/tickets.py) tự động trích xuất đúng `Phường/Xã` và `Tỉnh/TP`.
 
+7. **Quy chuẩn đồng bộ 3 lớp bắt buộc (Code gốc ➔ Thư mục Docker ➔ File nén ZIP)**:
+   * **BẮT BUỘC**: Mỗi khi tạo mới hoặc sửa đổi bất kỳ file code, cấu hình, template, static hay tài liệu triển khai nào:
+     1. **Lớp 1 (Code gốc)**: Sửa tại thư mục gốc workspace (`PAKH_PRECHECK/`).
+     2. **Lớp 2 (Thư mục Docker)**: Đồng bộ ngay lập tức sang thư mục triển khai docker `VNPT TTS PRECHECK/` (giữ nguyên cấu trúc thư mục).
+     3. **Lớp 3 (Gói ZIP triển khai)**: Chạy `python update_deploy_zip.py` để đóng gói cập nhật đè vào file `VNPT_TTS_PRECHECK_DEPLOY.zip`.
+   * **Mục tiêu**: Đảm bảo code chạy trên máy trạm dev, thư mục docker server và file nén bàn giao cho KTV luôn đồng bộ 100%, không bị lệch phiên bản.
+
 ---
 
 ## 🗺️ 2. BẢN ĐỒ CHỈ MỤC CÁC FILE LÕI (CORE REPOSITORY MAP)
@@ -117,3 +124,6 @@ Dự án đã được phân tầng rõ ràng, mọi nghiệp vụ chỉ nằm t
    * Kiểm tra định tuyến SPA tại [`routers/web.py`](routers/web.py) và API lọc tại [`routers/tickets.py`](routers/tickets.py).
 3. **Cập nhật quy tắc đóng phiếu tự động**:
    * Kiểm tra [`routers/tickets.py`](routers/tickets.py) tại các hàm `save_autoclose_config` và điều kiện trigger.
+4. **Đồng bộ 3 lớp (Bắt buộc cuối mỗi tác vụ)**:
+   * Copy file vừa sửa sang thư mục `VNPT TTS PRECHECK/`.
+   * Chạy `python update_deploy_zip.py` để cập nhật `VNPT_TTS_PRECHECK_DEPLOY.zip`.

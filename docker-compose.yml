@@ -1,0 +1,63 @@
+services:
+  pakh-precheck:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pakh_precheck:latest
+    container_name: pakh_precheck_app
+    restart: unless-stopped
+    shm_size: '512mb'
+    ports:
+      - "${PORT:-1234}:1234"
+    env_file:
+      - .env
+    environment:
+      - PORT=1234
+      - TZ=Asia/Ho_Chi_Minh
+      - IS_DOCKER=1
+      - PORT_1708_URL=${PORT_1708_URL:-http://vnpt_customer_position_app:1708}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - vnpt_bridge_net
+    volumes:
+      # Cơ sở dữ liệu SQLite và thư mục kết quả xuất báo cáo
+      - ./tickets.db:/app/tickets.db
+      - ./result:/app/result
+      - ./scratch:/app/scratch
+      # Thư mục mô hình AI Offline (người dùng copy file .gguf vào đây)
+      - ./models:/app/models
+      # Cache Token / Cookie được Client đồng bộ lên máy chủ
+      - ./btools_cookie.json:/app/btools_cookie.json
+      - ./cem_auth_cache.json:/app/cem_auth_cache.json
+      - ./ttsnew_token_cache.json:/app/ttsnew_token_cache.json
+      - ./lan_sessions.json:/app/lan_sessions.json
+      - ./ccos_cookie_cache.json:/app/ccos_cookie_cache.json
+      - ./sapccheck/sapc_cookies.json:/app/sapccheck/sapc_cookies.json
+      # Thư viện danh mục gói cước & công nghệ sóng mạng
+      - ./rattype.json:/app/rattype.json
+      - ./serviceid.json:/app/serviceid.json
+      - ./diagnostic_scenarios.json:/app/diagnostic_scenarios.json
+      # Giao diện Web & Code cập nhật trực tiếp (Live update không cần rebuild image)
+      - ./templates:/app/templates
+      - ./static:/app/static
+      - ./routers:/app/routers
+      - ./services:/app/services
+      - ./db_manager.py:/app/db_manager.py
+      - ./dashboard.py:/app/dashboard.py
+      - ./report_bot.py:/app/report_bot.py
+      - ./btools_manager.py:/app/btools_manager.py
+      - ./ttsnew_api.py:/app/ttsnew_api.py
+      - ./crawler_btools.py:/app/crawler_btools.py
+      - ./region_detector.py:/app/region_detector.py
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:1234/api/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+networks:
+  vnpt_bridge_net:
+    name: vnpt_bridge_net
+    driver: bridge

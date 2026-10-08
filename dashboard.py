@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 BASE_DIR = Path(__file__).resolve().parent
-PORT = 1234
+PORT = int(os.getenv("PORT", 1234))
 
 # Fix UTF-8 encoding trên Windows console (tránh lỗi charmap UnicodeEncodeError)
 if hasattr(sys.stdout, "reconfigure") and sys.stdout is not None:
@@ -57,6 +57,8 @@ from routers import web, auth, automation, tickets, integrations, cdr, flow_audi
 # ==============================================================================
 def kill_existing_port_process(port: int):
     """Đảm bảo không có tiến trình zombie cũ nào chiếm port trước khi bind."""
+    if sys.platform != "win32":
+        return
     try:
         current_pid = os.getpid()
         cmd = f'netstat -ano | findstr :{port}'
@@ -112,9 +114,16 @@ def open_in_chrome_debug(url: str):
 # ==============================================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Khởi tạo database SQLite
-    init_db()
-    launch_chrome_debug()
+    # Khởi tạo database SQLite an toàn
+    try:
+        init_db()
+    except Exception as e:
+        print(f"[ERROR] Khoi tao SQLite Database that bai: {e}")
+
+    try:
+        launch_chrome_debug()
+    except Exception as e:
+        print(f"[WARN] Khoi chay Chrome Debug that bai (co the do chay tren Docker): {e}")
 
     # Khởi chạy luồng worker tự động quét ngầm
     worker_thread = threading.Thread(target=automation_worker_loop, daemon=True)

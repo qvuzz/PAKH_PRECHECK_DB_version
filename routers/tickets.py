@@ -25,7 +25,6 @@ from db_manager import (
 )
 from services.state import state
 from services.session_manager import ACTIVE_LAN_SESSIONS, resolve_ttsnew_token
-from tts_old_api import extract_token_from_browser, fetch_nguyen_nhan_list_api, close_tts_old_ticket_api
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 router = APIRouter(prefix="/api", tags=["Quản lý Phiếu Sự Cố (Tickets)"])
@@ -37,7 +36,7 @@ def get_tickets_api(
     search: str = None, 
     status: str = None, 
     tab: str = None, 
-    source: str = "tts_old", 
+    source: str = "tts_new", 
     service_type: str = "data",
     region: str = None
 ):
@@ -50,23 +49,31 @@ def get_tickets_api(
     # 🎯 Nhận diện quyền truy cập và Phân vùng 3 Miền
     client_ip = request.client.host if request and request.client else "127.0.0.1"
     is_local = client_ip in ("127.0.0.1", "::1", "localhost", "testclient")
+    client_tok = request.headers.get("Authorization") or request.cookies.get("TOKEN") or ""
 
     effective_region = "ALL"
     user_role = "admin"
     current_user_name = "Quản trị viên"
 
-    if is_local:
-        # Super Admin quản trị code: Xem được toàn quốc hoặc chủ động lọc miền
+    _, uinfo = resolve_ttsnew_token(client_ip, is_local=is_local, client_tok=client_tok)
+    from region_detector import is_superadmin, detect_user_region
+
+    if is_superadmin(uinfo):
         user_role = "admin"
         effective_region = (region or "ALL").upper()
-    else:
-        # Client KTV mạng ngoài / LAN: Bắt buộc lọc theo vùng miền của user
+        current_user_name = uinfo.get("displayName") or uinfo.get("userName") or "Quản trị viên"
+    elif uinfo:
         user_role = "ktv"
-        _, uinfo = resolve_ttsnew_token(client_ip, is_local=False)
-        from region_detector import detect_user_region
         user_reg = detect_user_region(uinfo)
-        effective_region = user_reg  # Ép cứng theo miền của KTV
+        if region and region != "ALL":
+            effective_region = region.upper()
+        else:
+            effective_region = user_reg or "ALL"
         current_user_name = uinfo.get("displayName") or uinfo.get("userName") or "KTV"
+    else:
+        user_role = "guest"
+        effective_region = (region or "ALL").upper()
+        current_user_name = ""
 
     tickets = get_all_tickets(
         search=search, 
@@ -109,7 +116,7 @@ def get_closed_stats_api(
 
 
 @router.get("/export_excel")
-def export_excel_api(source: str = "tts_old"):
+def export_excel_api(source: str = "tts_new"):
     from report_bot import export_diagnostics_to_excel
     src_f = None if source == "all" else source
     tickets = get_all_tickets(source=src_f)
@@ -118,7 +125,7 @@ def export_excel_api(source: str = "tts_old"):
 
     out_dir = BASE_DIR / "result"
     os.makedirs(out_dir, exist_ok=True)
-    prefix = "BaoCao_TTS_NEW" if source == "tts_new" else "BaoCao_TTS_OLD"
+    prefix = "BaoCao_TTS_NEW"
     out_file = out_dir / f"{prefix}_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     saved_path = export_diagnostics_to_excel(tickets, out_file)
 
@@ -206,11 +213,59 @@ def normalize_vn_commune_and_province(ward, district, province, address):
     return w, p, ', '.join(loc_parts)
 
 
+_DETECTED_1708_BASE_URL = None
+_LAST_1708_CHECK_TIME = 0
+
+
+def get_1708_base_url() -> str:
+    global _DETECTED_1708_BASE_URL, _LAST_1708_CHECK_TIME
+    now = time.time()
+    if _DETECTED_1708_BASE_URL and (now - _LAST_1708_CHECK_TIME < 300):
+        return _DETECTED_1708_BASE_URL
+
+    env_url = (os.getenv("PORT_1708_URL") or os.getenv("GEOCODE_URL") or "").rstrip("/")
+    candidates = []
+    if env_url:
+        candidates.append(env_url)
+
+    # Ưu tiên các kênh giao tiếp trong Docker bridge và máy Host
+    candidates.extend([
+        "http://vnpt_customer_position_app:1708",
+        "http://vnpt-customer-position:1708",
+        "http://host.docker.internal:1708",
+        "http://172.17.0.1:1708",
+        "http://10.155.59.158:1708",
+        "http://127.0.0.1:1708",
+    ])
+
+    import requests
+    seen = set()
+    for cand in candidates:
+        if not cand or cand in seen:
+            continue
+        seen.add(cand)
+        try:
+            r = requests.get(f"{cand}/", timeout=1.2)
+            if r.status_code in (200, 302, 307):
+                _DETECTED_1708_BASE_URL = cand
+                _LAST_1708_CHECK_TIME = now
+                print(f"🎯 [1708 Service] Đã kết nối CustomerPosition tại: {cand}")
+                return cand
+        except Exception:
+            continue
+
+    fallback = env_url or "http://vnpt_customer_position_app:1708"
+    _DETECTED_1708_BASE_URL = fallback
+    _LAST_1708_CHECK_TIME = now
+    return fallback
+
+
 @router.get("/cell_info/{phone}")
 def get_cell_info_api(phone: str):
     """
     Tra cứu Cell Name, Phường/Xã, Tỉnh/TP từ service CustomerPosition (Link 1).
-    URL: http://127.0.0.1:1708/api/msisdn/84...
+    URL: http://127.0.0.1:1708/api/msisdn/84... hoặc host.docker.internal:1708
+    Kèm fallback trực tiếp từ Core SAPC nếu CustomerPosition chưa có session.
     """
     phone_clean = str(phone or "").strip()
     if not phone_clean:
@@ -227,18 +282,18 @@ def get_cell_info_api(phone: str):
     now_t = time.time()
     cached = _CELL_INFO_CACHE.get(phone_84)
     if cached and (now_t - cached.get("time", 0) < 600):
-        # Chỉ trả về ngay từ cache nếu đã có Phường/Xã chuẩn (Xã, Phường, Thị trấn)
-        c_ward = (cached.get("data", {}).get("ward") or "").lower()
-        COMMUNE_PREFIXES = ('xã ', 'phường ', 'thị trấn ', 'tt. ', 'p. ', 'x. ', 'tt ', 'p ')
-        if any(c_ward.startswith(pfx) for pfx in COMMUNE_PREFIXES):
-            return cached["data"]
+        # Chỉ trả về ngay từ cache nếu đã có Cell Name hoặc Phường/Xã chuẩn
+        cached_data = cached.get("data", {})
+        if cached_data.get("cell_name") or cached_data.get("ward"):
+            return cached_data
 
     import requests
+    base_1708 = get_1708_base_url()
     target_urls = [
-        f"http://127.0.0.1:1708/api/msisdn/{phone_84}",
+        f"{base_1708}/api/msisdn/{phone_84}",
     ]
     if phone_84.startswith("84"):
-        target_urls.append(f"http://127.0.0.1:1708/api/msisdn/0{phone_84[2:]}")
+        target_urls.append(f"{base_1708}/api/msisdn/0{phone_84[2:]}")
 
     cell_name = None
     radio = "4G"
@@ -250,16 +305,18 @@ def get_cell_info_api(phone: str):
 
     for url in target_urls:
         try:
-            resp = requests.get(url, headers={"Accept": "application/json"}, timeout=4.5)
+            resp = requests.get(url, headers={"Accept": "application/json"}, timeout=5.0)
             if resp.status_code == 200:
                 data = resp.json()
                 if data and isinstance(data, dict):
-                    cell_name = (data.get("cell") or "").strip() or None
-                    ward = (data.get("ward") or data.get("phuong_xa") or (data.get("summary") or {}).get("ward") or "").strip() or None
-                    province = (data.get("province") or data.get("tinh_tp") or (data.get("summary") or {}).get("province") or "").strip() or None
-                    district = (data.get("district") or data.get("quan_huyen") or (data.get("summary") or {}).get("district") or "").strip() or None
-                    address = (data.get("address") or data.get("dia_chi") or "").strip() or None
-                    site_name = (data.get("site") or (data.get("summary") or {}).get("site") or "").strip() or None
+                    loc_dict = data.get("location") or {}
+                    sum_dict = data.get("summary") or {}
+                    cell_name = (data.get("cell") or data.get("cell_name") or sum_dict.get("current_cell") or loc_dict.get("cell_name") or "").strip() or None
+                    ward = (data.get("ward") or data.get("phuong_xa") or sum_dict.get("ward") or loc_dict.get("ward") or "").strip() or None
+                    province = (data.get("province") or data.get("tinh_tp") or sum_dict.get("province") or loc_dict.get("province") or "").strip() or None
+                    district = (data.get("district") or data.get("quan_huyen") or sum_dict.get("district") or loc_dict.get("district") or "").strip() or None
+                    address = (data.get("address") or data.get("dia_chi") or loc_dict.get("address") or "").strip() or None
+                    site_name = (data.get("site") or sum_dict.get("current_site") or loc_dict.get("site_name") or "").strip() or None
 
                     if cell_name:
                         c_upper = cell_name.upper()
@@ -278,18 +335,47 @@ def get_cell_info_api(phone: str):
     # Fallback endpoint cũ nếu chưa có dữ liệu
     if not cell_name and not ward:
         try:
-            old_url = f"http://127.0.0.1:1708/msisdn/{phone_84}"
-            resp = requests.get(old_url, headers={"Accept": "application/json"}, timeout=3.0)
+            old_url = f"{base_1708}/msisdn/{phone_84}"
+            resp = requests.get(old_url, headers={"Accept": "application/json"}, timeout=3.5)
             if resp.status_code == 200:
                 d = resp.json()
                 summary = d.get("summary") or {}
                 location = d.get("location") or {}
                 subscriber = d.get("subscriber") or {}
-                cell_name = summary.get("current_cell") or location.get("cell_name")
+                cell_name = summary.get("current_cell") or location.get("cell_name") or (d.get("cell") or "")
                 radio = subscriber.get("Radio") or "4G"
                 site_name = summary.get("current_site") or location.get("site_name")
         except Exception:
             pass
+
+    # 🎯 Fallback nội bộ: Tra cứu trực tiếp từ Core SAPC (10.155.42.218) nếu port 1708 chưa có cell
+    if not cell_name:
+        try:
+            try:
+                from sapccheck.msisdn_info import tra_cell_tu_so_dien_thoai
+            except Exception:
+                import sys
+                from pathlib import Path
+                root_d = Path(__file__).resolve().parent.parent
+                sapc_d = root_d / "sapccheck"
+                if str(root_d) not in sys.path:
+                    sys.path.insert(0, str(root_d))
+                if str(sapc_d) not in sys.path:
+                    sys.path.insert(0, str(sapc_d))
+                try:
+                    from sapccheck.msisdn_info import tra_cell_tu_so_dien_thoai
+                except Exception:
+                    from msisdn_info import tra_cell_tu_so_dien_thoai
+            sapc_res = tra_cell_tu_so_dien_thoai(phone_84)
+            if sapc_res and isinstance(sapc_res, dict) and not sapc_res.get("error"):
+                c_sapc = sapc_res.get("CellName") or sapc_res.get("cell_name")
+                if c_sapc:
+                    cell_name = str(c_sapc).strip()
+                r_sapc = sapc_res.get("Radio") or sapc_res.get("radio")
+                if r_sapc:
+                    radio = str(r_sapc).strip()
+        except Exception as sapc_ex:
+            print(f"⚠️ [CellInfo Fallback SAPC] Lỗi tra cứu: {sapc_ex}")
 
     coord_lat = None
     coord_lng = None
@@ -375,10 +461,12 @@ def get_cell_location_api(
     coord_lat = lat
     coord_lng = long or lng
 
+    base_1708 = get_1708_base_url()
+
     def _fetch_from_1708(query_target):
         nonlocal ward, province, district, address, site, cell_name
         try:
-            resp = requests.get(f"http://127.0.0.1:1708/api/cell/{query_target}", headers={"Accept": "application/json"}, timeout=4.5)
+            resp = requests.get(f"{base_1708}/api/cell/{query_target}", headers={"Accept": "application/json"}, timeout=4.0)
             if resp.status_code == 200:
                 data = resp.json()
                 if data and isinstance(data, dict) and data.get("success") is not False:
@@ -392,8 +480,8 @@ def get_cell_location_api(
                         site = (data.get("site") or (data.get("summary") or {}).get("site") or "").strip() or None
                         cell_name = (data.get("cell") or clean_cell).strip()
                         return True
-        except Exception as e:
-            print(f"⚠️ [Location] Lỗi tra cứu Cell {query_target} từ port 1708: {e}")
+        except Exception:
+            pass
         return False
 
     # 1. Tra cứu theo tên Cell ID gốc
@@ -421,15 +509,15 @@ def get_cell_location_api(
                 c_lat, c_lng = get_cell_coordinates(clean_cell, phone=phone)
                 if c_lat and c_lng:
                     coord_lat, coord_lng = c_lat, c_lng
-            except Exception as e:
-                print(f"⚠️ [Location] Lỗi lấy tọa độ CEM cho Cell {clean_cell}: {e}")
+            except Exception:
+                pass
 
         if coord_lat and coord_lng:
             try:
                 geo_resp = requests.get(
-                    "http://127.0.0.1:1708/api/reverse-geocode",
+                    f"{base_1708}/api/reverse-geocode",
                     params={"lat": coord_lat, "long": coord_lng, "lng": coord_lng},
-                    timeout=4.5
+                    timeout=4.0
                 )
                 if geo_resp.status_code == 200:
                     geo_data = geo_resp.json()
@@ -447,8 +535,8 @@ def get_cell_location_api(
                             district = g_dist
                         if g_addr and not address:
                             address = g_addr
-            except Exception as e:
-                print(f"⚠️ [Location] Lỗi gọi reverse-geocode port 1708 cho Cell {clean_cell}: {e}")
+            except Exception:
+                pass
 
     norm_w, norm_p, loc_str = normalize_vn_commune_and_province(ward, district, province, address)
 
@@ -536,154 +624,7 @@ async def clear_tickets_api(request: Request):
 @router.post("/tts_old_api/close_one")
 @router.post("/tickets/close_one")
 async def close_one_tts_old_ticket(request: Request):
-    body = await request.json()
-    phone = body.get("phone")
-    incident_time = body.get("incident_time")
-    comment_input = body.get("comment")
-    action_plan_input = body.get("action_plan")
-    if not phone:
-        return Response(content="Missing phone", status_code=400)
-
-    conn = get_db_connection()
-    row = conn.execute("SELECT * FROM tickets WHERE phone = ? AND incident_time = ?", (phone, incident_time)).fetchone()
-    conn.close()
-
-    if not row:
-        return {"success": False, "message": f"Không tìm thấy phiếu của SĐT {phone} trong cơ sở dữ liệu."}
-
-    ticket_dict = dict(row)
-
-    if not ticket_dict.get("id_yeu_cau") and ticket_dict.get("flow_id"):
-        ticket_dict["id_yeu_cau"] = ticket_dict["flow_id"]
-    if not ticket_dict.get("ma_ccos") and ticket_dict.get("ticket_code"):
-        ticket_dict["ma_ccos"] = ticket_dict["ticket_code"]
-
-    if comment_input is not None:
-        update_ticket_field(phone, "comment", comment_input, incident_time=incident_time)
-        ticket_dict["comment"] = comment_input
-    if action_plan_input is not None:
-        update_ticket_field(phone, "action_plan", action_plan_input, incident_time=incident_time)
-        ticket_dict["action_plan"] = action_plan_input
-
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    is_local = client_ip in ("127.0.0.1", "localhost", "::1")
-
-    client_token = (body.get("token") or "").strip()
-    client_user_id = body.get("user_id")
-    client_user_name = (body.get("user_name") or "").strip()
-
-    token = client_token
-    user_id = client_user_id
-    user_name = client_user_name
-
-    if not token:
-        if client_ip in ACTIVE_LAN_SESSIONS and ACTIVE_LAN_SESSIONS[client_ip].get("token"):
-            token = ACTIVE_LAN_SESSIONS[client_ip]["token"]
-            u_inf = ACTIVE_LAN_SESSIONS[client_ip].get("user") or {}
-            user_id = user_id or u_inf.get("Id") or u_inf.get("id") or 0
-            user_name = user_name or u_inf.get("HoTen") or u_inf.get("TaiKhoan") or "Kỹ thuật viên"
-        elif is_local:
-            token, user_info = extract_token_from_browser()
-            if user_info:
-                user_id = user_id or user_info.get("Id") or user_info.get("id") or 0
-                user_name = user_name or user_info.get("HoTen") or user_info.get("TaiKhoan") or "Quản trị viên"
-        else:
-            return {"success": False, "message": "Bạn chưa kết nối tài khoản TTS Cũ của mình trên trình duyệt này. Vui lòng bấm vào nút TTS CŨ trên thanh công cụ để đăng nhập trước khi đóng phiếu!"}
-
-    if token and not user_id and client_ip in ACTIVE_LAN_SESSIONS:
-        u_inf = ACTIVE_LAN_SESSIONS[client_ip].get("user") or {}
-        user_id = user_id or u_inf.get("Id") or u_inf.get("id") or 0
-        user_name = user_name or u_inf.get("HoTen") or u_inf.get("TaiKhoan") or "Kỹ thuật viên"
-
-    if token and (not user_id or user_id == 0):
-        from tts_old_api import fetch_tts_old_user_info
-        fresh_u = fetch_tts_old_user_info(token)
-        if fresh_u and fresh_u.get("Id"):
-            user_id = int(fresh_u["Id"])
-            user_name = fresh_u.get("HoTen") or fresh_u.get("TaiKhoan") or user_name
-            save_cached_auth(token, fresh_u)
-            if client_ip in ACTIVE_LAN_SESSIONS:
-                ACTIVE_LAN_SESSIONS[client_ip]["user"] = fresh_u
-                _save_lan_sessions()
-
-    if not token:
-        return {"success": False, "message": "Không tìm thấy token scnntttoken của TTS Cũ. Vui lòng kết nối tài khoản TTS trước."}
-
-    user_name = user_name or "Kỹ thuật viên"
-    user_id = user_id or 0
-    nguyen_nhan_map = fetch_nguyen_nhan_list_api(token)
-
-    import update_tts.config as tts_config
-    import update_tts.excel_reader as excel_reader
-    matched_nn, action_override = excel_reader.get_nguyen_nhan_and_action(ticket_dict)
-
-    id_nn = None
-    if matched_nn:
-        id_nn = nguyen_nhan_map.get(matched_nn.lower()) or nguyen_nhan_map.get(matched_nn)
-    if not id_nn:
-        id_nn = 1016
-
-    action_text = ticket_dict.get('action_plan', '') or action_override or ''
-    full_content = f"{ticket_dict.get('comment', '')}\n{action_text}".strip()
-    if not full_content:
-        full_content = "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường"
-
-    state.log("STEP", f"Đang gửi request đóng phiếu TTS Cũ cho SĐT {phone} bởi [{user_name}]...")
-    ok, msg = close_tts_old_ticket_api(
-        ticket=ticket_dict,
-        id_nguyen_nhan=id_nn,
-        noi_dung=full_content,
-        token=token,
-        user_id=user_id,
-        dry_run=False
-    )
-    if not ok and ("401" in str(msg) or "Authorization has been denied" in str(msg)):
-        if is_local:
-            fresh_token, fresh_user = extract_token_from_browser()
-        else:
-            # Client LAN: thử lấy token mới từ LAN session của chính user đó
-            fresh_token = ""
-            fresh_user = {}
-            if client_ip in ACTIVE_LAN_SESSIONS:
-                fresh_token = ACTIVE_LAN_SESSIONS[client_ip].get("token", "")
-                fresh_user = ACTIVE_LAN_SESSIONS[client_ip].get("user", {})
-        if fresh_token and fresh_token != token:
-            state.log("INFO", "🔄 Token TTS Cũ đã hết hạn, tự động trích xuất token mới từ trình duyệt và thử lại...")
-            token = fresh_token
-            if fresh_user:
-                user_id = fresh_user.get("Id") or user_id
-                user_name = fresh_user.get("HoTen") or fresh_user.get("TaiKhoan") or user_name
-            nguyen_nhan_map = fetch_nguyen_nhan_list_api(token)
-            if matched_nn:
-                id_nn = nguyen_nhan_map.get(matched_nn.lower()) or nguyen_nhan_map.get(matched_nn) or 1016
-            ok, msg = close_tts_old_ticket_api(
-                ticket=ticket_dict,
-                id_nguyen_nhan=id_nn,
-                noi_dung=full_content,
-                token=token,
-                user_id=user_id,
-                dry_run=False
-            )
-
-    if ok:
-        from datetime import datetime, timezone, timedelta
-        ICT = timezone(timedelta(hours=7))
-        now_close_str = datetime.now(ICT).strftime("%Y-%m-%d %H:%M:%S")
-        update_ticket_field(phone, "ticket_status", "Đã đóng", incident_time=incident_time)
-        update_ticket_field(phone, "closed_by", user_name, incident_time=incident_time)
-        update_ticket_field(phone, "closed_at", now_close_str, incident_time=incident_time)
-        state.closed_count += 1
-        state.log("SUCCESS", f"✅ [{user_name}] {msg}")
-    else:
-        state.log("WARN", msg)
-
-    return {
-        "success": ok, 
-        "message": msg, 
-        "closed_by": user_name,
-        "token": token,
-        "user_id": user_id
-    }
+    return {"success": False, "message": "Hệ thống TTS Cũ đã ngừng hoạt động. Vui lòng đóng phiếu qua hệ thống TTS Mới."}
 
 
 @router.post("/ttsnew/open_detail")
@@ -720,9 +661,15 @@ async def open_detail_ttsnew_api(request: Request):
 
     client_ip = request.client.host if request.client else "127.0.0.1"
     is_local = client_ip in ("127.0.0.1", "localhost", "::1")
-    client_tok = (body.get("token") or "").strip()
+    client_tok = (body.get("token") or request.headers.get("Authorization") or "").strip()
     from ttsnew_api import fetch_active_tickets
     tok, ktv_user = resolve_ttsnew_token(client_ip, is_local, client_tok)
+    if not tok:
+        return {
+            "success": False,
+            "require_login": True,
+            "message": "Bạn chưa đăng nhập TTS Mới trên trình duyệt này. Vui lòng đăng nhập tài khoản của bạn trước khi xử lý phiếu."
+        }
 
     if not flow_id and tok:
         try:
@@ -891,7 +838,7 @@ async def close_one_ttsnew_ticket(request: Request):
 
     client_ip = request.client.host if request.client else "127.0.0.1"
     is_local = client_ip in ("127.0.0.1", "localhost", "::1")
-    client_tok = (body.get("token") or "").strip()
+    client_tok = (body.get("token") or request.headers.get("Authorization") or "").strip()
 
     from ttsnew_api import fetch_active_tickets, api_transfer_ttsnew_ticket
     tok, ktv_user = resolve_ttsnew_token(client_ip, is_local, client_tok)
@@ -904,17 +851,18 @@ async def close_one_ttsnew_ticket(request: Request):
     ktv_name = ktv_user.get("displayName") or ktv_user.get("userName") or "Kỹ thuật viên"
     state.log("STEP", f"Đang gửi yêu cầu xử lý phiếu {clean_code or phone} trên TTS Mới bởi [{ktv_name}] (IP: {client_ip})...")
 
-    try:
-        raw_active = fetch_active_tickets(tok, limit=1000)
-        for r_it in raw_active:
-            if (ticket_id and str(r_it.get("ticketId")) == str(ticket_id)) or \
-               (clean_code and str(r_it.get("ticketCode")) == str(clean_code)) or \
-               (phone and phone in str(r_it)):
-                flow_id = r_it.get("id")
-                ticket_id = r_it.get("ticketId")
-                break
-    except Exception:
-        pass
+    if not flow_id or not ticket_id:
+        try:
+            raw_active = fetch_active_tickets(tok, limit=1000)
+            for r_it in raw_active:
+                if (ticket_id and str(r_it.get("ticketId")) == str(ticket_id)) or \
+                   (clean_code and str(r_it.get("ticketCode")) == str(clean_code)) or \
+                   (phone and phone in str(r_it)):
+                    flow_id = r_it.get("id")
+                    ticket_id = r_it.get("ticketId")
+                    break
+        except Exception:
+            pass
 
     if not flow_id or not ticket_id:
         return {"success": False, "message": f"Không tìm thấy luồng xử lý (flow_id/ticket_id) của phiếu {clean_code or phone} trên TTS Mới."}
@@ -974,11 +922,12 @@ async def close_all_ttsnew_tickets(request: Request):
     client_ip = request.client.host if request.client else "127.0.0.1"
     is_local = client_ip in ("127.0.0.1", "localhost", "::1")
     body = await request.json()
-    client_tok = (body.get("token") or "").strip()
+    client_tok = (body.get("token") or request.headers.get("Authorization") or "").strip()
     tok, ktv_user = resolve_ttsnew_token(client_ip, is_local, client_tok)
     if not tok:
         return {
             "success": False, 
+            "require_login": True,
             "message": "Không tìm thấy phiên xác thực TTS Mới. Vui lòng kết nối tài khoản KTV của bạn trước khi thực hiện đóng tự động."
         }
 
@@ -1355,12 +1304,10 @@ async def move_ticket_to_step_2_4(request: Request):
 
     ticket_id = body.get("ticket_id")
     flow_id = body.get("flow_id")
-    client_tok = (body.get("token") or "").strip()
-
     client_ip = request.client.host if request.client else "127.0.0.1"
     is_local = client_ip in ("127.0.0.1", "localhost", "::1")
+    client_tok = (body.get("token") or request.headers.get("Authorization") or "").strip()
 
-    from ttsnew_api import fetch_active_tickets, api_move_step_2_3_to_2_4
     tok, ktv_user = resolve_ttsnew_token(client_ip, is_local, client_tok)
     if not tok:
         return {
@@ -1803,13 +1750,17 @@ async def update_ticket_ward_api(request: Request):
     if target_tid and province_id and ward_id:
         client_ip = request.client.host if request.client else "127.0.0.1"
         is_local = client_ip in ("127.0.0.1", "localhost", "::1")
-        client_tok = (body.get("token") or "").strip()
+        client_tok = (body.get("token") or request.headers.get("Authorization") or "").strip()
         from services.session_manager import resolve_ttsnew_token
         tok, _ = resolve_ttsnew_token(client_ip, is_local, client_tok)
-        target_f_id = int(body.get("field_id") or 71)
-        ok, msg = sync_update_ticket_boundary_tts_new(int(target_tid), int(province_id), int(ward_id), address_detail or ward_address, token=tok, field_id=target_f_id)
-        tts_synced = ok
-        sync_msg = msg
+        if not tok:
+            tts_synced = False
+            sync_msg = "Chưa đăng nhập TTS Mới trên trình duyệt này, chỉ lưu cục bộ"
+        else:
+            target_f_id = int(body.get("field_id") or 71)
+            ok, msg = sync_update_ticket_boundary_tts_new(int(target_tid), int(province_id), int(ward_id), address_detail or ward_address, token=tok, field_id=target_f_id)
+            tts_synced = ok
+            sync_msg = msg
 
     return {
         "success": success_local,

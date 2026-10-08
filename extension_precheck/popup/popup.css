@@ -1,0 +1,451 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    width: 360px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #0b1120;
+    color: #e2e8f0;
+    font-size: 11px;
+    line-height: 1.4;
+    user-select: none;
+}
+
+/* Header */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    background: linear-gradient(180deg, #131f37 0%, #0b1120 100%);
+    border-bottom: 1px solid #1e293b;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+}
+
+.brand-logo {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #005aa0 0%, #0284c7 100%);
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);
+}
+
+.brand-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #f8fafc;
+    letter-spacing: 0.2px;
+}
+
+.brand-sub {
+    font-size: 9.5px;
+    color: #94a3b8;
+}
+
+/* Status Pill (Master Badge) */
+.status-pill {
+    padding: 2px 7px;
+    border-radius: 9999px;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.status-green {
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.status-blue {
+    background: rgba(2, 132, 199, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(2, 132, 199, 0.35);
+}
+
+.status-gray {
+    background: rgba(100, 116, 139, 0.15);
+    color: #94a3b8;
+    border: 1px solid rgba(100, 116, 139, 0.3);
+}
+
+.status-red {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+/* Status Dot for Service Cards */
+.status-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+    margin-right: 4px;
+    transition: all 0.25s ease-in-out;
+}
+
+.status-dot.green {
+    background-color: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.9);
+}
+
+.status-dot.red {
+    background-color: #ef4444;
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.75);
+}
+
+.status-dot.checking {
+    background-color: #64748b;
+    opacity: 0.45;
+}
+
+/* Ports Panel */
+.ports-panel {
+    padding: 8px 14px;
+    background: #0f172a;
+    border-bottom: 1px solid #1e293b;
+}
+
+.ports-title {
+    font-size: 9px;
+    text-transform: uppercase;
+    color: #64748b;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-bottom: 5px;
+}
+
+.ports-row {
+    display: flex;
+    gap: 8px;
+}
+
+.port-item {
+    flex: 1;
+    background: #1e293b;
+    padding: 4px 6px;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid #334155;
+    transition: all 0.2s;
+}
+
+.port-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #64748b;
+}
+
+.port-item.online .port-dot {
+    background: #10b981;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.7);
+}
+
+.port-item.online {
+    border-color: rgba(16, 185, 129, 0.4);
+    background: rgba(16, 185, 129, 0.08);
+}
+
+.port-label {
+    font-size: 9.5px;
+    font-weight: 600;
+    color: #cbd5e1;
+}
+
+/* Services Container */
+.services-container {
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    max-height: 330px;
+    overflow-y: auto;
+}
+
+.services-container::-webkit-scrollbar {
+    width: 4px;
+}
+.services-container::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 4px;
+}
+
+/* Service Card */
+.service-card {
+    background: #111827;
+    border: 1px solid #1f2937;
+    border-radius: 7px;
+    padding: 7px 9px;
+    transition: border-color 0.15s;
+}
+
+.service-card:hover {
+    border-color: #374151;
+}
+
+.service-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.service-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.service-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: #f1f5f9;
+}
+
+.service-type {
+    font-size: 8.5px;
+    color: #64748b;
+}
+
+.service-body {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+}
+
+.token-preview {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 9px;
+    color: #94a3b8;
+    background: #090d16;
+    padding: 3px 6px;
+    border-radius: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+    border: 1px solid #1e293b;
+}
+
+.btn-open-link {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #38bdf8;
+    padding: 3px 12px;
+    border-radius: 4px;
+    font-size: 9.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    text-align: center;
+}
+
+.btn-open-link:hover {
+    background: #0284c7;
+    color: #ffffff;
+    border-color: #0284c7;
+    box-shadow: 0 0 8px rgba(2, 132, 199, 0.4);
+}
+
+/* Footer */
+.footer {
+    padding: 10px 14px 12px;
+    background: #0f172a;
+    border-top: 1px solid #1e293b;
+}
+
+.sync-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 9.5px;
+    color: #64748b;
+    margin-bottom: 8px;
+}
+
+.time-value {
+    color: #94a3b8;
+    font-weight: 600;
+}
+
+.action-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 9px;
+}
+
+.btn {
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #005aa0 0%, #0284c7 100%);
+    color: #ffffff;
+    box-shadow: 0 2px 10px rgba(2, 132, 199, 0.3);
+}
+
+.btn-primary:hover:not(:disabled) {
+    opacity: 0.93;
+    transform: translateY(-1px);
+}
+
+.btn-secondary {
+    background: #1e293b;
+    color: #cbd5e1;
+    border: 1px solid #334155;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: #334155;
+    color: #ffffff;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Quick Apps */
+.quick-apps {
+    border-top: 1px dashed #1e293b;
+    padding-top: 7px;
+}
+
+.apps-title {
+    font-size: 8.5px;
+    text-transform: uppercase;
+    color: #64748b;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    margin-bottom: 5px;
+}
+
+.apps-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 5px;
+}
+
+.btn-app {
+    background: #111827;
+    border: 1px solid #1f2937;
+    color: #94a3b8;
+    padding: 4px 2px;
+    border-radius: 4px;
+    font-size: 8.5px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.btn-app:hover {
+    background: #1e293b;
+    color: #38bdf8;
+    border-color: #38bdf8;
+}
+
+/* Server Config Panel */
+.server-config-panel {
+    padding: 8px 14px;
+    background: #0f172a;
+    border-bottom: 1px solid #1e293b;
+}
+.server-config-title {
+    font-size: 9.5px;
+    text-transform: uppercase;
+    color: #38bdf8;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-bottom: 5px;
+}
+.server-config-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+.server-input {
+    flex: 1;
+    height: 26px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    color: #f8fafc;
+    font-size: 11px;
+    padding: 0 8px;
+    outline: none;
+    font-family: inherit;
+}
+.server-input:focus {
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 1px #38bdf8;
+}
+.btn-save-server {
+    height: 26px;
+    padding: 0 10px;
+    background: #0284c7;
+    color: #ffffff;
+    border: none;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease;
+}
+.btn-save-server:hover {
+    background: #0369a1;
+}
+.server-status-text {
+    font-size: 9.5px;
+    color: #94a3b8;
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.server-status-text.ok {
+    color: #4ade80;
+}
+.server-status-text.err {
+    color: #f87171;
+}

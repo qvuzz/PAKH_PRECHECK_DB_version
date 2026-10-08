@@ -409,8 +409,8 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
 
     url_cust = f"{API_BASE_URL}/get-customer-by-ticketflowid/{flow_id}"
     url_info = f"{API_BASE_URL}/get-ticket-info?ticketTypeId=2&ticketFlowId={flow_id}"
-    reopen_count = int(it.get("reopenCount") or 0)
-    last_reopened_date = str(it.get("lastReopenedDate") or "").strip()
+    reopen_count = int(it.get("reopenCount") or it.get("reOpenCount") or it.get("soLanMoLai") or it.get("reopen_count") or 0)
+    last_reopened_date = str(it.get("lastReopenedDate") or it.get("last_reopened_date") or "").strip()
 
     try:
         resp = make_api_request(url_cust, token, timeout=10)
@@ -432,15 +432,21 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             resp_info = make_api_request(url_info, token, timeout=8)
             info_data = resp_info.get("data") or {}
             if isinstance(info_data, dict):
-                rc = info_data.get("reopenCount")
+                rc = info_data.get("reopenCount") or info_data.get("reOpenCount") or info_data.get("soLanMoLai") or info_data.get("reopen_count")
                 if rc is not None:
                     reopen_count = int(rc or 0)
-                lrd = info_data.get("lastReopenedDate")
+                lrd = info_data.get("lastReopenedDate") or info_data.get("last_reopened_date")
                 if lrd:
                     last_reopened_date = str(lrd).strip()
                 processing_content = str(info_data.get("processingContent") or "").strip()
         except Exception:
             pass
+
+        # Fallback nhận diện phiếu mở lại từ tiêu đề hoặc nội dung nếu hệ thống chưa gán trường số
+        if reopen_count == 0:
+            comb_text = f"{it.get('title', '')} {it.get('content', '')} {proc_name} {step_name}".lower()
+            if "mở lại" in comb_text or "phiếu mở lại" in comb_text:
+                reopen_count = 1
 
         return {
             "flow_id": flow_id,
@@ -462,9 +468,21 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "reopen_count": reopen_count,
             "last_reopened_date": last_reopened_date,
             "processing_content": processing_content,
+            "region": detect_ticket_region({
+                "ticket_code": combined_code,
+                "step_name": step_name,
+                "process_name": proc_name,
+                "processNodeName": step_name,
+                "processDefinitionName": proc_name,
+                "title": it.get("title", ""),
+                "content": it.get("content", ""),
+                "assigned_unit": it.get("assignedUnitName", ""),
+                "assignedUnitName": it.get("assignedUnitName", "")
+            }),
         }
     except Exception as e:
         raw_fb = str(it.get("subscriberNumber") or it.get("customerPhone") or "").strip()
+        from region_detector import detect_ticket_region
         return {
             "flow_id": flow_id,
             "ticket_id": it.get("ticketId"),
@@ -485,6 +503,14 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "reopen_count": reopen_count,
             "last_reopened_date": last_reopened_date,
             "processing_content": "",
+            "region": detect_ticket_region({
+                "ticket_code": combined_code,
+                "step_name": step_name,
+                "process_name": proc_name,
+                "title": it.get("title", ""),
+                "content": it.get("content", ""),
+                "assigned_unit": it.get("assignedUnitName", "")
+            }),
             "error": str(e),
         }
 
@@ -752,19 +778,19 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
                 if ticket_id:
                     conn.execute("""
                         UPDATE tickets 
-                        SET ticket_status = 'Đã đóng', closed_by = ?, closed_at = ?, updated_at = CURRENT_TIMESTAMP 
+                        SET ticket_status = 'Đã đóng 2.6', closed_by = ?, closed_at = ?, updated_at = CURRENT_TIMESTAMP 
                         WHERE ticket_id = ? AND source = 'tts_new'
                     """, (actor_name, now_close_str, ticket_id))
                 elif clean_c:
                     conn.execute("""
                         UPDATE tickets 
-                        SET ticket_status = 'Đã đóng', closed_by = ?, closed_at = ?, updated_at = CURRENT_TIMESTAMP 
+                        SET ticket_status = 'Đã đóng 2.6', closed_by = ?, closed_at = ?, updated_at = CURRENT_TIMESTAMP 
                         WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new'
                     """, (actor_name, now_close_str, clean_c, f"{clean_c}%"))
                 elif phone:
                     conn.execute("""
                         UPDATE tickets 
-                        SET ticket_status = 'Đã đóng', closed_by = ?, closed_at = ?, updated_at = CURRENT_TIMESTAMP 
+                        SET ticket_status = 'Đã đóng 2.6', closed_by = ?, closed_at = ?, updated_at = CURRENT_TIMESTAMP 
                         WHERE phone = ? AND source = 'tts_new'
                     """, (actor_name, now_close_str, phone))
                 conn.commit()
@@ -898,7 +924,12 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         else:
             chosen_node = next((n for n in next_node_list if "2.6" in str(n.get("name", "")) or str((n.get("processData") or {}).get("stepCode", "")) == "2.6"), None)
             if not chosen_node:
-                chosen_node = next((n for n in next_node_list if "2.4" in str(n.get("name", "")) and "soc2" in str(n.get("name", "")).lower()), None)
+                t_lower = str(ticket_code or "").lower()
+                target_soc = "soc1" if "soc1" in t_lower else ("soc3" if "soc3" in t_lower else ("soc2" if "soc2" in t_lower else ""))
+                if target_soc:
+                    chosen_node = next((n for n in next_node_list if "2.4" in str(n.get("name", "")) and target_soc in str(n.get("name", "")).lower()), None)
+                if not chosen_node:
+                    chosen_node = next((n for n in next_node_list if "2.4" in str(n.get("name", ""))), None)
 
         if not chosen_node:
             valid_targets = [str(n.get("name")) for n in next_node_list]
@@ -1002,7 +1033,7 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         from datetime import datetime, timezone, timedelta
         ICT = timezone(timedelta(hours=7))
         now_close_str = datetime.now(ICT).strftime("%Y-%m-%d %H:%M:%S") if is_step_5_1 else None
-        new_status = "Đã đóng (5.1)" if is_step_5_1 else "Chờ đóng lần 2"
+        new_status = "Đã đóng 5.1" if is_step_5_1 else "Chờ đóng lần 2"
         clean_code = (ticket_code or "").split("\n")[0].strip()
         new_flow_id = None
         new_actual_step = next_step_name
@@ -1155,14 +1186,18 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
                     "message": f"⚠️ Phiếu đang ở bước '{curr_node_name}', không hỗ trợ chuyển sang 2.4. Các bước tiếp theo: {[n.get('name') for n in next_node_list]}"
                 }
 
-        # 2. Tìm node bước đích 2.4
         chosen_node = None
-        for n in next_node_list:
-            n_name = str(n.get("name") or "")
-            n_code = str((n.get("processData") or {}).get("stepCode") or "")
-            if "2.4" in n_name or "2.4" in n_code or "đánh giá" in n_name.lower():
-                chosen_node = n
-                break
+        t_lower = str(ticket_code or "").lower()
+        target_soc = "soc1" if "soc1" in t_lower else ("soc3" if "soc3" in t_lower else ("soc2" if "soc2" in t_lower else ""))
+        if target_soc:
+            chosen_node = next((n for n in next_node_list if ("2.4" in str(n.get("name") or "") or "2.4" in str((n.get("processData") or {}).get("stepCode") or "")) and target_soc in str(n.get("name") or "").lower()), None)
+        if not chosen_node:
+            for n in next_node_list:
+                n_name = str(n.get("name") or "")
+                n_code = str((n.get("processData") or {}).get("stepCode") or "")
+                if "2.4" in n_name or "2.4" in n_code or "đánh giá" in n_name.lower():
+                    chosen_node = n
+                    break
 
         if not chosen_node and next_node_list:
             # Fallback lấy node đầu tiên nếu chỉ có 1 node
@@ -1364,7 +1399,7 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
         db_rows = conn.execute("""
             SELECT ticket_id, ticket_code, phone, flow_id, ticket_status 
             FROM tickets 
-            WHERE source = 'tts_new' AND ticket_status NOT IN ('Đã đóng', 'Da dong')
+            WHERE source = 'tts_new' AND (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%')
         """).fetchall()
 
         if not db_rows:
@@ -1483,8 +1518,8 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
                             "ticket_code": en_ticket.get("ticket_code") or it_code,
                             "ticket_id": it.get("ticketId"),
                             "flow_id": it.get("id"),
-                            "reopen_count": int(it.get("reopenCount") or 0),
-                            "last_reopened_date": str(it.get("lastReopenedDate") or "").strip()
+                            "reopen_count": int(en_ticket.get("reopen_count") or it.get("reopenCount") or 0),
+                            "last_reopened_date": str(en_ticket.get("last_reopened_date") or it.get("lastReopenedDate") or "").strip()
                         }
                         save_or_update_ticket(rec)
                         updated_count += 1

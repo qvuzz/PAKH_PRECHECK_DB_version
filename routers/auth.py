@@ -15,9 +15,16 @@ from ttsnew_api import save_cached_token
 router = APIRouter(prefix="/api", tags=["Xác thực & Phiên KTV"])
 
 
+def _get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "127.0.0.1"
+
+
 @router.get("/current_user")
 def get_current_user_info(request: Request):
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = _get_client_ip(request)
     is_local = client_ip in ("127.0.0.1", "localhost", "::1")
 
     token = ""
@@ -81,26 +88,42 @@ async def login_tts_step1(request: Request):
     body = await request.json()
     username = body.get("username", "").strip()
     password = body.get("password", "").strip()
-    system = str(body.get("system") or "tts_old").strip()
+    system = str(body.get("system") or "tts_new").strip()
+    print(f"[AUTH API] 📥 [BƯỚC 1] Nhận yêu cầu Đăng nhập: system={system}, user={username}", flush=True)
 
     from services.auth_tts import authenticate_tts_step1
     result = authenticate_tts_step1(username, password, system=system)
 
     if result.get("success"):
-        client_ip = request.client.host if request.client else "127.0.0.1"
+        client_ip = _get_client_ip(request)
         is_local = (client_ip in ("127.0.0.1", "localhost", "::1"))
         token = result.get("token", "")
         ttsnew_token = result.get("ttsnew_token", "")
         user_info = result.get("user", {})
         if client_ip not in ACTIVE_LAN_SESSIONS:
             ACTIVE_LAN_SESSIONS[client_ip] = {}
+
         if system == "tts_new":
             tok_to_save = ttsnew_token or token
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok_to_save
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
-            if is_local and tok_to_save:
+            if tok_to_save:
                 save_cached_token(tok_to_save)
+        elif system == "btools":
+            from btools_manager import save_btools_cookie
+            save_btools_cookie(token, verify=False)
+            ACTIVE_LAN_SESSIONS[client_ip]["btools_cookie"] = token
+            ACTIVE_LAN_SESSIONS[client_ip]["btools_timestamp"] = time.time()
+        elif system == "cem":
+            ACTIVE_LAN_SESSIONS[client_ip]["cem_apikey"] = token
+            ACTIVE_LAN_SESSIONS[client_ip]["cem_timestamp"] = time.time()
+        elif system == "sapc":
+            ACTIVE_LAN_SESSIONS[client_ip]["sapc_cookie"] = token
+            ACTIVE_LAN_SESSIONS[client_ip]["sapc_timestamp"] = time.time()
+        elif system == "ccos":
+            ACTIVE_LAN_SESSIONS[client_ip]["ccos_cookie"] = token
+            ACTIVE_LAN_SESSIONS[client_ip]["ccos_timestamp"] = time.time()
         else:
             ACTIVE_LAN_SESSIONS[client_ip]["token"] = token
             ACTIVE_LAN_SESSIONS[client_ip]["user"] = user_info
@@ -115,32 +138,38 @@ async def login_tts_step1(request: Request):
         _save_lan_sessions()
 
         user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or user_info.get("displayName") or username
-        sys_label = "TTS Mới" if system == "tts_new" else "TTS Cũ"
+        sys_tag = "BTOOLS" if system == "btools" else ("CEM" if system == "cem" else ("SAPC" if system == "sapc" else ("CCOS" if system == "ccos" else ("TTS MỚI" if system == "tts_new" else "TTS CŨ"))))
+        print(f"[AUTH API] ✅ [BƯỚC 1] Đăng nhập {sys_tag} THÀNH CÔNG cho {user_display}! (Không cần OTP)", flush=True)
         try:
-            state.log("SUCCESS", f"🔑 [XÁC THỰC {sys_label}] {user_display} (IP: {client_ip}) đã đăng nhập thành công!")
+            state.log("SUCCESS", f"🔑 [XÁC THỰC {sys_tag}] {user_display} (IP: {client_ip}) đã đăng nhập thành công!")
         except Exception:
             pass
         return {
             "success": True,
-            "token": token,
-            "ttsnew_token": ttsnew_token or (token if system == "tts_new" else ""),
+            "token": token or ttsnew_token,
+            "ttsnew_token": ttsnew_token or token,
             "system": system,
             "user": user_info
         }
     elif result.get("otp_required"):
+        sid = result.get("session_id", "")
+        phone = result.get("phone", "")
+        print(f"[AUTH API] 📲 [BƯỚC 1] Hệ thống [{system}] yêu cầu OTP! session_id={sid[:8] if sid else 'None'}, phone={phone}", flush=True)
         return {
             "success": False,
             "otp_required": True,
-            "session_id": result.get("session_id"),
+            "session_id": sid,
             "username": result.get("username", username),
-            "phone": result.get("phone", ""),
+            "phone": phone,
             "system": system,
             "message": result.get("message", "Vui lòng nhập mã OTP để tiếp tục.")
         }
     else:
+        err = result.get("error", "Đăng nhập thất bại. Vui lòng kiểm tra lại tài khoản hoặc mật khẩu.")
+        print(f"[AUTH API] ❌ [BƯỚC 1] Đăng nhập [{system}] thất bại: {err}", flush=True)
         return {
             "success": False,
-            "error": result.get("error", "Đăng nhập thất bại. Vui lòng kiểm tra lại tài khoản hoặc mật khẩu.")
+            "error": err
         }
 
 
@@ -149,17 +178,18 @@ async def login_tts_step2_otp(request: Request):
     body = await request.json()
     session_id = body.get("session_id", "").strip()
     otp_code = body.get("otp", "").strip()
+    print(f"[AUTH API] 📥 [BƯỚC 2] Nhận yêu cầu Xác thực OTP từ Client: session_id={session_id[:8] if session_id else 'Trống/None'}, otp={otp_code}", flush=True)
 
     from services.auth_tts import authenticate_tts_step2_otp
     result = authenticate_tts_step2_otp(session_id, otp_code)
 
     if result.get("success"):
-        client_ip = request.client.host if request.client else "127.0.0.1"
+        client_ip = _get_client_ip(request)
         is_local = (client_ip in ("127.0.0.1", "localhost", "::1"))
         token = result.get("token", "")
         ttsnew_token = result.get("ttsnew_token", "")
         user_info = result.get("user", {})
-        system = result.get("system", "tts_old")
+        system = result.get("system", "tts_new")
         if client_ip not in ACTIVE_LAN_SESSIONS:
             ACTIVE_LAN_SESSIONS[client_ip] = {}
         if system == "tts_new":
@@ -167,8 +197,19 @@ async def login_tts_step2_otp(request: Request):
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok_to_save
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
-            if is_local and tok_to_save:
+            if tok_to_save:
                 save_cached_token(tok_to_save)
+        elif system == "btools":
+            from btools_manager import save_btools_cookie
+            save_btools_cookie(token, verify=False)
+            ACTIVE_LAN_SESSIONS[client_ip]["btools_cookie"] = token
+            ACTIVE_LAN_SESSIONS[client_ip]["btools_timestamp"] = time.time()
+        elif system == "cem":
+            ACTIVE_LAN_SESSIONS[client_ip]["cem_apikey"] = token
+            ACTIVE_LAN_SESSIONS[client_ip]["cem_timestamp"] = time.time()
+        elif system == "ccos":
+            ACTIVE_LAN_SESSIONS[client_ip]["ccos_cookie"] = token
+            ACTIVE_LAN_SESSIONS[client_ip]["ccos_timestamp"] = time.time()
         else:
             ACTIVE_LAN_SESSIONS[client_ip]["token"] = token
             ACTIVE_LAN_SESSIONS[client_ip]["user"] = user_info
@@ -183,7 +224,8 @@ async def login_tts_step2_otp(request: Request):
         _save_lan_sessions()
 
         user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or user_info.get("displayName") or "KTV"
-        sys_label = "TTS Mới" if system == "tts_new" else "TTS Cũ"
+        sys_label = "BTools" if system == "btools" else ("CEM" if system == "cem" else ("TTS Mới" if system == "tts_new" else "TTS Cũ"))
+        print(f"[AUTH API] 🔑 [BƯỚC 2] Xác thực OTP [{sys_label}] THÀNH CÔNG cho {user_display}! Đã lưu phiên.", flush=True)
         try:
             state.log("SUCCESS", f"🔑 [XÁC THỰC OTP {sys_label}] {user_display} (IP: {client_ip}) đã qua bước OTP thành công!")
         except Exception:
@@ -198,6 +240,7 @@ async def login_tts_step2_otp(request: Request):
     else:
         client_ip = request.client.host if request.client else "127.0.0.1"
         err_msg = result.get("error", "Xác thực OTP thất bại. Vui lòng thử lại.")
+        print(f"[AUTH API] ❌ [BƯỚC 2] Xác thực OTP THẤT BÀI: {err_msg}", flush=True)
         try:
             state.log("ERROR", f"❌ [XÁC THỰC OTP THẤT BÀI] IP {client_ip}: {err_msg}")
         except Exception:

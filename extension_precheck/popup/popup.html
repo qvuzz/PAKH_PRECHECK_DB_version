@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VNPT Token Utilities</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <!-- Top Header -->
+    <header class="header">
+        <div class="brand">
+            <div class="brand-logo">V</div>
+            <div class="brand-text">
+                <div class="brand-title">VNPT Token Utilities</div>
+                <div class="brand-sub">Session & Token Sync Utility</div>
+            </div>
+        </div>
+        <div id="badge-master" class="status-pill status-gray">Initializing...</div>
+    </header>
+
+    <!-- Local Server Ports Monitor -->
+    <section class="ports-panel">
+        <div class="ports-title">Local Server Status</div>
+        <div class="ports-row">
+            <div id="port-710" class="port-item" title="KPI AI Assistant (kpi_assistant)">
+                <span class="port-dot"></span>
+                <span class="port-label">Port 710</span>
+            </div>
+            <div id="port-9190" class="port-item" title="Automated Reports (Report Tool)">
+                <span class="port-dot"></span>
+                <span class="port-label">Port 9190</span>
+            </div>
+            <div id="port-1234" class="port-item" title="Customer Inquiries (PAKH Precheck)">
+                <span class="port-dot"></span>
+                <span class="port-label">Port 1234</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- PAKH Precheck Remote/Local Server Config -->
+    <section class="server-config-panel">
+        <div class="server-config-title">Máy chủ PAKH Precheck (Port 1234)</div>
+        <div class="server-config-row">
+            <input type="text" id="inp-precheck-server" class="server-input" placeholder="http://10.x.x.x:1234 hoặc localhost:1234">
+            <button type="button" id="btn-save-server" class="btn-save-server">Lưu & Đẩy</button>
+        </div>
+        <div id="precheck-server-status" class="server-status-text">Đang kiểm tra kết nối máy chủ...</div>
+    </section>
+
+    <!-- Service Cards Container (Alphabetical Order) -->
+    <main class="services-container">
+
+        <!-- 1. BTool -->
+        <div class="service-card" id="card-btools">
+            <div class="service-header">
+                <div class="service-meta">
+                    <span class="service-name">BTool</span>
+                    <span class="service-type">JSESSIONID</span>
+                </div>
+                <span id="btools-status" class="status-dot checking" title="Checking..."></span>
+            </div>
+            <div class="service-body">
+                <div id="btools-preview" class="token-preview">Checking...</div>
+                <button class="btn-open-link" data-url="http://10.159.21.241">Open</button>
+            </div>
+        </div>
+
+        <!-- 2. CCOS -->
+        <div class="service-card" id="card-ccos">
+            <div class="service-header">
+                <div class="service-meta">
+                    <span class="service-name">CCOS</span>
+                    <span class="service-type">SessionDB / SESSIONID</span>
+                </div>
+                <span id="ccos-status" class="status-dot checking" title="Checking..."></span>
+            </div>
+            <div class="service-body">
+                <div id="ccos-preview" class="token-preview">Checking...</div>
+                <button class="btn-open-link" data-url="http://gqknccos.vnpt.vn">Open</button>
+            </div>
+        </div>
+
+        <!-- 3. CEM -->
+        <div class="service-card" id="card-cem">
+            <div class="service-header">
+                <div class="service-meta">
+                    <span class="service-name">CEM</span>
+                    <span class="service-type">API Key / Cookie</span>
+                </div>
+                <span id="cem-status" class="status-dot checking" title="Checking..."></span>
+            </div>
+            <div class="service-body">
+                <div id="cem-preview" class="token-preview">Checking...</div>
+                <button class="btn-open-link" data-url="https://cem.vnptmedia.vn">Open</button>
+            </div>
+        </div>
+
+        <!-- 4. CTS -->
+        <div class="service-card" id="card-cts">
+            <div class="service-header">
+                <div class="service-meta">
+                    <span class="service-name">CTS</span>
+                    <span class="service-type">.AspNetCore.Cookies</span>
+                </div>
+                <span id="cts-status" class="status-dot checking" title="Checking..."></span>
+            </div>
+            <div class="service-body">
+                <div id="cts-preview" class="token-preview">Checking...</div>
+                <button class="btn-open-link" data-url="https://cts.vnpt.vn">Open</button>
+            </div>
+        </div>
+
+        <!-- 5. NPMRAN -->
+        <div class="service-card" id="card-npmran">
+            <div class="service-header">
+                <div class="service-meta">
+                    <span class="service-name">NPMRAN</span>
+                    <span class="service-type">Bearer JWT Token</span>
+                </div>
+                <span id="npmran-status" class="status-dot checking" title="Checking..."></span>
+            </div>
+            <div class="service-body">
+                <div id="npmran-preview" class="token-preview">Checking...</div>
+                <button class="btn-open-link" data-url="https://oneoss.vnpt.vn">Open</button>
+            </div>
+        </div>
+
+        <!-- 6. PMS -->
+        <div class="service-card" id="card-pms">
+            <div class="service-header">
+                <div class="service-meta">
+                    <span class="service-name">PMS</span>
+                    <span class="service-type">sessionid / csrftoken</span>
+                </div>
+                <span id="pms-status" class="status-dot checking" title="Checking..."></span>
+            </div>
+            <div class="service-body">
+                <div id="pms-preview" class="token-preview">Checking...</div>
+                <button class="btn-open-link" data-url="https://pms.vnpt.vn/kpi/provincenew/3g">Open</button>
+            </div>
+        </div>
+
+        <!-- 7. tts.vnpt.vn -->
+        <div class="service-card" id="card-tts-vnpt">
+            <div class="service-header">
+                <div class="service-meta">
+                    <span class="service-name">tts.vnpt.vn</span>
+                    <span class="service-type">scnntttoken</span>
+                </div>
+                <span id="tts-vnpt-status" class="status-dot checking" title="Checking..."></span>
+            </div>
+            <div class="service-body">
+                <div id="tts-vnpt-preview" class="token-preview">Checking...</div>
+                <button class="btn-open-link" data-url="https://tts.vnpt.vn">Open</button>
+            </div>
+        </div>
+
+                <!-- SAPC -->
+        <div class="service-card" id="card-sapc">
+            <div class="service-header">
+                <div class="service-meta">
+                    <span class="service-name">SAPC</span>
+                    <span class="service-type">.AspNet.ApplicationCookie</span>
+                </div>
+                <span id="sapc-status" class="status-dot checking" title="Checking..."></span>
+            </div>
+            <div class="service-body">
+                <div id="sapc-preview" class="token-preview">Checking...</div>
+                <button class="btn-open-link" data-url="http://10.155.42.218">Open</button>
+            </div>
+        </div>
+
+        <!-- 8. tts.vnptnet.vn -->
+        <div class="service-card" id="card-tts-vnptnet">
+            <div class="service-header">
+                <div class="service-meta">
+                    <span class="service-name">tts.vnptnet.vn</span>
+                    <span class="service-type">Bearer JWT Token</span>
+                </div>
+                <span id="tts-vnptnet-status" class="status-dot checking" title="Checking..."></span>
+            </div>
+            <div class="service-body">
+                <div id="tts-vnptnet-preview" class="token-preview">Checking...</div>
+                <button class="btn-open-link" data-url="https://tts.vnptnet.vn">Open</button>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Bottom Actions -->
+    <footer class="footer">
+        <div class="sync-info">
+            <span>Sync:</span>
+            <span id="last-sync-time" class="time-value">--:--:--</span>
+            <span style="margin: 0 4px; opacity: 0.4;">?</span>
+            <span>Heartbeat:</span>
+            <span id="last-heartbeat-time" class="time-value" style="color: #10b981;">--:--:--</span>
+        </div>
+
+        <div class="action-buttons">
+            <button id="btn-sync-now" class="btn btn-primary">
+                Sync All Now
+            </button>
+            <button id="btn-clear-sync" class="btn btn-secondary">
+                Clear Cache & Resync
+            </button>
+        </div>
+
+        <div class="quick-apps">
+            <div class="apps-title">Quick App Access</div>
+            <div class="apps-grid">
+                <button class="btn-app" data-url="http://localhost:710">KPI Assistant (710)</button>
+                <button class="btn-app" data-url="http://localhost:9190">Report Tool (9190)</button>
+                <button class="btn-app" data-url="http://localhost:1234">PAKH Precheck (1234)</button>
+            </div>
+        </div>
+    </footer>
+
+    <script src="popup.js"></script>
+</body>
+</html>

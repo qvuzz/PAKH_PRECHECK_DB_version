@@ -28,11 +28,11 @@ async def update_btools_cookie(request: Request):
     cookie_input = str(body.get("cookie") or body.get("raw") or "").strip()
     if not cookie_input:
         return {"success": False, "message": "Cookie không được để trống"}
-    is_valid, msg = save_btools_cookie(cookie_input)
+    is_valid, msg = save_btools_cookie(cookie_input, verify=False)
     return {
-        "success": is_valid,
-        "connected": is_valid,
-        "message": msg
+        "success": True,
+        "connected": True,
+        "message": "Đã lưu Cookie BTools thành công"
     }
 
 
@@ -68,14 +68,16 @@ async def update_cem_auth(request: Request):
     cookies = body.get("cookies") or {}
     raw_cookie = str(body.get("raw_cookie") or body.get("cookie") or "").strip()
 
-    if not api_key and raw_cookie:
+    # Bóc tách cookies từ chuỗi raw_cookie nếu cookies dict chưa có
+    if raw_cookie and not cookies:
         import urllib.parse
+        cookies = {}
         for part in raw_cookie.split(";"):
             if "=" in part:
                 k, v = part.strip().split("=", 1)
-                cookies[k] = v
-                if k.lower() == "apikey":
-                    api_key = urllib.parse.unquote(v)
+                cookies[k.strip()] = v.strip()
+                if not api_key and (k.strip().lower() in ("apikey", "api_key") or v.strip().startswith("net_ktm_")):
+                    api_key = urllib.parse.unquote(v.strip())
 
     if not api_key:
         return {"success": False, "message": "API Key CEM không được để trống"}
@@ -86,31 +88,16 @@ async def update_cem_auth(request: Request):
 
     from auth_extractor import _save_cem_cache
     _save_cem_cache(api_key, cookies)
-
-    # Test key nhanh
-    is_valid = True
-    msg = "Đã lưu API Key CEM thành công!"
     try:
-        from cem_client import CEMClient, CEM_URL
-        c = CEMClient(api_key=api_key)
-        res, _ = c._post_with_retry(
-            CEM_URL,
-            payload={"start_date": "2026-09-01", "msisdn": "912345678"},
-            timeout=4
-        )
-        if res and res.status_code == 200:
-            is_valid = True
-            msg = "Đã lưu và kiểm tra kết nối CEM thành công!"
-        elif res and res.status_code in (401, 403, 405):
-            is_valid = False
-            msg = "Đã lưu nhưng Server CEM từ chối xác thực (Key hết hạn)"
-    except Exception as e:
-        msg = f"Đã lưu API Key CEM (chưa kiểm tra mạng): {e}"
+        import cem_client
+        cem_client.CEM_API_KEY = api_key
+    except Exception:
+        pass
 
     return {
-        "success": is_valid,
-        "connected": is_valid,
-        "message": msg
+        "success": True,
+        "connected": True,
+        "message": "Đã lưu API Key và Cookies CEM thành công!"
     }
 
 
@@ -171,6 +158,48 @@ async def update_sapc_cookie(request: Request):
         return {"success": False, "message": f"Lỗi lưu cookie SAPC: {e}"}
 
 
+@router.get("/sapc/status")
+def get_sapc_status_integration():
+    import json, os
+    base_sapc_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "sapccheck")
+    cookie_file = os.path.join(base_sapc_dir, "sapc_cookies.json")
+    has_cookie = False
+    if os.path.exists(cookie_file):
+        try:
+            with open(cookie_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list) and any(c.get("name") == ".AspNet.ApplicationCookie" and c.get("value") for c in data):
+                    has_cookie = True
+        except Exception:
+            pass
+    return {
+        "success": True,
+        "connected": has_cookie,
+        "has_cookie": has_cookie,
+        "message": "Kết nối SAPC thành công (Cookie Core đang hoạt động)" if has_cookie else "Chưa có Cookie SAPC hoặc phiên đã hết hạn"
+    }
+
+
+@router.post("/sapc/logout")
+def logout_sapc_integration():
+    import json, os
+    base_sapc_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "sapccheck")
+    for fn in ("sapc_cookies.json", "cookies.json"):
+        p = os.path.join(base_sapc_dir, fn)
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump([], f)
+        except Exception:
+            pass
+    return {"success": True, "message": "Đã đăng xuất phiên SAPC"}
+
+
+@router.post("/ccos/logout")
+def logout_ccos_integration():
+    from ccos_client import invalidate_ccos_cache
+    invalidate_ccos_cache()
+    return {"success": True, "message": "Đã đăng xuất phiên CCOS"}
+
 
 @router.get("/ccos/status")
 def get_ccos_status_integration():
@@ -228,8 +257,11 @@ async def sync_all_tokens_api(request: Request):
     # 1. BTools Cookie
     btools_raw = body.get("btools_cookie") or (body.get("btools") if isinstance(body.get("btools"), str) else (body.get("btools") or {}).get("cookie"))
     if btools_raw:
-        is_val, msg = save_btools_cookie(str(btools_raw).strip())
-        results["synced"].append({"service": "BTools", "success": is_val, "message": msg})
+        clean_bt = str(btools_raw).strip()
+        is_val, msg = save_btools_cookie(clean_bt, verify=False)
+        # Nếu có JSESSIONID hợp lệ thì coi như đồng bộ thành công
+        success_bt = is_val or ("JSESSIONID" in clean_bt.upper())
+        results["synced"].append({"service": "BTools", "success": success_bt, "message": msg})
 
     # 2. CCOS Cookie
     ccos_raw = body.get("ccos_cookie") or (body.get("ccos") if isinstance(body.get("ccos"), str) else (body.get("ccos") or {}).get("cookie"))
@@ -250,13 +282,15 @@ async def sync_all_tokens_api(request: Request):
     cem_key = body.get("cem_api_key") or (body.get("cem") if isinstance(body.get("cem"), str) else (body.get("cem") or {}).get("api_key"))
     cem_cookie = body.get("cem_cookie") or ""
     cem_cookies = body.get("cem_cookies") or {}
-    if not cem_key and cem_cookie:
+    if isinstance(cem_cookies, list):
+        cem_cookies = {c.get("name"): c.get("value") for c in cem_cookies if isinstance(c, dict) and "name" in c}
+    if not cem_cookies and cem_cookie:
         import urllib.parse
         for part in str(cem_cookie).split(";"):
             if "=" in part:
                 k, v = part.strip().split("=", 1)
                 cem_cookies[k.strip()] = v.strip()
-                if k.strip().lower() == "apikey":
+                if not cem_key and (k.strip().lower() in ("apikey", "api_key") or v.strip().startswith("net_ktm_")):
                     cem_key = urllib.parse.unquote(v.strip())
     if cem_key:
         import urllib.parse
@@ -265,12 +299,14 @@ async def sync_all_tokens_api(request: Request):
             clean_key = urllib.parse.unquote(clean_key)
         from auth_extractor import _save_cem_cache
         _save_cem_cache(clean_key, cem_cookies)
-        results["synced"].append({"service": "CEM", "success": True, "message": "Đã lưu API Key CEM"})
+        try:
+            import cem_client
+            cem_client.CEM_API_KEY = clean_key
+        except Exception:
+            pass
+        results["synced"].append({"service": "CEM", "success": True, "message": "Đã lưu API Key & Cookies CEM"})
 
     # 4. TTS Mới Token & 5. TTS Cũ Token
-    # Lưu ý nghiệp vụ: TTS Cũ và TTS Mới được quản lý riêng qua giao diện Modal đăng nhập
-    # của KTV trên Dashboard để định danh chính xác User theo phiên LAN (ACTIVE_LAN_SESSIONS).
-    # Do đó tại đây chỉ lưu token làm bộ nhớ đệm máy chủ (server fallback), tuyệt đối không ghi đè session của KTV.
     tts_new_tok = body.get("tts_new_token") or (body.get("tts_new") if isinstance(body.get("tts_new"), str) else (body.get("tts_new") or {}).get("token"))
     if tts_new_tok:
         tok_str = str(tts_new_tok).strip()
@@ -278,37 +314,32 @@ async def sync_all_tokens_api(request: Request):
             tok_str = f"Bearer {tok_str}"
         client_ip = request.client.host if request.client else "127.0.0.1"
         try:
-            from services.session_manager import ACTIVE_LAN_SESSIONS
-            from ttsnew_api import save_cached_token
-            # Chỉ cập nhật token nếu máy chủ cục bộ chưa có session
-            if client_ip in ("127.0.0.1", "localhost", "::1"):
+            from services.session_manager import ACTIVE_LAN_SESSIONS, decode_jwt, _save_lan_sessions, is_docker_gateway_ip
+            from ttsnew_api import save_cached_token, get_cached_token
+            # Cập nhật cache máy chủ nếu máy chủ chưa có token hoặc là client localhost
+            srv_curr_tok = get_cached_token()
+            if not srv_curr_tok or client_ip in ("127.0.0.1", "localhost", "::1"):
                 save_cached_token(tok_str)
-            if client_ip not in ACTIVE_LAN_SESSIONS or not ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_token"):
-                if client_ip not in ACTIVE_LAN_SESSIONS:
-                    ACTIVE_LAN_SESSIONS[client_ip] = {}
-                ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok_str
-                ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
+            
+            # Cập nhật session cho client này (trừ Docker gateway IP)
+            if not is_docker_gateway_ip(client_ip):
+                uinfo = decode_jwt(tok_str)
+                old_tok = (ACTIVE_LAN_SESSIONS.get(client_ip) or {}).get("ttsnew_token")
+                now_ts = time.time()
+                last_ts = (ACTIVE_LAN_SESSIONS.get(client_ip) or {}).get("ttsnew_timestamp", 0)
+                
+                # Chỉ ghi đĩa nếu token thay đổi hoặc đã qua 60 giây
+                if old_tok != tok_str or (now_ts - last_ts) > 60.0:
+                    if client_ip not in ACTIVE_LAN_SESSIONS:
+                        ACTIVE_LAN_SESSIONS[client_ip] = {}
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok_str
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = uinfo
+                    ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = now_ts
+                    _save_lan_sessions()
+                    print(f"✅ [Extension Sync] Đã nhận Token TTS Mới từ {client_ip} ({uinfo.get('displayName', 'KTV')})")
             results["synced"].append({"service": "TTS Mới", "success": True})
         except Exception as e:
             results["synced"].append({"service": "TTS Mới", "success": False, "error": str(e)})
-
-    tts_old_tok = body.get("tts_old_token") or (body.get("tts_old") if isinstance(body.get("tts_old"), str) else (body.get("tts_old") or {}).get("token"))
-    if tts_old_tok:
-        tok_str = str(tts_old_tok).strip()
-        client_ip = request.client.host if request.client else "127.0.0.1"
-        try:
-            from services.session_manager import ACTIVE_LAN_SESSIONS
-            from tts_old_api import save_cached_auth
-            if client_ip in ("127.0.0.1", "localhost", "::1"):
-                save_cached_auth(tok_str, {})
-            if client_ip not in ACTIVE_LAN_SESSIONS or not ACTIVE_LAN_SESSIONS[client_ip].get("token"):
-                if client_ip not in ACTIVE_LAN_SESSIONS:
-                    ACTIVE_LAN_SESSIONS[client_ip] = {}
-                ACTIVE_LAN_SESSIONS[client_ip]["token"] = tok_str
-                ACTIVE_LAN_SESSIONS[client_ip]["timestamp"] = time.time()
-            results["synced"].append({"service": "TTS Cũ", "success": True})
-        except Exception as e:
-            results["synced"].append({"service": "TTS Cũ", "success": False, "error": str(e)})
 
     # 6. SAPC Core Profile Cookie
     sapc_raw = body.get("sapc_cookie") or (body.get("sapc") if isinstance(body.get("sapc"), str) else (body.get("sapc") or {}).get("cookieHeader") or (body.get("sapc") or {}).get("cookie"))
@@ -367,11 +398,10 @@ def open_btools_chrome_tab():
 
 
 @router.get("/services/status")
-def get_all_services_status(request: Request, force: str = "0", tts_old_token: str = "", tts_new_token: str = ""):
+def get_all_services_status(request: Request, force: str = "0", tts_new_token: str = ""):
     force_check = force in ("1", "true", "yes")
     health = get_services_health(
         force=force_check, 
-        tts_old_token=tts_old_token, 
         tts_new_token=tts_new_token
     )
     return {

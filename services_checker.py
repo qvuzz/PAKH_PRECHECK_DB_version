@@ -10,7 +10,6 @@ _HEALTH_CACHE = {
     "btools": False,
     "cem": False,
     "sapc": False,
-    "tts_old": False,
     "tts_new": False,
     "ccos": False,
     "last_checked": 0
@@ -66,24 +65,9 @@ def check_sapc_fast(driver=None) -> bool:
     except Exception:
         return False
 
-def check_tts_old_fast(driver=None, token: str = None) -> bool:
-    try:
-        from tts_old_api import get_cached_auth, extract_token_from_browser, fetch_nguyen_nhan_list_api
-        tok = (token or "").strip()
-        if not tok:
-            tok, _ = get_cached_auth()
-        if not tok:
-            tok, _ = extract_token_from_browser(driver=driver)
-        if not tok:
-            return False
-        res = fetch_nguyen_nhan_list_api(tok)
-        return bool(res)
-    except Exception:
-        return False
-
 def check_tts_new_fast(driver=None, token: str = None) -> bool:
     try:
-        from ttsnew_api import get_cached_token, extract_token_from_browser, fetch_active_tickets
+        from ttsnew_api import get_cached_token, extract_token_from_browser, fetch_active_tickets, _is_jwt_valid
         tok = (token or "").strip()
         if not tok:
             tok = get_cached_token()
@@ -93,22 +77,32 @@ def check_tts_new_fast(driver=None, token: str = None) -> bool:
             return False
         if not tok.startswith("Bearer ") and "." in tok:
             tok = f"Bearer {tok}"
-        res = fetch_active_tickets(tok, limit=1)
+        
+        # 1. Kiểm tra cấu trúc JWT và hạn sử dụng exp trước
+        if not _is_jwt_valid(tok):
+            return False
+            
+        # 2. Token còn hạn exp hợp lệ -> kiểm tra thêm API OneOSS nhưng tránh để lỗi mạng làm đánh rớt trạng thái
+        try:
+            fetch_active_tickets(tok, limit=1)
+        except Exception as api_err:
+            err_str = str(api_err).lower()
+            if "401" in err_str or "unauthorized" in err_str or "token hết hạn" in err_str:
+                return False
         return True
     except Exception:
         return False
 
-def get_services_health(force=False, driver=None, tts_old_token: str = None, tts_new_token: str = None) -> dict:
+def get_services_health(force=False, driver=None, tts_new_token: str = None, **kwargs) -> dict:
     global _HEALTH_CACHE
     now = time.time()
-    has_custom_tokens = bool((tts_old_token and tts_old_token.strip()) or (tts_new_token and tts_new_token.strip()))
+    has_custom_tokens = bool(tts_new_token and tts_new_token.strip())
     
     if not force and not has_custom_tokens and (now - _HEALTH_CACHE["last_checked"] < 25):
         return {
             "btools": _HEALTH_CACHE["btools"],
             "cem": _HEALTH_CACHE["cem"],
             "sapc": _HEALTH_CACHE["sapc"],
-            "tts_old": _HEALTH_CACHE["tts_old"],
             "tts_new": _HEALTH_CACHE["tts_new"],
             "ccos": _HEALTH_CACHE.get("ccos", False)
         }
@@ -123,7 +117,6 @@ def get_services_health(force=False, driver=None, tts_old_token: str = None, tts
     btools_ok = check_btools_fast(driver=driver)
     cem_ok = check_cem_fast(driver=driver)
     sapc_ok = check_sapc_fast(driver=driver)
-    tts_old_ok = check_tts_old_fast(driver=driver, token=tts_old_token)
     tts_new_ok = check_tts_new_fast(driver=driver, token=tts_new_token)
     ccos_ok = check_ccos_fast(driver=driver)
 
@@ -131,7 +124,6 @@ def get_services_health(force=False, driver=None, tts_old_token: str = None, tts
         _HEALTH_CACHE["btools"] = btools_ok
         _HEALTH_CACHE["cem"] = cem_ok
         _HEALTH_CACHE["sapc"] = sapc_ok
-        _HEALTH_CACHE["tts_old"] = tts_old_ok
         _HEALTH_CACHE["tts_new"] = tts_new_ok
         _HEALTH_CACHE["ccos"] = ccos_ok
         _HEALTH_CACHE["last_checked"] = now
@@ -140,7 +132,6 @@ def get_services_health(force=False, driver=None, tts_old_token: str = None, tts
         "btools": btools_ok,
         "cem": cem_ok,
         "sapc": sapc_ok,
-        "tts_old": tts_old_ok,
         "tts_new": tts_new_ok,
         "ccos": ccos_ok
     }

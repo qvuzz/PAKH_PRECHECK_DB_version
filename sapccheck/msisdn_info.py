@@ -1,3 +1,4 @@
+import os
 import requests
 
 try:
@@ -133,10 +134,15 @@ def _parse_loc_response(data):
     if phone_clean:
         p84 = "84" + phone_clean[1:] if phone_clean.startswith("0") else phone_clean
         try:
+            from routers.tickets import get_1708_base_url
+            base_1708 = get_1708_base_url()
+        except Exception:
+            base_1708 = (os.getenv("PORT_1708_URL") or "http://vnpt_customer_position_app:1708").rstrip("/")
+        try:
             cp_resp = requests.get(
-                f"http://127.0.0.1:1708/msisdn/{p84}",
+                f"{base_1708}/msisdn/{p84}",
                 headers={"Accept": "application/json"},
-                timeout=2.5
+                timeout=2.0
             )
             if cp_resp.status_code == 200:
                 cp_data = cp_resp.json()

@@ -29,17 +29,17 @@ def normalize_phone_vn(phone_raw: str) -> str:
 class AutomationState:
     def __init__(self):
         self.lock = threading.Lock()
-        self.is_running = True
+        self.is_running = False
         self.status = "IDLE"  # IDLE, PROCESSING, WAITING, STOPPING
         self.status_message = "Hệ thống tự động tiền kiểm đang hoạt động"
         self.interval_minutes = 2.5  # Chu kỳ quét chuyên sâu nền tự động (BTools + SAPC)
         self.auto_close = False  # Mặc định KHÔNG tự đóng để đảm bảo an toàn, KTV phải chủ động bật & xác nhận 2 lần
-        self.auto_close_tts_old = False  # Trạng thái tự đóng TTS Cũ
+        self.auto_close_tts_old = False  # TTS Cũ đã bỏ
         self.auto_close_tts_new = False  # Trạng thái tự đóng TTS Mới
-        self.scan_scopes = ["tts_old_data", "tts_old_voice", "tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"]  # Quét tự động toàn bộ phân hệ nghiệp vụ
-        self.auto_close_mode = "none"  # 'all', 'tts_old', 'tts_new', 'none'
+        self.scan_scopes = ["tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"]  # Quét tự động toàn bộ phân hệ TTS Mới
+        self.auto_close_mode = "none"  # 'tts_new', 'none'
         self.ai_summary_engine = "qwen"  # 'qwen' (Qwen 2.5 GGUF) hoặc 'regex' (Regex thuần)
-        self.engine = "api"  # 'api' (TTS Cũ) hoặc 'tts_new' (TTS Mới)
+        self.engine = "tts_new"  # Hệ thống TTS Mới
         self.dry_run = False
         self.observe = False
         self.open_excel = False
@@ -154,11 +154,11 @@ class AutomationState:
                 "interval_minutes": self.interval_minutes,
                 "auto_close": self.auto_close,
                 "auto_close_mode": getattr(self, "auto_close_mode", "none"),
-                "auto_close_tts_old": self.should_auto_close("tts_old"),
+                "auto_close_tts_old": False,
                 "auto_close_tts_new": self.should_auto_close("tts_new"),
                 "ai_summary_engine": getattr(self, "ai_summary_engine", "qwen"),
-                "scan_scopes": list(getattr(self, "scan_scopes", ["tts_old_data", "tts_new_data"])),
-                "engine": getattr(self, "engine", "api"),
+                "scan_scopes": list(getattr(self, "scan_scopes", ["tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"])),
+                "engine": getattr(self, "engine", "tts_new"),
                 "dry_run": self.dry_run,
                 "observe": self.observe,
                 "open_excel": self.open_excel,

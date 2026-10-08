@@ -13,6 +13,13 @@
     const HOST = window.location.hostname;
     const HREF = window.location.href;
 
+    // Tự động nhận diện tab Dashboard của Server để lưu URL máy chủ
+    if (window.location.port === '1234' || (document.title && document.title.includes('TTS Precheck')) || window.location.pathname.startsWith('/ttsmoi')) {
+        try {
+            chrome.runtime.sendMessage({ action: 'SET_PRECHECK_SERVER', url: window.location.origin });
+        } catch (e) {}
+    }
+
     // Danh sách máy chủ Precheck (Port 1234)
     function getPrecheckServers() {
         const custom = localStorage.getItem('precheck_server_url');
@@ -391,60 +398,9 @@
     }
 
     // =============================================================
-    // 7. DỊCH VỤ: TTS CŨ (tts.vnpt.vn) -> Port 1234
+    // 7. DỊCH VỤ: TTS CŨ (tts.vnpt.vn) - ĐÃ BỎ / NGỪNG ĐỒNG BỘ
     // =============================================================
-    if (HOST.includes('tts.vnpt.vn')) {
-        let lastTtsOldSynced = '';
-
-        function syncTtsOld() {
-            try {
-                let token = localStorage.getItem('scnntttoken') || 
-                            sessionStorage.getItem('scnntttoken') || 
-                            localStorage.getItem('token') || 
-                            sessionStorage.getItem('token') || '';
-                
-                if (!token) {
-                    const cookie = document.cookie || '';
-                    const m = cookie.match(/scnntttoken=([^;]+)/i);
-                    if (m) token = decodeURIComponent(m[1].trim());
-                }
-
-                if (!token) return;
-
-                let userInfo = {};
-                let rawUser = localStorage.getItem('userInfo') || sessionStorage.getItem('userInfo') || '';
-                if (rawUser) {
-                    try {
-                        userInfo = JSON.parse(rawUser);
-                    } catch (e1) {
-                        try {
-                            userInfo = JSON.parse(atob(rawUser));
-                        } catch (e2) {}
-                    }
-                }
-
-                if (lastTtsOldSynced !== token) {
-                    getPrecheckServers().forEach(server => {
-                        sendSyncRequest(`${server}/api/session/register`, { token: token, user: userInfo })
-                        .then(data => {
-                            if (data && data.success) {
-                                if (lastTtsOldSynced !== token) {
-                                    lastTtsOldSynced = token;
-                                    showToast('PAKH Precheck', 'Đã đồng bộ Token TTS Cũ!', '#ea580c');
-                                }
-                            }
-                        });
-                        sendSyncRequest(`${server}/api/tts_old/token`, { token: token, user: userInfo });
-                    });
-                }
-            } catch (e) {
-                console.error("[Precheck Helper TTS Cũ Error]", e);
-            }
-        }
-
-        setInterval(syncTtsOld, 3000);
-        setTimeout(syncTtsOld, 1000);
-    }
+    // (Đã ngắt hoàn toàn logic sync TTS Cũ)
 
     // =============================================================
     // 8. DỊCH VỤ: CCOS (gqknccos.vnpt.vn) -> Port 1234

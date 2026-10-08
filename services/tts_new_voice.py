@@ -161,7 +161,6 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
                     ccos_json_str = existing_db_row["ccos_attachments"]
 
                 if can_reuse_db:
-                    state.log("INFO", f"   ↳ 📋 Thuê bao {phone_84} đã có kết quả tiền kiểm trong DB: [{existing_db_row['status']}]. Giữ nguyên hiển thị.")
                     final_comment = existing_db_row["comment"] if existing_db_row["comment"] else default_comment
                     final_plan = existing_db_row["action_plan"] if existing_db_row["action_plan"] else default_action_plan
                     eval_res = {
@@ -225,13 +224,14 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
                     "ccos_attachments": ccos_json_str
                 }
                 save_or_update_ticket(rec_update)
-                state.log("SUCCESS", f"[{idx}/{len(voice_tickets)}] Đã tiền kiểm Cuộc gọi: {phone_84} -> {eval_res.get('status')}")
+                if not can_reuse_db:
+                    state.log("SUCCESS", f"[{idx}/{len(voice_tickets)}] Đã tiền kiểm mới {lbl}: {phone_84} -> {eval_res.get('status')}")
                 return True
             except Exception as e:
                 state.log("ERROR", f"Lỗi tiền kiểm {phone_84}: {e}")
                 return False
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             items = list(enumerate(voice_tickets, 1))
             futures = [executor.submit(_process_single_voice_ticket, it) for it in items]
             for future in concurrent.futures.as_completed(futures):

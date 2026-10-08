@@ -65,7 +65,8 @@ BAO_CAO_LOI_LUONG_TTS_MOI_ONEOSS.docx
 models/
 *.gguf
 
-# OS / editor artifacts
-.DS_Store
-Thumbs.db
+# Deployment packages & docker tar
+*.tar
+*.zip
+VNPT TTS PRECHECK/
 

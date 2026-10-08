@@ -5,8 +5,6 @@ import threading
 from fastapi import APIRouter, Request
 from services.state import state
 from db_manager import get_system_counts
-from services.tts_old_api_data import execute_tts_old_api_data_cycle
-from services.tts_old_api_voice import execute_tts_old_api_voice_cycle
 from services.tts_new_data import execute_tts_new_data_cycle
 from services.tts_new_voice import execute_tts_new_voice_cycle
 
@@ -30,18 +28,22 @@ def is_admin_ip(client_ip: str) -> bool:
 async def start_automation(request: Request):
     body = await request.json()
     client_ip = request.client.host if request.client else "127.0.0.1"
-    is_local = is_admin_ip(client_ip)
+    auth_hdr = request.headers.get("Authorization") or (body.get("token") or "")
+    from services.session_manager import decode_jwt
+    from region_detector import is_superadmin
+    uinfo = decode_jwt(auth_hdr) if auth_hdr else {}
+    is_admin = is_superadmin(uinfo)
 
     state.is_running = True
     state.stop_requested = False
     state.trigger_now_requested = True
     if "scan_scopes" in body:
         state.scan_scopes = list(body["scan_scopes"])
-    if not is_local:
+    if not is_admin:
         state.auto_close = False
         state.auto_close_mode = "none"
         if body.get("auto_close") or (body.get("auto_close_mode") and body.get("auto_close_mode") != "none") or body.get("system"):
-            state.log("WARNING", f"⛔ Đã chặn yêu cầu Tự đóng từ IP máy trạm {client_ip} (Chỉ Admin từ 127./localhost mới được phép)")
+            state.log("WARNING", f"⛔ Đã chặn yêu cầu Tự đóng từ IP máy trạm {client_ip} (Chỉ tài khoản Admin quangvu mới được phép)")
     elif "system" in body and "auto_close" in body:
         state.set_auto_close_for_system(str(body["system"]).strip(), bool(body["auto_close"]))
     elif "auto_close_mode" in body:
@@ -73,14 +75,24 @@ async def update_automation_config(request: Request):
     client_ip = request.client.host if request.client else "127.0.0.1"
     is_local = is_admin_ip(client_ip)
 
+    from region_detector import is_superadmin
+    from services.session_manager import decode_jwt
+
+    user_info = {}
+    auth_hdr = request.headers.get("Authorization") or (body.get("token") or "")
+    if auth_hdr:
+        user_info = decode_jwt(auth_hdr)
+
+    is_admin = is_superadmin(user_info)
+
     if "scan_scopes" in body:
         state.scan_scopes = list(body["scan_scopes"])
         state.log("INFO", f"⚙️ Đã cập nhật phạm vi quét: {state.scan_scopes}")
-    if not is_local:
+    if not is_admin:
         state.auto_close = False
         state.auto_close_mode = "none"
         if body.get("auto_close") or (body.get("auto_close_mode") and body.get("auto_close_mode") != "none") or body.get("auto_close_tts_old") or body.get("auto_close_tts_new") or body.get("system"):
-            state.log("WARNING", f"⛔ Đã chặn yêu cầu Tự đóng từ IP máy trạm {client_ip} (Chỉ Admin từ 127./localhost mới được phép)")
+            state.log("WARNING", f"⛔ Đã chặn yêu cầu Tự đóng từ IP máy trạm {client_ip} (Chỉ Admin mới được phép)")
     elif "system" in body and "auto_close" in body:
         sys_target = str(body["system"]).strip()
         state.set_auto_close_for_system(sys_target, bool(body["auto_close"]))
@@ -102,8 +114,8 @@ async def update_automation_config(request: Request):
         state.interval_minutes = int(body["interval_minutes"])
 
     if "ai_summary_engine" in body:
-        if not is_local:
-            state.log("WARNING", f"⛔ Đã chặn thay đổi AI Summary Engine từ IP máy trạm {client_ip} (Chỉ Admin mới có quyền)")
+        if not is_admin:
+            state.log("WARNING", f"⛔ Đã chặn thay đổi AI Summary Engine từ {client_ip} (Chỉ Admin mới có quyền)")
         else:
             engine_val = str(body["ai_summary_engine"]).strip().lower()
             if engine_val in ("qwen", "regex"):
@@ -132,16 +144,19 @@ def stop_automation():
 @router.post("/run-now")
 async def trigger_run_now(request: Request):
     body = await request.json()
-    client_ip = request.client.host if request.client else "127.0.0.1"
-    is_local = client_ip in ("127.0.0.1", "localhost", "::1")
+    auth_hdr = request.headers.get("Authorization") or (body.get("token") or "")
+    from services.session_manager import decode_jwt
+    from region_detector import is_superadmin
+    uinfo = decode_jwt(auth_hdr) if auth_hdr else {}
+    is_admin = is_superadmin(uinfo)
 
     if state.status == "PROCESSING":
         return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
 
-    scopes = body.get("scan_scopes") or getattr(state, "scan_scopes", ["tts_old_data", "tts_old_voice", "tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"])
+    scopes = body.get("scan_scopes") or getattr(state, "scan_scopes", ["tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"])
     if not scopes:
-        scopes = ["tts_old_data", "tts_old_voice"]
-    if not is_local:
+        scopes = ["tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"]
+    if not is_admin:
         state.auto_close = False
         state.auto_close_mode = "none"
     elif "system" in body and "auto_close" in body:
@@ -163,11 +178,7 @@ async def trigger_run_now(request: Request):
                 for sc in sc_list:
                     if state.stop_requested:
                         break
-                    if sc == "tts_old_data":
-                        execute_tts_old_api_data_cycle()
-                    elif sc == "tts_old_voice":
-                        execute_tts_old_api_voice_cycle()
-                    elif sc == "tts_new_data":
+                    if sc == "tts_new_data":
                         execute_tts_new_data_cycle()
                     elif sc in ("tts_new_call", "tts_new_voice_call"):
                         from services.tts_new_voice import execute_tts_new_call_cycle
@@ -193,27 +204,12 @@ async def trigger_run_now(request: Request):
 @router.post("/tts_old/scan_voice")
 @router.post("/tts_old_api/scan_voice")
 def scan_tts_old_voice():
-    if state.status == "PROCESSING":
-        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
-    threading.Thread(target=execute_tts_old_api_voice_cycle, daemon=True).start()
-    return {"success": True, "message": "Đang tiến hành quét riêng phiếu Thoại / SMS từ TTS Cũ..."}
+    return {"success": False, "message": "Hệ thống TTS Cũ đã ngừng hoạt động."}
 
 
 @router.post("/tts_old_api/run-now")
 async def run_now_tts_old_api(request: Request = None):
-    if state.status == "PROCESSING":
-        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
-    state.engine = "api"
-    force_recheck = False
-    if request:
-        try:
-            body = await request.json()
-            force_recheck = bool(body.get("force") or body.get("force_recheck"))
-        except Exception:
-            pass
-
-    threading.Thread(target=execute_tts_old_api_data_cycle, kwargs={"force_recheck": force_recheck}, daemon=True).start()
-    return {"success": True, "message": "Đã kích hoạt quét tiền kiểm TTS Cũ (Data)..."}
+    return {"success": False, "message": "Hệ thống TTS Cũ đã ngừng hoạt động."}
 
 
 @router.post("/ttsnew/run-now")

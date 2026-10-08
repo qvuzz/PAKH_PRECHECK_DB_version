@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>VNPT Token Utilities</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      width: 360px;
+      padding: 14px 16px;
+      color: #0f172a;
+      background: #f8fafc;
+      font-size: 13px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 10px;
+      margin-bottom: 12px;
+    }
+    .brand-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: #005baa;
+      letter-spacing: 0.3px;
+    }
+    .brand-sub {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 1px;
+    }
+    .badge-ver {
+      font-size: 10.5px;
+      font-weight: 700;
+      background: #e0f2fe;
+      color: #0284c7;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .section {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+    .section-title {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #334155;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      margin-bottom: 8px;
+    }
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .input-text {
+      width: 100%;
+      height: 32px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 0 10px;
+      font-size: 12.5px;
+      outline: none;
+      background: #ffffff;
+      color: #0f172a;
+    }
+    .input-text:focus {
+      border-color: #005baa;
+      box-shadow: 0 0 0 2px rgba(0,91,170,0.15);
+    }
+    .btn-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .btn {
+      height: 30px;
+      border-radius: 5px;
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 12px;
+      transition: background 0.15s ease;
+    }
+    .btn-primary {
+      background: #005baa;
+      color: #ffffff;
+      flex: 1;
+    }
+    .btn-primary:hover {
+      background: #004b8d;
+    }
+    .btn-secondary {
+      background: #f1f5f9;
+      color: #334155;
+      border: 1px solid #cbd5e1;
+    }
+    .btn-secondary:hover {
+      background: #e2e8f0;
+    }
+    .btn-success {
+      background: #16a34a;
+      color: #ffffff;
+      width: 100%;
+      height: 34px;
+      font-size: 12.5px;
+      font-weight: 700;
+    }
+    .btn-success:hover {
+      background: #15803d;
+    }
+    .status-msg {
+      font-size: 11px;
+      margin-top: 6px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      display: none;
+    }
+    .status-msg.success {
+      background: #dcfce7;
+      color: #166534;
+      border: 1px solid #bbf7d0;
+      display: block;
+    }
+    .status-msg.error {
+      background: #fee2e2;
+      color: #991b1b;
+      border: 1px solid #fecaca;
+      display: block;
+    }
+    .service-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .service-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      padding: 4px 0;
+      border-bottom: 1px dashed #f1f5f9;
+    }
+    .service-item:last-child {
+      border-bottom: none;
+    }
+    .service-name {
+      color: #475569;
+      font-weight: 500;
+    }
+    .pill {
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .pill-green {
+      background: #dcfce7;
+      color: #15803d;
+    }
+    .pill-gray {
+      background: #f1f5f9;
+      color: #94a3b8;
+    }
+    .footer {
+      text-align: center;
+      font-size: 10.5px;
+      color: #94a3b8;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="brand-title">VNPT Token Utilities</div>
+      <div class="brand-sub">Đồng bộ phiên lên máy chủ Docker</div>
+    </div>
+    <span class="badge-ver">v3.0</span>
+  </div>
+
+  <!-- CẤU HÌNH ĐỊA CHỈ MÁY CHỦ -->
+  <div class="section">
+    <div class="section-title">Máy chủ PAKH Precheck</div>
+    <div class="input-group">
+      <input type="text" id="inpServerUrl" class="input-text" placeholder="http://10.x.x.x:1234 hoặc http://localhost:1234">
+      <div class="btn-row">
+        <button type="button" id="btnSaveServer" class="btn btn-primary">Lưu địa chỉ</button>
+        <button type="button" id="btnTestConn" class="btn btn-secondary">Kiểm tra</button>
+      </div>
+      <div id="statusServerMsg" class="status-msg"></div>
+    </div>
+  </div>
+
+  <!-- TRẠNG THÁI TOKEN BẮT ĐƯỢC TRÊN CLIENT -->
+  <div class="section">
+    <div class="section-title">Trạng thái Token trên trình duyệt</div>
+    <div class="service-list">
+      <div class="service-item">
+        <span class="service-name">BTools (10.159.21.241)</span>
+        <span id="stBtools" class="pill pill-gray">Chưa có</span>
+      </div>
+      <div class="service-item">
+        <span class="service-name">CEM Sóng trạm (vnptmedia.vn)</span>
+        <span id="stCem" class="pill pill-gray">Chưa có</span>
+      </div>
+      <div class="service-item">
+        <span class="service-name">SAPC Core (10.155.42.218)</span>
+        <span id="stSapc" class="pill pill-gray">Chưa có</span>
+      </div>
+      <div class="service-item">
+        <span class="service-name">CCOS (gqknccos.vnpt.vn)</span>
+        <span id="stCcos" class="pill pill-gray">Chưa có</span>
+      </div>
+      <div class="service-item">
+        <span class="service-name">TTS Mới OneOSS (vnptnet.vn)</span>
+        <span id="stTtsNew" class="pill pill-gray">Chưa có</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- NÚT ĐỒNG BỘ TOÀN DIỆN LÊN SERVER -->
+  <button type="button" id="btnSyncNow" class="btn btn-success">Đồng bộ tất cả lên Server</button>
+  <div id="syncResultMsg" class="status-msg"></div>
+
+  <div class="footer">VNPT VinaPhone &copy; 2026 - Tự động đồng bộ ngầm khi mở tab</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

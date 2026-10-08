@@ -171,14 +171,9 @@ def _run_winscp_commands(commands: list) -> tuple[bool, str]:
 
 def _query_via_sftp(phone: str, direction_str: str, gte_time: str, lte_time: str, size: int) -> dict:
     """Gửi yêu cầu qua SFTP 10.165 và chờ VHKT xử lý trả kết quả"""
-    temp_dir = os.path.join(tempfile.gettempdir(), "cdr_precheck")
-    os.makedirs(temp_dir, exist_ok=True)
-
     req_id = f"{phone}_{datetime.now().strftime('%y%m%d%H%M%S')}"
     req_fname = f"{req_id}.req"
     json_fname = f"{req_id}.json"
-    local_req = os.path.join(temp_dir, req_fname)
-    local_json = os.path.join(temp_dir, json_fname)
 
     params = {
         "phone": phone,
@@ -188,36 +183,99 @@ def _query_via_sftp(phone: str, direction_str: str, gte_time: str, lte_time: str
         "size": size,
         "elastic_url": ELASTIC_URL
     }
+    req_json_str = json.dumps(params, ensure_ascii=False)
 
-    with open(local_req, "w", encoding="utf-8") as f:
-        json.dump(params, f, ensure_ascii=False)
+    # 1. ƯU TIÊN SỐ 1: Dùng thư viện Python thuần Paramiko (hoạt động 100% trên cả Windows, Linux và Docker)
+    try:
+        import paramiko
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(
+            hostname=SFTP_HOST,
+            port=22,
+            username=SFTP_USER,
+            password=SFTP_PASS,
+            timeout=10,
+            banner_timeout=15,
+            look_for_keys=False,
+            allow_agent=False
+        )
+        sftp = ssh.open_sftp()
+        try:
+            # Upload .req lên input/
+            remote_req = f"{REMOTE_INPUT_DIR}/{req_fname}"
+            with sftp.open(remote_req, "w") as f:
+                f.write(req_json_str)
 
-    # 1. Upload .req lên input/
-    remote_req = f"{REMOTE_INPUT_DIR}/{req_fname}"
-    up_cmd = [f'put "{local_req}" "{remote_req}"']
-    ok_up, out_up = _run_winscp_commands(up_cmd)
-    if not ok_up:
-        raise RuntimeError(f"Lỗi upload .req qua SFTP: {out_up[:200]}")
+            # Poll output/ chờ file .json kết quả từ máy VHKT Watcher
+            remote_json = f"{REMOTE_OUTPUT_DIR}/{json_fname}"
+            for _ in range(POLL_TIMEOUT_SECS):
+                time.sleep(1)
+                try:
+                    st = sftp.stat(remote_json)
+                    if st and st.st_size > 0:
+                        with sftp.open(remote_json, "r") as rf:
+                            raw_data = rf.read()
+                            data_str = raw_data.decode("utf-8") if isinstance(raw_data, bytes) else raw_data
+                            result = json.loads(data_str)
+                        # Dọn dẹp file kết quả trên SFTP sau khi đã lấy
+                        try:
+                            sftp.remove(remote_json)
+                        except Exception:
+                            pass
+                        return result
+                except (IOError, FileNotFoundError):
+                    continue
 
-    # 2. Poll output/ chờ file .json
-    remote_json = f"{REMOTE_OUTPUT_DIR}/{json_fname}"
-    for _ in range(POLL_TIMEOUT_SECS):
-        time.sleep(1)
-        # Thử tải file kết quả
-        dl_cmd = [f'get "{remote_json}" "{local_json}"']
-        ok_dl, _ = _run_winscp_commands(dl_cmd)
-        if ok_dl and os.path.exists(local_json) and os.path.getsize(local_json) > 0:
-            with open(local_json, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            # Dọn dẹp temp
+            raise TimeoutError(f"Hết thời gian {POLL_TIMEOUT_SECS}s chờ VHKT xử lý trả kết quả CDR.")
+        finally:
             try:
-                os.remove(local_req)
-                os.remove(local_json)
+                sftp.close()
             except Exception:
                 pass
-            return data
+            try:
+                ssh.close()
+            except Exception:
+                pass
+    except Exception as ex_paramiko:
+        # Nếu đã là TimeoutError từ VHKT thì re-raise luôn
+        if isinstance(ex_paramiko, TimeoutError):
+            raise ex_paramiko
 
-    raise TimeoutError(f"Hết thời gian {POLL_TIMEOUT_SECS}s chờ VHKT xử lý trả kết quả CDR.")
+        # 2. DỰ PHÒNG: Fallback sang WinSCP nếu có cài trên Windows
+        if not os.path.exists(WINSCP_PATH):
+            raise RuntimeError(f"Lỗi kết nối SFTP Paramiko: {ex_paramiko}")
+
+        temp_dir = os.path.join(tempfile.gettempdir(), "cdr_precheck")
+        os.makedirs(temp_dir, exist_ok=True)
+        local_req = os.path.join(temp_dir, req_fname)
+        local_json = os.path.join(temp_dir, json_fname)
+
+        with open(local_req, "w", encoding="utf-8") as f:
+            f.write(req_json_str)
+
+        remote_req = f"{REMOTE_INPUT_DIR}/{req_fname}"
+        up_cmd = [f'put "{local_req}" "{remote_req}"']
+        ok_up, out_up = _run_winscp_commands(up_cmd)
+        if not ok_up:
+            raise RuntimeError(f"Lỗi upload .req qua WinSCP: {out_up[:200]}")
+
+        remote_json = f"{REMOTE_OUTPUT_DIR}/{json_fname}"
+        for _ in range(POLL_TIMEOUT_SECS):
+            time.sleep(1)
+            dl_cmd = [f'get "{remote_json}" "{local_json}"']
+            ok_dl, _ = _run_winscp_commands(dl_cmd)
+            if ok_dl and os.path.exists(local_json) and os.path.getsize(local_json) > 0:
+                with open(local_json, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                try:
+                    os.remove(local_req)
+                    os.remove(local_json)
+                except Exception:
+                    pass
+                return data
+
+        raise TimeoutError(f"Hết thời gian {POLL_TIMEOUT_SECS}s chờ VHKT xử lý trả kết quả CDR.")
 
 
 def _query_direct_elastic(phone: str, direction_str: str, gte_time: str, lte_time: str, size: int) -> dict:

@@ -470,7 +470,7 @@ def analyze_ticket_flow(ticket_data: dict, history_data: dict, ticket_flows: lis
     # 3b. Nhận diện trạng thái đã đóng trên CCOS (Tổng đài / Phía khách hàng)
     is_closed_ccos = (
         bool(ticket_data.get("customerCompletionDate")) or
-        (db_row and db_row.get("ticket_status") in ("Đã đóng", "Da dong", "Hoàn thành")) or
+        (db_row and any(k in str(db_row.get("ticket_status") or "") for k in ("Đã đóng", "Da dong", "Hoàn thành"))) or
         (db_row and bool(db_row.get("closed_at"))) or
         (is_closed_oneoss) or
         any("đóng phiếu" in str(f.get("processNodeName") or "").lower() and f.get("closingDate") for f in ticket_flows)
@@ -568,7 +568,7 @@ def analyze_ticket_flow(ticket_data: dict, history_data: dict, ticket_flows: lis
     # vì đây là tiến trình kỹ thuật mạng lưới thực tế đang diễn ra.
     # =========================================================================
     is_field_step = any(k in last_flow_name for k in ["3.10", "3.11", "3.12", "3.13", "5.1", "5.2", "Đo kiểm", "chất lượng"])
-    db_closed = db_row and db_row.get("ticket_status") in ("Đã đóng", "Da dong")
+    db_closed = db_row and any(k in str(db_row.get("ticket_status") or "") for k in ("Đã đóng", "Da dong"))
     if db_closed and not is_closed_oneoss and not has_end_node and not is_field_step:
         issues.append({
             "code": "STATUS_DESYNC",
@@ -1106,9 +1106,9 @@ def api_scan_closed_tickets(
             params = []
             
             if ticket_status_type == "closed":
-                where_parts.append("ticket_status IN ('Đã đóng', 'Da dong')")
+                where_parts.append("(ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%')")
             elif ticket_status_type == "active":
-                where_parts.append("ticket_status NOT IN ('Đã đóng', 'Da dong')")
+                where_parts.append("(ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%')")
 
             if source != "all":
                 where_parts.append("source = ?")

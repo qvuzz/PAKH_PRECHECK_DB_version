@@ -1205,9 +1205,22 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         )
 
     # 🔍 BTOOLS GROUND TRUTH: Trích xuất sớm các phiên Downlink và mốc thời gian tiếp nhận
+    def is_system_traffic_record(row) -> bool:
+        if not isinstance(row, dict):
+            return True
+        sc = str(row.get("SERVICE_ID_CODE", "") or row.get("SERVICE_ID", "")).strip().lower()
+        if not sc or sc in ("null", "none"):
+            return True
+        if sc in ("300", "302", "330", "2042", "0000000300", "0000000302", "0000000330", "0000002042"):
+            return True
+        sc_clean = sc.lstrip("0") or "0"
+        return sc_clean in ("300", "302", "330", "2042")
+
     downlink_sessions = []
     if clean_data:
         for r in clean_data:
+            if is_system_traffic_record(r):
+                continue
             try:
                 dl = float(r.get("DATA_VOLUME_DOWNLINK") or 0)
                 if dl > 0:
@@ -1230,7 +1243,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     downlinks_after = [
         float(r.get("DATA_VOLUME_DOWNLINK", 0) or 0) 
         for _, r in sessions_after_incident 
-        if r.get("DATA_VOLUME_DOWNLINK") is not None
+        if r.get("DATA_VOLUME_DOWNLINK") is not None and not is_system_traffic_record(r)
     ]
     max_downlink_after = max(downlinks_after, default=0)
     has_session_over_10mb_after = max_downlink_after >= 10_000_000
@@ -1683,8 +1696,9 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         s_c = row.get("SERVICE_ID_CODE")
         if s_c is not None: service_codes.append(str(s_c).strip().lower())
         try:
-            v = row.get("DATA_VOLUME_DOWNLINK")
-            if v is not None: downlink_values.append(float(v))
+            if not is_system_traffic_record(row):
+                v = row.get("DATA_VOLUME_DOWNLINK")
+                if v is not None: downlink_values.append(float(v))
         except ValueError:
             pass
 
@@ -1972,7 +1986,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     downlinks_after = [
         float(r.get("DATA_VOLUME_DOWNLINK", 0) or 0) 
         for _, r in sessions_after_incident 
-        if r.get("DATA_VOLUME_DOWNLINK") is not None
+        if r.get("DATA_VOLUME_DOWNLINK") is not None and not is_system_traffic_record(r)
     ]
     max_downlink_after = max(downlinks_after, default=0)
     has_session_over_10mb_after = max_downlink_after >= TRAFFIC_MAX_WEAK
@@ -1981,9 +1995,10 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     total_bytes_after = sum(
         (float(r.get("DATA_VOLUME_DOWNLINK", 0) or 0) + float(r.get("DATA_VOLUME_UPLINK", 0) or 0))
         for _, r in sessions_after_incident
+        if not is_system_traffic_record(r)
     )
     total_mb_after = total_bytes_after / (1024 * 1024)
-    count_sessions_after = len(sessions_after_incident)
+    count_sessions_after = len([r for _, r in sessions_after_incident if not is_system_traffic_record(r)])
     # Thuê bao có phát sinh dữ liệu đáng kể sau mốc tiếp nhận: Có phiên >= 10MB HOẶC tích lũy >= 30MB (với >= 3 phiên OTT/Web/Streaming)
     has_continuous_data_after = (total_mb_after >= 30.0 and count_sessions_after >= 3)
     has_real_usage_after = has_session_over_10mb_after or has_continuous_data_after
@@ -2276,6 +2291,8 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     for row in (clean_data or []):
         t_str = row.get("RECORD_OPENING_TIME", "")
         if not t_str:
+            continue
+        if is_system_traffic_record(row):
             continue
         try:
             d_str = t_str.split(" ")[0]
@@ -2836,16 +2853,16 @@ def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, 
         ai_cell.font = Font(name="Segoe UI", size=10.5, italic=True, color="404040") 
         
         # 🎯 CỘT 10 (J): NỘI DUNG PHÂN TÍCH KỸ THUẬT
-        comment_text = rec["comment"]
+        comment_text = str(rec.get("comment") or "").strip()
         c_cell = ws.cell(row=current_row, column=10, value=comment_text)
         c_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        if "Phiếu mở lại" in str(comment_text):
+        if "Phiếu mở lại" in comment_text:
             c_cell.font = Font(name="Segoe UI", size=11, bold=True, color="C00000")
         elif "Lưu ý: 2 ngày gần nhất không thấy phát sinh data" in comment_text:
             c_cell.font = Font(name="Segoe UI", size=11, bold=True, color="C00000")
             
         # 🎯 CỘT 11 (K): HƯỚNG XỬ LÝ KHUYÊN DÙNG
-        action_text = rec["action_plan"]
+        action_text = str(rec.get("action_plan") or "").strip()
         a_cell = ws.cell(row=current_row, column=11, value=action_text)
         a_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
         if "Cần kiểm tra tình trạng thuê bao và gói cước" in action_text:

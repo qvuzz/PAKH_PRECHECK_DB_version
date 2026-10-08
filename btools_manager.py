@@ -8,6 +8,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 BTOOLS_COOKIE_FILE = BASE_DIR / "btools_cookie.json"
 
+BTOOLS_HOST = os.environ.get("BTOOLS_HOST", "10.159.21.241:9267")
+BTOOLS_BASE_URL = os.environ.get("BTOOLS_URL", f"http://{BTOOLS_HOST}/B_tools_v2")
+
 def verify_btools_cookie(cookie_str: str) -> tuple:
     """
     Kiểm tra xem cookie BTools có hợp lệ và truy cập được hay không.
@@ -20,13 +23,14 @@ def verify_btools_cookie(cookie_str: str) -> tuple:
     if "JSESSIONID" not in clean_cookie:
         clean_cookie = f"JSESSIONID={clean_cookie}"
 
-    test_url = "http://10.159.21.241:9267/B_tools_v2/data_view.jsp"
+    test_url = f"{BTOOLS_BASE_URL}/data_view.jsp"
     try:
         req = urllib.request.Request(
             test_url,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Cookie": clean_cookie
+                "Cookie": clean_cookie,
+                "Host": "10.159.21.241:9267"
             }
         )
         with urllib.request.urlopen(req, timeout=8) as resp:
@@ -44,9 +48,11 @@ def verify_btools_cookie(cookie_str: str) -> tuple:
         return False, f"Lỗi kết nối tới máy chủ BTools (10.159.21.241): {e}"
 
 
-def save_btools_cookie(cookie_str: str) -> tuple:
+def save_btools_cookie(cookie_str: str, verify: bool = False) -> tuple:
     """
-    Lưu cookie BTools vào file cấu hình btools_cookie.json sau khi kiểm tra tính hợp lệ.
+    Lưu cookie BTools vào file cấu hình btools_cookie.json.
+    Nếu verify=True: kiểm tra kết nối tới BTools server trước khi lưu.
+    Nếu verify=False: lưu tức thì để tránh nghẽn luồng đồng bộ API.
     """
     clean_cookie = cookie_str.strip()
     if not clean_cookie:
@@ -54,8 +60,11 @@ def save_btools_cookie(cookie_str: str) -> tuple:
     if "JSESSIONID" not in clean_cookie:
         clean_cookie = f"JSESSIONID={clean_cookie}"
 
-    is_valid, msg = verify_btools_cookie(clean_cookie)
-    # Vẫn lưu ngay cả khi test mạng nội bộ tạm thời chập chờn nếu có format chuẩn
+    is_valid = True
+    msg = "Đã lưu Cookie BTools thành công"
+    if verify:
+        is_valid, msg = verify_btools_cookie(clean_cookie)
+
     data = {
         "cookie": clean_cookie,
         "is_valid": is_valid,

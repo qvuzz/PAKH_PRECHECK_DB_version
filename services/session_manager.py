@@ -44,70 +44,68 @@ def decode_jwt(tok_str: str) -> dict:
             p += "=" * ((4 - len(p) % 4) % 4)
             data = json.loads(base64.b64decode(p).decode("utf-8"))
             u = data.get("userInfo") or {}
+            username = u.get("userName") or u.get("username") or data.get("sub") or data.get("preferred_username") or "KTV"
+            email = u.get("email") or data.get("email") or ""
             return {
-                "userName": u.get("userName") or data.get("sub") or "KTV",
-                "displayName": u.get("name") or u.get("userName") or data.get("sub") or "KTV",
-                "userId": u.get("userId") or 0
+                "userName": username,
+                "displayName": u.get("name") or u.get("displayName") or username,
+                "email": email,
+                "userId": u.get("userId") or 0,
+                "don_vi": u.get("donVi") or u.get("department") or "",
+                "ma_don_vi": u.get("maDonVi") or ""
             }
     except Exception:
         pass
     return {}
 
 
-def resolve_ttsnew_token(client_ip: str, is_local: bool, client_tok: str = "") -> tuple:
-    """
-    Xác định token và thông tin KTV thực hiện trên TTS Mới:
-    1. Ưu tiên token client gửi lên (nếu là JWT Bearer hợp lệ).
-    2. Nếu không có, lấy từ ACTIVE_LAN_SESSIONS[client_ip].
-    3. Nếu là máy chủ Localhost (Admin): cho phép lấy từ Chrome máy chủ.
-    4. Nếu là máy client LAN: TUYỆT ĐỐI KHÔNG dùng token máy chủ.
-    Trả về: (token: str, user_info: dict)
-    """
-    # 1. Kiểm tra token gửi từ client
-    tok = (client_tok or "").strip()
-    if tok and len(tok) > 30 and "." in tok:
-        if not tok.startswith("Bearer "):
-            tok = f"Bearer {tok}"
-        from ttsnew_api import _is_jwt_valid
-        if _is_jwt_valid(tok):
-            user_info = decode_jwt(tok)
-            if user_info.get("userName"):
-                if client_ip not in ACTIVE_LAN_SESSIONS:
-                    ACTIVE_LAN_SESSIONS[client_ip] = {}
-                ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = tok
-                ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
-                ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
-                _save_lan_sessions()
-                return tok, user_info
-        else:
-            # Token client gửi lên đã hết hạn -> xóa khỏi session để tránh dùng lại
-            if client_ip in ACTIVE_LAN_SESSIONS and ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_token") == tok:
-                ACTIVE_LAN_SESSIONS[client_ip].pop("ttsnew_token", None)
-                ACTIVE_LAN_SESSIONS[client_ip].pop("ttsnew_user", None)
-                _save_lan_sessions()
-
-    # 2. Kiểm tra phiên LAN session của IP này
-    if client_ip in ACTIVE_LAN_SESSIONS:
-        lan_tok = (ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_token") or "").strip()
-        if lan_tok and len(lan_tok) > 30 and "." in lan_tok:
-            from ttsnew_api import _is_jwt_valid
-            if _is_jwt_valid(lan_tok):
-                if not lan_tok.startswith("Bearer "):
-                    lan_tok = f"Bearer {lan_tok}"
-                user_info = ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_user") or decode_jwt(lan_tok)
-                return lan_tok, user_info
-
-    # 3. Nếu là máy chủ local (Admin), cho phép fallback lấy từ Chrome máy chủ
-    if is_local:
+def is_docker_gateway_ip(ip: str) -> bool:
+    if not ip:
+        return False
+    parts = ip.split(".")
+    if len(parts) == 4 and parts[0] == "172":
         try:
-            from ttsnew_api import extract_token_from_browser
-            srv_tok = extract_token_from_browser()
-            if srv_tok:
-                if not srv_tok.startswith("Bearer "):
-                    srv_tok = f"Bearer {srv_tok}"
-                user_info = decode_jwt(srv_tok)
-                return srv_tok, user_info
+            sec = int(parts[1])
+            return 16 <= sec <= 31
         except Exception:
             pass
+    return False
 
-    return "", {}
+
+def resolve_ttsnew_token(client_ip: str, is_local: bool = False, client_tok: str = "") -> tuple:
+    """
+    Xác định token và thông tin KTV thực hiện trên TTS Mới — CHẾ ĐỘ NGHIÊM NGẶT:
+    - CHỈ chấp nhận token JWT hợp lệ do CHÍNH trình duyệt client gửi lên (header Authorization / body token).
+    - KHÔNG dùng phiên theo IP (trong Docker mọi client đều hiện IP gateway 172.x giống nhau).
+    - KHÔNG fallback sang token máy chủ / Chrome máy chủ.
+    client_ip, is_local giữ lại để tương thích chữ ký hàm cũ (chỉ dùng ghi log).
+    Trả về: (token: str, user_info: dict) hoặc ("", {}) nếu chưa đăng nhập.
+    """
+    tok = (client_tok or "").strip()
+    if not tok or len(tok) <= 30 or "." not in tok:
+        return "", {}
+    if not tok.startswith("Bearer "):
+        tok = f"Bearer {tok}"
+    from ttsnew_api import _is_jwt_valid
+    if not _is_jwt_valid(tok):
+        return "", {}
+    user_info = decode_jwt(tok)
+    if not user_info.get("userName"):
+        return "", {}
+    return tok, user_info
+
+
+def get_request_token(request, body: dict = None) -> str:
+    """Lấy token client gửi lên: ưu tiên body['token'], sau đó header Authorization."""
+    tok = ""
+    if body and isinstance(body, dict):
+        tok = str(body.get("token") or "").strip()
+    if not tok and request is not None:
+        tok = (request.headers.get("Authorization") or "").strip()
+    return tok
+
+
+def get_request_user(request, body: dict = None) -> tuple:
+    """Định danh người dùng của request chỉ dựa trên token của trình duyệt. Trả về (token, user_info)."""
+    client_ip = request.client.host if (request is not None and request.client) else ""
+    return resolve_ttsnew_token(client_ip, False, get_request_token(request, body))

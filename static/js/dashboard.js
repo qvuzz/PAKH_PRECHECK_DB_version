@@ -1,3 +1,30 @@
+// ==================== TỰ ĐỘNG GẮN TOKEN TTS MỚI VÀO TẤT CẢ REQUEST /api/ ====================
+(function() {
+    const _originalFetch = window.fetch;
+    window.fetch = function(url, options = {}) {
+        try {
+            const tok = localStorage.getItem('ttsnew_auth_token') || localStorage.getItem('tts_auth_token');
+            if (tok && typeof url === 'string' && url.startsWith('/api/')) {
+                options = options || {};
+                options.headers = options.headers || {};
+                const authVal = tok.startsWith('Bearer ') ? tok : `Bearer ${tok}`;
+                if (options.headers instanceof Headers) {
+                    if (!options.headers.has('Authorization')) options.headers.set('Authorization', authVal);
+                } else if (Array.isArray(options.headers)) {
+                    if (!options.headers.some(h => h[0].toLowerCase() === 'authorization')) {
+                        options.headers.push(['Authorization', authVal]);
+                    }
+                } else {
+                    if (!options.headers['Authorization'] && !options.headers['authorization']) {
+                        options.headers['Authorization'] = authVal;
+                    }
+                }
+            }
+        } catch (e) {}
+        return _originalFetch.call(this, url, options);
+    };
+})();
+
 let isRunning = false;
 let currentAutoClose = false;
 let currentSystem = 'tts_new';
@@ -128,7 +155,7 @@ let autoCloseState = {
 };
 
 function getCurrentSystemKey() {
-    return (currentSystem === 'tts_new') ? 'tts_new' : 'tts_old';
+    return (currentSystem === 'tts_old' || currentSystem === 'tts_old_api') ? 'tts_old' : 'tts_new';
 }
 
 function updateModeUI() {
@@ -152,7 +179,7 @@ function updateModeUI() {
     }
 
     if (lblUnified) {
-        lblUnified.innerText = isSysNew ? 'Tự đóng TTS Mới' : 'Tự đóng TTS Cũ';
+        lblUnified.innerText = 'Tự đóng TTS Mới';
     }
 
     if (ctrlUnified) {
@@ -160,12 +187,12 @@ function updateModeUI() {
             ctrlUnified.style.background = '#fef2f2';
             ctrlUnified.style.borderColor = 'rgba(220,38,38,0.5)';
             ctrlUnified.style.color = '#dc2626';
-            ctrlUnified.title = `Chế độ: ĐANG BẬT tự động đóng cho ${isSysNew ? 'TTS Mới' : 'TTS Cũ'} (Bấm để tắt)`;
+            ctrlUnified.title = `Chế độ: ĐANG BẬT tự động đóng cho TTS Mới (Bấm để tắt)`;
         } else {
             ctrlUnified.style.background = '#f8fafc';
             ctrlUnified.style.borderColor = '#cbd5e1';
             ctrlUnified.style.color = '#64748b';
-            ctrlUnified.title = `Chế độ: ĐANG TẮT tự động đóng cho ${isSysNew ? 'TTS Mới' : 'TTS Cũ'} (Bấm để bật)`;
+            ctrlUnified.title = `Chế độ: ĐANG TẮT tự động đóng cho TTS Mới (Bấm để bật)`;
         }
     }
 
@@ -238,7 +265,7 @@ function openAutoCloseConfirmModal() {
     if (!modal) return;
 
     const sysKey = getCurrentSystemKey();
-    const sysName = (sysKey === 'tts_new') ? 'HỆ THỐNG TTS MỚI' : 'HỆ THỐNG TTS CŨ';
+    const sysName = 'HỆ THỐNG TTS MỚI';
 
     const targetSub1 = document.getElementById('autoCloseModalTargetSub1');
     const targetSub2 = document.getElementById('autoCloseModalTargetSub2');
@@ -316,17 +343,24 @@ async function toggleAutoCloseMode(isChecked) {
 }
 
 async function handleAiSummaryModelChange(modelValue) {
-    if (!isSystemAdmin) {
-        alert('⛔ Bạn không có quyền Admin để thay đổi mô hình Tóm tắt nội dung!\n(Chỉ máy chủ Admin chạy trên localhost mới được phép cấu hình)');
+    const curTok = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+    const curUser = (typeof getTtsNewAuthUser === 'function') ? getTtsNewAuthUser() : null;
+    const isQv = curUser && ((curUser.username || '').toLowerCase().includes('quangvu') || (curUser.displayName || '').toLowerCase().includes('quang vũ'));
+
+    if (!isSystemAdmin && !isQv) {
+        alert('Bạn không có quyền Admin để thay đổi mô hình Tóm tắt nội dung!\n(Chỉ tài khoản Admin mới được phép cấu hình)');
         const selAi = document.getElementById('selectAiSummaryModel');
         if (selAi) selAi.value = currentAiEngine || 'qwen';
         return;
     }
 
     try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (curTok) headers['Authorization'] = curTok;
+
         const res = await fetch('/api/config', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify({
                 ai_summary_engine: modelValue
             })
@@ -335,16 +369,20 @@ async function handleAiSummaryModelChange(modelValue) {
         if (data.success) {
             currentAiEngine = data.ai_summary_engine || modelValue;
             const modelName = currentAiEngine === 'regex' ? 'Regex (Quy tắc mẫu)' : 'Qwen 2.5 (Offline AI)';
-            alert(`✅ Đã chuyển mô hình Tóm tắt sang: ${modelName}\nCác lượt quét và tiền kiểm tiếp theo sẽ áp dụng mô hình này.`);
+            alert(`Đã chuyển mô hình Tóm tắt sang: ${modelName}\nCác lượt quét và tiền kiểm tiếp theo sẽ áp dụng mô hình này.`);
         } else {
-            alert('⚠️ Lỗi cập nhật mô hình: ' + (data.error || 'Không xác định'));
+            alert('Lỗi cập nhật mô hình: ' + (data.error || 'Không xác định'));
         }
     } catch (e) {
-        alert('⚠️ Lỗi kết nối máy chủ: ' + e.message);
+        alert('Lỗi kết nối máy chủ: ' + e.message);
     }
 }
 
+let isFetchingStatus = false;
+
 async function fetchStatus() {
+    if (isFetchingStatus) return;
+    isFetchingStatus = true;
     try {
         const res = await fetch('/api/status');
         const data = await res.json();
@@ -357,9 +395,13 @@ async function fetchStatus() {
                 selAi.value = currentAiEngine;
             }
             if (selAi) {
-                if (!isSystemAdmin) {
+                const curUser = (typeof getTtsNewAuthUser === 'function') ? getTtsNewAuthUser() : null;
+                const isQv = curUser && ((curUser.username || '').toLowerCase().includes('quangvu') || (curUser.displayName || '').toLowerCase().includes('quang vũ'));
+                const canChangeAi = isSystemAdmin || isQv;
+
+                if (!canChangeAi) {
                     selAi.disabled = true;
-                    selAi.title = "Chỉ máy chủ Admin (127./localhost) mới có quyền đổi mô hình AI";
+                    selAi.title = "Chỉ tài khoản Quản trị viên mới có quyền đổi mô hình AI";
                     selAi.style.opacity = "0.7";
                     selAi.style.cursor = "not-allowed";
                 } else {
@@ -566,6 +608,8 @@ async function fetchStatus() {
 
     } catch (e) {
         console.error("Lỗi fetch status:", e);
+    } finally {
+        isFetchingStatus = false;
     }
 }
 
@@ -927,23 +971,23 @@ function selectHistoryStats(updateUrl = true) {
 }
 
 function selectModule(sys, srv, updateUrl = true) {
+    if (sys === 'tts_old_api' || sys === 'tts_old') {
+        sys = 'tts_new';
+        srv = 'data';
+    }
     isHistoryStatsView = false;
-    currentSystem = sys;
+    currentSystem = 'tts_new';
     currentService = srv;
 
     if (updateUrl) {
-        let routePath = '/ttscu/data';
-        if (sys === 'tts_new') {
-            if (srv === 'data') routePath = '/ttsmoi/data';
-            else if (srv === 'call') routePath = '/ttsmoi/cuoc-goi';
-            else if (srv === 'sms') routePath = '/ttsmoi/tin-nhan';
-            else if (srv === 'other') routePath = '/ttsmoi/khac';
-            else routePath = '/ttsmoi/voice';
-        } else {
-            routePath = (srv === 'data') ? '/ttscu/data' : '/ttscu/voice';
-        }
+        let routePath = '/ttsmoi/data';
+        if (srv === 'data') routePath = '/ttsmoi/data';
+        else if (srv === 'call') routePath = '/ttsmoi/cuoc-goi';
+        else if (srv === 'sms') routePath = '/ttsmoi/tin-nhan';
+        else if (srv === 'other') routePath = '/ttsmoi/khac';
+        else routePath = '/ttsmoi/voice';
         if (window.location.pathname !== routePath) {
-            history.pushState({ sys, srv }, '', routePath);
+            history.pushState({ sys: 'tts_new', srv }, '', routePath);
         }
     }
 
@@ -1429,7 +1473,13 @@ async function loadTickets(force = false, resetPage = false) {
         // Chỉ áp dụng filterStatus cho dịch vụ data (Mobile Internet), các nghiệp vụ khác luôn để 'all'
         const statusFilter = (currentService === 'data' && filterStatusElem) ? filterStatusElem.value : 'all';
 
-        const res = await fetch(`/api/tickets?search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusFilter)}&tab=${encodeURIComponent(requestedTab)}&source=${encodeURIComponent(requestedSystem)}&service_type=${encodeURIComponent(requestedService)}&region=${encodeURIComponent(currentRegion || 'ALL')}`, { signal });
+        const clientAuthTok = getTtsNewAuthToken() || (getTtsAuthSession() ? getTtsAuthSession().token : '');
+        const reqHeaders = clientAuthTok ? { 'Authorization': clientAuthTok } : {};
+
+        const res = await fetch(`/api/tickets?search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusFilter)}&tab=${encodeURIComponent(requestedTab)}&source=${encodeURIComponent(requestedSystem)}&service_type=${encodeURIComponent(requestedService)}&region=${encodeURIComponent(currentRegion || 'ALL')}`, { 
+            signal,
+            headers: reqHeaders
+        });
         const data = await res.json();
 
         // Kiểm tra tính hợp lệ: Nếu người dùng đã chuyển sang tab hoặc module khác trong lúc fetch thì bỏ qua kết quả cũ
@@ -1437,25 +1487,49 @@ async function loadTickets(force = false, resetPage = false) {
             return;
         }
 
-        // 🎯 Đồng bộ Widget Phân vùng 3 Miền trên Header
+        // 🎯 Đồng bộ Widget Phân vùng 3 Miền & Vai trò Admin trên Header
+        const authRoleTag = document.getElementById('authRoleTag');
+        const authUserName = document.getElementById('authUserName');
+        const authPill = document.getElementById('authPill');
+        const unauthBtn = document.getElementById('unauthBtn');
+
         if (data.user_role === 'admin') {
-            const regWrap = document.getElementById('regionSelectWrapper');
-            if (regWrap) regWrap.style.display = 'flex';
-            const regSelect = document.getElementById('regionSelect');
-            if (regSelect && data.region && regSelect.value !== data.region) {
-                regSelect.value = data.region;
+            isSystemAdmin = true;
+            if (authRoleTag) {
+                authRoleTag.innerText = 'ADMIN';
+                authRoleTag.className = 'auth-role-tag admin';
             }
-            const regBadge = document.getElementById('regionBadgeKtv');
-            if (regBadge) regBadge.style.display = 'none';
         } else {
-            const regWrap = document.getElementById('regionSelectWrapper');
-            if (regWrap) regWrap.style.display = 'none';
-            const regBadge = document.getElementById('regionBadgeKtv');
-            if (regBadge) {
-                regBadge.style.display = 'inline-flex';
-                const regLabels = { 'MB': 'Miền Bắc', 'MT': 'Miền Trung', 'MN': 'Miền Nam', 'ALL': 'Toàn quốc' };
-                regBadge.innerText = regLabels[data.region] || data.region;
+            if (authRoleTag) {
+                authRoleTag.innerText = 'KTV';
+                authRoleTag.className = 'auth-role-tag ktv';
             }
+        }
+
+        const regWrap = document.getElementById('regionSelectWrapper');
+        if (regWrap) regWrap.style.display = 'flex';
+        const regSelect = document.getElementById('regionSelect');
+        if (regSelect) {
+            const chosen = currentRegion || data.region || 'ALL';
+            if (regSelect.value !== chosen) {
+                regSelect.value = chosen;
+            }
+        }
+
+        // Cập nhật tên hiển thị từ server nếu có
+        if (data.user_role === 'guest' || !data.user_name) {
+            if (!getTtsNewAuthToken()) {
+                window.currentApiUserName = '';
+                if (authPill) authPill.style.display = 'none';
+                if (unauthBtn) unauthBtn.style.display = 'inline-flex';
+            }
+        } else if (data.user_name && data.user_name !== 'KTV' && data.user_name !== 'Quản trị viên') {
+            window.currentApiUserName = data.user_name;
+            if (authUserName) {
+                authUserName.innerText = `Xin chào, ${data.user_name}`;
+            }
+            if (authPill) authPill.style.display = 'inline-flex';
+            if (unauthBtn) unauthBtn.style.display = 'none';
         }
 
         const tickets = data.tickets || [];
@@ -2595,9 +2669,10 @@ function renderTicketsTable(force = false) {
         const isExpanded = expandedTicketKeys.has(ticketKey);
 
         let badgeClass = 'badge-gray';
-        if (t.status.includes('BÌNH THƯỜNG') || t.status.includes('VPN') || t.status.includes('MẠNG LƯỚI ĐẢM BẢO') || t.status.includes('ĐỦ ĐIỀU KIỆN ĐÓNG')) badgeClass = 'badge-green';
-        else if (t.status.includes('PROFILE LẠ') || t.status.includes('LẠ') || t.status.includes('KHÓA DỊCH VỤ') || t.status.includes('SPAM') || t.status.includes('KHÓA GPRS')) badgeClass = 'badge-red';
-        else if (t.status.includes('YẾU') || t.status.includes('GÓI') || t.status.includes('LỖI ỨNG DỤNG') || t.status.includes('ỨNG DỤNG') || t.status.includes('MỞ LẠI') || t.status.includes('SỰ CỐ') || t.status.includes('KTV KIỂM TRA')) badgeClass = 'badge-yellow';
+        const stStr = String(t.status || '');
+        if (stStr.includes('BÌNH THƯỜNG') || stStr.includes('VPN') || stStr.includes('MẠNG LƯỚI ĐẢM BẢO') || stStr.includes('ĐỦ ĐIỀU KIỆN ĐÓNG')) badgeClass = 'badge-green';
+        else if (stStr.includes('PROFILE LẠ') || stStr.includes('LẠ') || stStr.includes('KHÓA DỊCH VỤ') || stStr.includes('SPAM') || stStr.includes('KHÓA GPRS')) badgeClass = 'badge-red';
+        else if (stStr.includes('YẾU') || stStr.includes('GÓI') || stStr.includes('LỖI ỨNG DỤNG') || stStr.includes('ỨNG DỤNG') || stStr.includes('MỞ LẠI') || stStr.includes('SỰ CỐ') || stStr.includes('KTV KIỂM TRA')) badgeClass = 'badge-yellow';
 
         const now = new Date();
         const pad = (n) => String(n).padStart(2, '0');
@@ -2608,7 +2683,7 @@ function renderTicketsTable(force = false) {
 
         let actionHtml = '';
         let compactActionHtml = '';
-        const isTtsNew = (t.source === 'tts_new' || currentSystem === 'tts_new');
+        const isTtsNew = (t.source === 'tts_new' || currentSystem === 'tts_new' || (t.source !== 'tts_old' && t.source !== 'tts_old_api'));
         const isTtsOldApi = (t.source === 'tts_old_api' || currentSystem === 'tts_old_api');
         let cleanTicketCode = (t.ticket_code || '').split('\n')[0].trim();
         if (cleanTicketCode.endsWith('.0') && !isNaN(Number(cleanTicketCode))) {
@@ -2648,12 +2723,28 @@ function renderTicketsTable(force = false) {
         const isStep24 = !isStep23 && !isStep26;
 
         if (t.ticket_status === 'Đã đóng' || t.ticket_status === 'Da dong' || (t.ticket_status && t.ticket_status.includes('Đã đóng'))) {
+            let closeLabel = 'ĐÃ ĐÓNG';
+            let closeBadgeStyle = 'font-weight:700; padding:4px 8px; font-size:11px;';
+            let compactBadgeStyle = 'font-weight:700; padding:2px 6px; font-size:10px;';
+            let closeBadgeClass = 'badge-status badge-green';
+
+            const stStr = String(t.ticket_status || '');
+            if (stStr.includes('5.1')) {
+                closeLabel = 'ĐÃ ĐÓNG 5.1';
+                closeBadgeClass = 'badge-status';
+                closeBadgeStyle += ' background:#e0e7ff; color:#3730a3; border:1px solid #c7d2fe;';
+                compactBadgeStyle += ' background:#e0e7ff; color:#3730a3; border:1px solid #c7d2fe;';
+            } else if (stStr.includes('2.6')) {
+                closeLabel = 'ĐÃ ĐÓNG 2.6';
+                closeBadgeClass = 'badge-status badge-green';
+            }
+
             actionHtml = `
                         <div style="display:flex; flex-direction:column; align-items:center; gap:3px;">
-                            <span class="badge-status badge-green" style="font-weight:700; padding:4px 8px; font-size:11px;">ĐÃ ĐÓNG</span>
+                            <span class="${closeBadgeClass}" style="${closeBadgeStyle}">${closeLabel}</span>
                         </div>
                     `;
-            compactActionHtml = `<span class="badge-status badge-green" style="font-weight:700; padding:2px 6px; font-size:10px;">ĐÃ ĐÓNG</span>`;
+            compactActionHtml = `<span class="${closeBadgeClass}" style="${compactBadgeStyle}">${closeLabel}</span>`;
         } else if (isTtsNew) {
             let stageBadge = '';
             if (reopenCount > 0) {
@@ -3472,7 +3563,7 @@ function renderTicketsTable(force = false) {
                 if (readTickets[ticketKey]) isAcknowledged = true;
             } catch(e) {}
 
-            const isNewPending = (t.ticket_status !== 'Đã đóng');
+            const isNewPending = !(t.ticket_status && (t.ticket_status === 'Đã đóng' || t.ticket_status.includes('Đã đóng')));
             const newBeacon = (isNewPending && !isAcknowledged) 
                 ? `<span id="beacon-${ticketKey}" class="pulse-red-dot beacon-${ticketKey}" onclick="dismissNewBeacon('${ticketKey}', event, this)" title="Phiếu mới (Bấm để xóa dấu đỏ / đã biết)"></span>` 
                 : '';
@@ -3854,25 +3945,17 @@ async function manualRefreshDashboard() {
     if (btn) btn.classList.add('spinning');
     try {
         lastTicketsSignature = "";
-        // Kích hoạt quét nhanh từ API theo phân hệ đang chọn để đồng bộ dữ liệu thực tế
-        if (currentSystem === 'tts_old_api') {
-            if (currentService === 'data') {
-                fetch('/api/tts_old_api/run-now', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
-            } else if (currentService === 'voice_sms') {
-                fetch('/api/tts_old_api/scan_voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
-            }
-        } else if (currentSystem === 'tts_new') {
-            if (currentService === 'data') {
-                fetch('/api/ttsnew/run-now', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
-            } else if (currentService === 'call') {
-                fetch('/api/ttsnew/scan_call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
-            } else if (currentService === 'sms') {
-                fetch('/api/ttsnew/scan_sms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
-            } else if (currentService === 'other') {
-                fetch('/api/ttsnew/scan_other', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
-            } else if (currentService === 'voice_sms') {
-                fetch('/api/ttsnew/scan_voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
-            }
+        // Kích hoạt quét nhanh từ API theo phân hệ TTS Mới đang chọn
+        if (currentService === 'data') {
+            fetch('/api/ttsnew/run-now', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
+        } else if (currentService === 'call') {
+            fetch('/api/ttsnew/scan_call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
+        } else if (currentService === 'sms') {
+            fetch('/api/ttsnew/scan_sms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
+        } else if (currentService === 'other') {
+            fetch('/api/ttsnew/scan_other', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
+        } else if (currentService === 'voice_sms' || currentService === 'voice') {
+            fetch('/api/ttsnew/scan_voice', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => { });
         }
         await Promise.all([
             fetchStatus(),
@@ -4164,8 +4247,8 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
     const ttsNewToken = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
     const ttsNewUser = (typeof getTtsNewAuthUser === 'function') ? getTtsNewAuthUser() : null;
 
-    if (!ttsNewToken && !isSystemAdmin) {
-        alert("Phiên làm việc TTS Mới (tts.vnptnet.vn) của bạn chưa kết nối hoặc ĐÃ HẾT HẠN.\n\nVui lòng bấm vào nút 'TTS (MỚI)' trên thanh công cụ (hoặc bật Chrome Extension) để đồng bộ phiên làm việc của bạn trước khi thực hiện!");
+    if (!ttsNewToken) {
+        alert("Phiên làm việc TTS Mới (tts.vnptnet.vn) của bạn chưa kết nối hoặc ĐÃ HẾT HẠN.\n\nVui lòng bấm vào nút 'TTS (MỚI)' trên thanh công cụ để kết nối tài khoản KTV của bạn trước khi thực hiện!");
         openTtsNewModal();
         return;
     }
@@ -4204,9 +4287,13 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
     }
 
     try {
+        const bearerTok = ttsNewToken.startsWith('Bearer ') ? ttsNewToken : `Bearer ${ttsNewToken}`;
         const res = await fetch('/api/ttsnew/close_one', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': bearerTok
+            },
             body: JSON.stringify({
                 ticket_code: ticketCode,
                 phone: phone,
@@ -4254,8 +4341,8 @@ async function handleMoveToStep24(ticketCode, phone, ticketId, flowId, btnElem) 
     if (btnElem && btnElem.disabled) return;
 
     const ttsNewToken = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
-    if (!ttsNewToken && !isSystemAdmin) {
-        alert("⚠️ Phiên làm việc TTS Mới (tts.vnptnet.vn) của bạn chưa kết nối hoặc ĐÃ HẾT HẠN.\n\nVui lòng bấm vào nút 'TTS (MỚI)' trên thanh công cụ (hoặc bật Chrome Extension) để đồng bộ phiên làm việc của bạn trước khi chuyển bước!");
+    if (!ttsNewToken) {
+        alert("⚠️ Phiên làm việc TTS Mới (tts.vnptnet.vn) của bạn chưa kết nối hoặc ĐÃ HẾT HẠN.\n\nVui lòng bấm vào nút 'TTS (MỚI)' trên thanh công cụ để kết nối tài khoản KTV của bạn trước khi chuyển bước!");
         if (typeof openTtsNewModal === 'function') openTtsNewModal();
         return;
     }
@@ -4288,16 +4375,20 @@ async function handleMoveToStep24(ticketCode, phone, ticketId, flowId, btnElem) 
         btnElem.style.opacity = '0.75';
     }
 
+    const bearerTok24 = ttsNewToken.startsWith('Bearer ') ? ttsNewToken : `Bearer ${ttsNewToken}`;
     try {
         const res = await fetch('/api/tickets/move_to_2_4', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': bearerTok24
+            },
             body: JSON.stringify({
                 ticket_code: ticketCode,
                 phone: phone,
                 ticket_id: ticketId || null,
                 flow_id: flowId || null,
-                token: ttsNewToken || '',
+                token: bearerTok24,
                 comment: commentVal,
                 action_plan: planVal
             })
@@ -4336,8 +4427,8 @@ async function triggerTtsNewAutoCloseAll(btnElem) {
     const ttsNewToken = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
     const ttsNewUser = (typeof getTtsNewAuthUser === 'function') ? getTtsNewAuthUser() : null;
 
-    if (!ttsNewToken && !isSystemAdmin) {
-        alert("Bạn cần đồng bộ phiên TTS Mới (tts.vnptnet.vn) của mình trước khi thực hiện đóng tự động!");
+    if (!ttsNewToken) {
+        alert("Bạn cần kết nối tài khoản TTS Mới (tts.vnptnet.vn) của mình trước khi thực hiện đóng tự động!");
         openTtsNewModal();
         return;
     }
@@ -4352,12 +4443,16 @@ async function triggerTtsNewAutoCloseAll(btnElem) {
         btnElem.innerHTML = `<span class="status-dot processing" style="display:inline-block; margin-right:6px;"></span> Đang tự động đóng...`;
     }
 
+    const bearerTokAll = ttsNewToken.startsWith('Bearer ') ? ttsNewToken : `Bearer ${ttsNewToken}`;
     try {
         const res = await fetch('/api/ttsnew/close_all', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': bearerTokAll
+            },
             body: JSON.stringify({
-                token: ttsNewToken || "",
+                token: bearerTokAll,
                 user_id: (ttsNewUser ? ttsNewUser.userId : null) || 0,
                 user_name: (ttsNewUser ? (ttsNewUser.displayName || ttsNewUser.username) : null) || "Kỹ thuật viên"
             })
@@ -5184,7 +5279,7 @@ function getSelectedScopes() {
     if (document.getElementById('chkScopeNewOther')?.checked) scopes.push('tts_new_other');
     if (document.getElementById('chkScopeNewVoice')?.checked) scopes.push('tts_new_voice');
     if (scopes.length === 0) {
-        return ['tts_old_data', 'tts_old_voice', 'tts_new_data', 'tts_new_call', 'tts_new_sms', 'tts_new_other'];
+        return ['tts_new_data', 'tts_new_call', 'tts_new_sms', 'tts_new_other'];
     }
     return scopes;
 }
@@ -5234,9 +5329,7 @@ function syncScopeCheckboxes(scopes) {
 async function handleScopeChange() {
     let scopes = getSelectedScopes();
     if (scopes.length === 0) {
-        const chkOldData = document.getElementById('chkScopeOldData');
-        if (chkOldData) chkOldData.checked = true;
-        scopes = ['tts_old_data'];
+        scopes = ['tts_new_data', 'tts_new_call', 'tts_new_sms', 'tts_new_other'];
     }
     updateScopeSummaryLabel(scopes);
     try {
@@ -5340,31 +5433,21 @@ window.startUnifiedAutomation = startUnifiedAutomation;
 
 // TIỀN KIỂM LẠI CHO RIÊNG MODULE HIỆN TẠI (TÁI SỬ DỤNG KẾT QUẢ DB NẾU PHIẾU ĐANG Ở BƯỚC 2.6)
 async function recheckCurrentModule(btn) {
-    let endpoint = '/api/tts_old_api/run-now';
-    let moduleLabel = 'Mobile Internet (TTS Cũ)';
+    let endpoint = '/api/ttsnew/run-now';
+    let moduleLabel = 'Mobile Internet (TTS Mới)';
 
-    if (currentSystem === 'tts_new') {
-        if (currentService === 'data') {
-            endpoint = '/api/ttsnew/run-now';
-            moduleLabel = 'Mobile Internet (TTS Mới)';
-        } else if (currentService === 'call') {
-            endpoint = '/api/ttsnew/scan_call';
-            moduleLabel = 'Cuộc gọi (TTS Mới)';
-        } else if (currentService === 'sms') {
-            endpoint = '/api/ttsnew/scan_sms';
-            moduleLabel = 'Tin nhắn (TTS Mới)';
-        } else if (currentService === 'other') {
-            endpoint = '/api/ttsnew/scan_other';
-            moduleLabel = 'Gói cước / PA Khác (TTS Mới)';
-        } else {
-            endpoint = '/api/ttsnew/scan_voice';
-            moduleLabel = 'Thoại / SMS (TTS Mới)';
-        }
-    } else {
-        if (currentService === 'voice_sms') {
-            endpoint = '/api/tts_old_api/scan_voice';
-            moduleLabel = 'Thoại/SMS/Gói (TTS Cũ)';
-        }
+    if (currentService === 'call') {
+        endpoint = '/api/ttsnew/scan_call';
+        moduleLabel = 'Cuộc gọi (TTS Mới)';
+    } else if (currentService === 'sms') {
+        endpoint = '/api/ttsnew/scan_sms';
+        moduleLabel = 'Tin nhắn (TTS Mới)';
+    } else if (currentService === 'other') {
+        endpoint = '/api/ttsnew/scan_other';
+        moduleLabel = 'Gói cước / PA Khác (TTS Mới)';
+    } else if (currentService === 'voice_sms' || currentService === 'voice') {
+        endpoint = '/api/ttsnew/scan_voice';
+        moduleLabel = 'Thoại / SMS (TTS Mới)';
     }
 
     if (btn) {
@@ -5456,7 +5539,13 @@ function setTtsAuthSession(token, userInfo) {
 function clearTtsAuthSession() {
     localStorage.removeItem('tts_auth_token');
     localStorage.removeItem('tts_auth_user');
+    localStorage.removeItem('ttsnew_auth_token');
+    localStorage.removeItem('ttsnew_auth_user');
+    window.currentApiUserName = '';
     currentAuthUser = null;
+    try {
+        fetch('/api/logout', { method: 'POST' }).catch(() => { });
+    } catch (e) { }
     applyUserSessionState();
     const welcomeModal = document.getElementById('welcomeTtsModal');
     if (welcomeModal) {
@@ -5561,6 +5650,13 @@ function setTtsNewAuthToken(tok) {
 function clearTtsNewAuthToken() {
     localStorage.removeItem('ttsnew_auth_token');
     localStorage.removeItem('ttsnew_auth_user');
+    localStorage.removeItem('tts_auth_token');
+    localStorage.removeItem('tts_auth_user');
+    window.currentApiUserName = '';
+    currentAuthUser = null;
+    try {
+        fetch('/api/logout', { method: 'POST' }).catch(() => { });
+    } catch (e) { }
 }
 
 function toggleWelcomeTtsPopup(event) {
@@ -5576,33 +5672,29 @@ function toggleWelcomeTtsPopup(event) {
 }
 
 function openWelcomeTtsModal() {
-    const modal = document.getElementById('welcomeTtsModal');
-    if (!modal) return;
-    modal.style.display = 'block';
+    const m = document.getElementById('welcomeTtsModal');
+    if (!m) return;
+    m.style.display = 'block';
 
-    const session = getTtsAuthSession();
+    let session = getTtsAuthSession();
     const connBox = document.getElementById('ttsOldConnectedBox');
     const s1 = document.getElementById('boxStep1Login');
     const s2 = document.getElementById('boxStep2Otp');
 
     if (session && session.token) {
-        // ĐÃ ĐĂNG NHẬP -> CHỈ HIỆN KHUNG THÔNG TIN VÀ NÚT ĐĂNG XUẤT
         if (connBox) connBox.style.display = 'flex';
-        const title = document.getElementById('ttsOldConnectedTitle');
-        const sub = document.getElementById('ttsOldConnectedSub');
-        const name = session.displayName || session.username || 'Kỹ thuật viên';
-        const uName = session.username || '--';
-        const idPart = session.userId ? ` (ID: ${session.userId})` : '';
-        if (title) title.innerText = `✅ Đã kết nối: ${name}`;
-        if (sub) sub.innerText = `Tài khoản: ${uName}${idPart} — Sẵn sàng ký nhận xử lý/đóng phiếu.`;
         if (s1) s1.style.display = 'none';
         if (s2) s2.style.display = 'none';
+        const title = document.getElementById('ttsOldConnectedTitle');
+        const sub = document.getElementById('ttsOldConnectedSub');
+        const u = session.user || {};
+        const uName = u.TaiKhoan || u.username || 'KTV';
+        const dName = u.HoTen || u.displayName || uName;
+        if (title) title.innerText = `Đã kết nối: ${uName}`;
+        if (sub) sub.innerText = `KTV: ${dName}`;
     } else {
-        // CHƯA ĐĂNG NHẬP -> HIỆN FORM ĐĂNG NHẬP
         if (connBox) connBox.style.display = 'none';
         backToStep1Login();
-        const uInp = document.getElementById('loginTtsUsername');
-        if (uInp && !uInp.value) uInp.focus();
     }
 }
 
@@ -5613,17 +5705,16 @@ function closeWelcomeTtsModal() {
 
 function logoutTtsSession() {
     clearTtsAuthSession();
-    openWelcomeTtsModal();
     applyUserSessionState();
     updateServicesStatus();
 }
 
 // Giữ lại alias để tương thích
 function openConnectModal() {
-    openWelcomeTtsModal();
+    openTtsNewModal();
 }
 function closeConnectModal() {
-    closeWelcomeTtsModal();
+    closeTtsNewModal();
 }
 
 function toggleSapcPopup(event) {
@@ -5708,31 +5799,7 @@ async function saveSapcCookieManual() {
 
 
 async function syncServerTokenQuick() {
-    try {
-        const res = await fetch('/api/current_user');
-        if (res.ok) {
-            const data = await res.json();
-            let gotAny = false;
-            if (data.server_token) {
-                setTtsAuthSession(data.server_token, data.server_user || { TaiKhoan: "admin", HoTen: "Quản trị viên máy chủ" });
-                gotAny = true;
-            }
-            if (data.server_ttsnew_token) {
-                setTtsNewAuthToken(data.server_ttsnew_token);
-                gotAny = true;
-            }
-            if (gotAny) {
-                closeWelcomeTtsModal();
-                closeConnectModal();
-                closeTtsNewModal();
-                applyUserSessionState();
-                updateServicesStatus();
-                alert("🎉 Đã kết nối thành công với phiên máy chủ (TTS Cũ & TTS Mới)!");
-                return;
-            }
-        }
-    } catch (e) { }
-    alert("Máy chủ hiện chưa trích xuất được phiên đăng nhập.");
+    alert("Hệ thống yêu cầu mỗi KTV đăng nhập bằng tài khoản TTS Mới của chính mình (tts.vnptnet.vn) để đảm bảo ghi đúng danh tính KTV khi đóng/chuyển bước phiếu OneOSS.");
 }
 
 let pollTtsInterval = null;
@@ -5806,7 +5873,7 @@ async function handleDirectLoginSubmit(e) {
         const res = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
+            body: JSON.stringify({ username, password, system: 'tts_old' })
         });
         const data = await res.json();
 
@@ -5987,7 +6054,32 @@ function closeWelcomeTtsModal() {
 }
 
 function applyUserSessionState() {
-    const session = getTtsAuthSession();
+    let session = null;
+    const newTok = getTtsNewAuthToken();
+    const newUsr = getTtsNewAuthUser();
+    if (newTok) {
+        session = {
+            token: newTok,
+            username: (newUsr ? (newUsr.username || newUsr.displayName) : '') || 'KTV',
+            displayName: (newUsr ? (newUsr.displayName || newUsr.username) : '') || window.currentApiUserName || 'KTV',
+            email: newUsr ? (newUsr.email || '') : '',
+            userId: newUsr ? (newUsr.userId || 0) : 0,
+            is_tts_new: true
+        };
+    } else {
+        const oldSess = getTtsAuthSession();
+        if (oldSess && oldSess.token) {
+            const u = oldSess.user || {};
+            session = {
+                token: oldSess.token,
+                username: u.TaiKhoan || u.username || 'KTV',
+                displayName: u.HoTen || u.displayName || u.TaiKhoan || window.currentApiUserName || 'KTV',
+                email: u.email || '',
+                userId: u.userId || 0,
+                is_tts_new: false
+            };
+        }
+    }
     currentAuthUser = session;
 
     const unauthBtn = document.getElementById('unauthBtn');
@@ -5999,8 +6091,19 @@ function applyUserSessionState() {
     // Không bao giờ khóa mờ màn hình (luôn xóa is-unauthenticated để KTV xem dữ liệu tự do)
     document.body.classList.remove('is-unauthenticated');
 
+    // Kiểm tra tài khoản có phải là SuperAdmin (quangvu / quangvu@vnpt.vn / Lê Quang Vũ) hay không
+    isSystemAdmin = false;
+    if (session) {
+        const uName = (session.username || '').toLowerCase();
+        const uEmail = (session.email || '').toLowerCase();
+        const uDisp = (session.displayName || '').toLowerCase();
+        if (uName === 'quangvu' || uEmail.includes('quangvu') || uDisp.includes('lê quang vũ') || uDisp.includes('quangvu')) {
+            isSystemAdmin = true;
+        }
+    }
+
     if (!session || !session.token) {
-        if (unauthBtn) unauthBtn.style.display = 'none';
+        if (unauthBtn) unauthBtn.style.display = 'inline-flex';
         if (authPill) authPill.style.display = 'none';
         if (welcomeModal) welcomeModal.style.display = 'none';
     } else {
@@ -6069,8 +6172,11 @@ async function initUserSession() {
 
     // 2. Lấy thông tin server & kiểm tra vai trò admin
     let serverData = { is_local: false, has_server_token: false };
+    const curClientTok = getTtsNewAuthToken() || (getTtsAuthSession() ? getTtsAuthSession().token : '');
     try {
-        const res = await fetch('/api/current_user');
+        const res = await fetch('/api/current_user', {
+            headers: curClientTok ? { 'Authorization': curClientTok } : {}
+        });
         if (res.ok) {
             serverData = await res.json();
         }
@@ -6078,26 +6184,23 @@ async function initUserSession() {
         console.warn("Lỗi kiểm tra current_user:", e);
     }
 
-    isSystemAdmin = serverData.is_local || checkIsLocalHost() || urlParams.get('role') === 'admin';
-    applyUserSessionState();
-
-    // Chỉ máy chủ Localhost (Admin) mới tự động kết nối với Chrome đang mở trên máy chủ
-    if (serverData.is_local) {
-        if (serverData.server_token) {
-            setTtsAuthSession(serverData.server_token, serverData.server_user || { TaiKhoan: "admin", HoTen: "Quản trị viên" });
+    // Đồng bộ thông tin KTV nếu client đã có token hợp lệ
+    if (serverData.ttsnew_token && curClientTok) {
+        if (serverData.ttsnew_user) {
+            localStorage.setItem('ttsnew_auth_user', JSON.stringify({
+                username: serverData.ttsnew_user.userName || serverData.ttsnew_user.username || 'KTV',
+                displayName: serverData.ttsnew_user.displayName || serverData.ttsnew_user.name || 'KTV',
+                email: serverData.ttsnew_user.email || '',
+                userId: serverData.ttsnew_user.userId || 0
+            }));
         }
-        if (serverData.server_ttsnew_token) {
-            setTtsNewAuthToken(serverData.server_ttsnew_token);
-        }
-    } else {
-        // Đối với máy trạm LAN: phục hồi phiên KTV đã lưu trên server nếu có
-        if (serverData.token && !getTtsAuthSession()) {
-            setTtsAuthSession(serverData.token, serverData.user || { TaiKhoan: "KTV", HoTen: "Kỹ thuật viên" });
-        }
-        if (serverData.ttsnew_token && !getTtsNewAuthToken()) {
-            setTtsNewAuthToken(serverData.ttsnew_token);
-        }
+    } else if (!curClientTok) {
+        // Máy client mới truy cập: đảm bảo sạch session
+        clearTtsNewAuthToken();
     }
+
+    isSystemAdmin = !!serverData.is_admin;
+    applyUserSessionState();
 
     if (typeof updateTtsNewBookmarkletLink === 'function') {
         updateTtsNewBookmarkletLink();
@@ -6106,8 +6209,8 @@ async function initUserSession() {
 
 // KHỞI CHẠY HỆ THỐNG
 initUserSession();
-setInterval(fetchStatus, 1500);
-setInterval(() => loadTickets(false), 8000);
+setInterval(fetchStatus, 4000);
+setInterval(() => loadTickets(false), 12000);
 fetchStatus();
 
 // Kích hoạt đúng tab theo URL hiện tại trên thanh địa chỉ trình duyệt
@@ -6180,6 +6283,8 @@ document.addEventListener('click', function (e) {
     }
     const wt = document.getElementById('wrapperTtsNew');
     if (wt && !wt.contains(e.target)) closeTtsNewModal();
+    const wtOld = document.getElementById('wrapperTtsOld');
+    if (wtOld && !wtOld.contains(e.target)) closeWelcomeTtsModal();
     const wccos = document.getElementById('wrapperCcos');
     if (wccos && !wccos.contains(e.target)) closeCcosModal();
 });
@@ -6192,12 +6297,10 @@ async function updateServicesStatus() {
     const dotSapc = document.getElementById('dotSapc');
 
     try {
-        const session = (typeof getTtsAuthSession === 'function') ? getTtsAuthSession() : null;
-        const clientOldTok = (session && session.token) ? session.token : '';
         const clientTtsNewTok = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+        const oldSess = (typeof getTtsAuthSession === 'function') ? getTtsAuthSession() : null;
 
         const params = new URLSearchParams();
-        if (clientOldTok) params.set('tts_old_token', clientOldTok);
         if (clientTtsNewTok) params.set('tts_new_token', clientTtsNewTok);
 
         const url = '/api/services/status' + (params.toString() ? '?' + params.toString() : '');
@@ -6205,8 +6308,8 @@ async function updateServicesStatus() {
         const data = await res.json();
         const svcs = (data && data.services) ? data.services : {};
 
-        // 1. TTS Cũ (Cá nhân KTV) - Chỉ xanh khi backend gọi thử API OneOSS thành công
-        const isTtsOldActive = !!svcs.tts_old;
+        // 0. TTS Cũ: Xanh khi Client đã có session HOẶC Backend kết nối thành công
+        const isTtsOldActive = !!((oldSess && oldSess.token) || svcs.tts_old);
         if (dotTtsOld) {
             dotTtsOld.className = 'svc-status-dot ' + (isTtsOldActive ? 'active' : 'inactive');
             dotTtsOld.style.backgroundColor = isTtsOldActive ? '#16a34a' : '#ef4444';
@@ -6214,16 +6317,15 @@ async function updateServicesStatus() {
         const pillTtsOld = document.getElementById('svcBtnTtsOld');
         if (pillTtsOld) {
             if (isTtsOldActive) {
-                pillTtsOld.title = 'TTS (cũ): Đang kết nối tốt';
-            } else if (clientOldTok) {
-                pillTtsOld.title = 'TTS (cũ): Phiên đã hết hạn (401) hoặc chưa xác thực - Click để đăng nhập/đồng bộ lại';
+                const uName = (oldSess && oldSess.user && (oldSess.user.TaiKhoan || oldSess.user.username)) || 'KTV';
+                pillTtsOld.title = `TTS (cũ): Đã kết nối [${uName}] - Click để xem thông tin`;
             } else {
-                pillTtsOld.title = 'TTS (cũ): Chưa đăng nhập - Click để đăng nhập';
+                pillTtsOld.title = 'TTS (cũ): Chưa đăng nhập - Click để kết nối';
             }
         }
 
-        // 2. TTS Mới (Cá nhân KTV) - Chỉ xanh khi backend gọi thử API TTS Mới thành công
-        const isTtsNewActive = !!svcs.tts_new;
+        // 1. TTS Mới: Xanh khi Client đã có token còn hạn HOẶC Backend kết nối thành công
+        const isTtsNewActive = !!(clientTtsNewTok || svcs.tts_new);
         if (dotTtsNew) {
             dotTtsNew.className = 'svc-status-dot ' + (isTtsNewActive ? 'active' : 'inactive');
             dotTtsNew.style.backgroundColor = isTtsNewActive ? '#16a34a' : '#ef4444';
@@ -6231,11 +6333,11 @@ async function updateServicesStatus() {
         const pillTtsNew = document.getElementById('svcBtnTtsNew');
         if (pillTtsNew) {
             if (isTtsNewActive) {
-                pillTtsNew.title = 'TTS (mới): Đang kết nối tốt';
-            } else if (clientTtsNewTok) {
-                pillTtsNew.title = 'TTS (mới): Phiên đã hết hạn (401) - Click để đồng bộ lại';
+                const u = getTtsNewAuthUser();
+                const uName = (u && (u.username || u.displayName)) || 'KTV';
+                pillTtsNew.title = `TTS (mới): Đã kết nối [${uName}] - Click để xem thông tin`;
             } else {
-                pillTtsNew.title = 'TTS (mới): Chưa đăng nhập - Click để đồng bộ';
+                pillTtsNew.title = 'TTS (mới): Chưa đăng nhập - Click để kết nối';
             }
         }
 
@@ -6263,7 +6365,7 @@ async function updateServicesStatus() {
             dotSapc.className = 'svc-status-dot ' + (isSapcActive ? 'active' : 'inactive');
             dotSapc.style.backgroundColor = isSapcActive ? '#16a34a' : '#ef4444';
             const pillSapc = document.getElementById('svcPillSapc');
-            if (pillSapc) pillSapc.title = isSapcActive ? 'SAPC: Connected (Click để mở trang tra cứu)' : 'SAPC: Disconnected (Chưa kết nối)';
+            if (pillSapc) pillSapc.title = isSapcActive ? 'SAPC: Connected (Click để quản lý phiên)' : 'SAPC: Disconnected (Click để đăng nhập)';
         }
 
         // 6. CCOS (Tự động reset và làm mới theo phiên truy cập)
@@ -6280,7 +6382,7 @@ async function updateServicesStatus() {
             dotCcos.style.backgroundColor = isCcosActive ? '#16a34a' : '#ef4444';
         }
         if (pillCcos) {
-            pillCcos.title = isCcosActive ? 'CCOS: Connected (Phiên đang hoạt động)' : 'CCOS: Disconnected (Chưa có cookie / hết hạn phiên)';
+            pillCcos.title = isCcosActive ? 'CCOS: Connected (Click để quản lý phiên)' : 'CCOS: Disconnected (Click để đăng nhập)';
         }
     } catch (e) {
         console.warn('Lỗi kiểm tra trạng thái dịch vụ:', e);
@@ -6288,8 +6390,190 @@ async function updateServicesStatus() {
 }
 
 // ==========================================
-// QUẢN LÝ POPUP CCOS
+// QUẢN LÝ POPUP & ĐĂNG NHẬP SAPC (10.155.42.218)
 // ==========================================
+function toggleSapcPopup(event) {
+    if (event) event.stopPropagation();
+    const m = document.getElementById('modalSapcSync');
+    if (!m) return;
+    if (m.style.display === 'block') {
+        closeSapcModal();
+    } else {
+        closeTtsNewModal();
+        closeBtoolsModal();
+        closeCemModal();
+        closeCcosModal();
+        openSapcModal();
+    }
+}
+
+async function openSapcModal() {
+    const m = document.getElementById('modalSapcSync');
+    if (!m) return;
+    m.style.display = 'block';
+
+    const boxLogged = document.getElementById('boxSapcLoggedInState');
+    const boxStep1 = document.getElementById('boxStep1SapcLogin');
+    const lblUser = document.getElementById('lblSapcUser');
+
+    try {
+        const res = await fetch('/api/sapc/status');
+        const data = await res.json();
+        const isConn = !!(data && data.connected);
+        window._isSapcConnected = isConn;
+        if (isConn) {
+            if (boxLogged) boxLogged.style.display = 'flex';
+            if (boxStep1) boxStep1.style.display = 'none';
+            if (lblUser) lblUser.innerText = 'Cookie Core đang hoạt động';
+        } else {
+            if (boxLogged) boxLogged.style.display = 'none';
+            if (boxStep1) boxStep1.style.display = 'block';
+        }
+    } catch (e) {
+        if (boxLogged) boxLogged.style.display = 'none';
+        if (boxStep1) boxStep1.style.display = 'block';
+    }
+}
+
+function closeSapcModal() {
+    const m = document.getElementById('modalSapcSync');
+    if (m) m.style.display = 'none';
+}
+
+function toggleSapcManualSection() {
+    const sec = document.getElementById('sectionSapcManual');
+    if (sec) sec.style.display = (sec.style.display === 'none') ? 'block' : 'none';
+}
+
+async function handleDirectSapcLoginSubmit(event) {
+    if (event) event.preventDefault();
+    const uInp = document.getElementById('loginSapcUsername');
+    const pInp = document.getElementById('loginSapcPassword');
+    const btn = document.getElementById('btnDirectSapcLoginSubmit');
+    const msg = document.getElementById('sapcLoginStatusMsg');
+
+    const username = uInp ? uInp.value.trim() : '';
+    const password = pInp ? pInp.value : '';
+
+    if (!username || !password) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Vui lòng nhập tên truy nhập và mật khẩu!';
+        }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerText = 'ĐANG XỬ LÝ...'; }
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0f9ff';
+        msg.style.color = '#0284c7';
+        msg.innerText = 'Đang kết nối xác thực máy chủ Core SAPC (10.155.42.218)...';
+    }
+
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, system: 'sapc' })
+        });
+        const data = await res.json();
+
+        if (data.success && data.token) {
+            if (msg) {
+                msg.style.background = '#f0fdf4';
+                msg.style.color = '#15803d';
+                msg.innerText = 'Đăng nhập SAPC thành công!';
+            }
+            window._isSapcConnected = true;
+            setTimeout(() => {
+                closeSapcModal();
+                updateServicesStatus();
+            }, 600);
+        } else {
+            if (msg) {
+                msg.style.background = '#fef2f2';
+                msg.style.color = '#dc2626';
+                msg.innerText = data.error || 'Đăng nhập SAPC thất bại. Kiểm tra lại thông tin!';
+            }
+        }
+    } catch (e) {
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Lỗi kết nối máy chủ: ' + e.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'ĐĂNG NHẬP SAPC'; }
+    }
+}
+
+async function logoutSapcSession() {
+    try {
+        await fetch('/api/sapc/logout', { method: 'POST' });
+    } catch (e) {}
+    window._isSapcConnected = false;
+    closeSapcModal();
+    updateServicesStatus();
+}
+
+async function handleDirectSapcCookieSubmit(event) {
+    if (event) event.preventDefault();
+    const inp = document.getElementById('sapcCookieInput');
+    const msg = document.getElementById('sapcStatusMsg');
+    const btn = document.getElementById('btnSaveSapcCookie');
+    const cookieVal = inp ? inp.value.trim() : '';
+    if (!cookieVal) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fee2e2';
+            msg.style.color = '#991b1b';
+            msg.innerText = 'Vui lòng nhập Cookie .AspNet.ApplicationCookie';
+        }
+        return;
+    }
+    if (btn) { btn.disabled = true; btn.innerText = 'Đang lưu...'; }
+    try {
+        const res = await fetch('/api/sapc/update-cookie', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookie: cookieVal })
+        });
+        const data = await res.json();
+        if (msg) {
+            msg.style.display = 'block';
+            if (data.success) {
+                msg.style.background = '#dcfce7';
+                msg.style.color = '#166534';
+                msg.innerText = data.message || 'Đã lưu Cookie SAPC thành công!';
+                if (inp) inp.value = '';
+                window._isSapcConnected = true;
+                setTimeout(() => { closeSapcModal(); updateServicesStatus(); }, 1200);
+            } else {
+                msg.style.background = '#fee2e2';
+                msg.style.color = '#991b1b';
+                msg.innerText = data.message || 'Lỗi khi lưu Cookie SAPC';
+            }
+        }
+    } catch (err) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fee2e2';
+            msg.style.color = '#991b1b';
+            msg.innerText = 'Không thể kết nối máy chủ: ' + err.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'LƯU COOKIE THỦ CÔNG'; }
+    }
+}
+
+// ==========================================
+// QUẢN LÝ POPUP & ĐĂNG NHẬP CCOS (GQKN CCOS)
+// ==========================================
+let currentCcosOtpSessionId = null;
+
 function toggleCcosPopup(event) {
     if (event) event.stopPropagation();
     const m = document.getElementById('modalCcosSync');
@@ -6300,6 +6584,7 @@ function toggleCcosPopup(event) {
         closeTtsNewModal();
         closeBtoolsModal();
         closeCemModal();
+        closeSapcModal();
         openCcosModal();
     }
 }
@@ -6308,28 +6593,31 @@ async function openCcosModal() {
     const m = document.getElementById('modalCcosSync');
     if (!m) return;
     m.style.display = 'block';
-    const bannerText = document.getElementById('ccosStatusText');
-    const bannerDot = document.getElementById('ccosStatusDot');
-    if (bannerText) bannerText.innerText = 'Đang kiểm tra kết nối CCOS...';
+
+    const boxLogged = document.getElementById('boxCcosLoggedInState');
+    const boxStep1 = document.getElementById('boxStep1CcosLogin');
+    const boxStep2 = document.getElementById('boxStep2CcosOtp');
+    const lblUser = document.getElementById('lblCcosUser');
 
     try {
         const res = await fetch('/api/ccos/status');
         const data = await res.json();
-        if (data && data.connected) {
-            if (bannerDot) {
-                bannerDot.className = 'svc-status-dot active';
-                bannerDot.style.backgroundColor = '#16a34a';
-            }
-            if (bannerText) bannerText.innerHTML = '<b style="color:#16a34a;">✅ Đã kết nối CCOS (Session đang hoạt động)</b>';
+        const isConn = !!(data && data.connected);
+        window._isCcosConnected = isConn;
+        if (isConn) {
+            if (boxLogged) boxLogged.style.display = 'flex';
+            if (boxStep1) boxStep1.style.display = 'none';
+            if (boxStep2) boxStep2.style.display = 'none';
+            if (lblUser) lblUser.innerText = 'Phiên làm việc đang hoạt động';
         } else {
-            if (bannerDot) {
-                bannerDot.className = 'svc-status-dot inactive';
-                bannerDot.style.backgroundColor = '#ef4444';
-            }
-            if (bannerText) bannerText.innerHTML = '<span style="color:#dc2626;">❌ Chưa có cookie hoặc phiên đã hết hạn</span>';
+            if (boxLogged) boxLogged.style.display = 'none';
+            if (boxStep1) boxStep1.style.display = 'block';
+            if (boxStep2) boxStep2.style.display = 'none';
         }
     } catch (e) {
-        if (bannerText) bannerText.innerText = 'Lỗi kết nối máy chủ Precheck';
+        if (boxLogged) boxLogged.style.display = 'none';
+        if (boxStep1) boxStep1.style.display = 'block';
+        if (boxStep2) boxStep2.style.display = 'none';
     }
 }
 
@@ -6338,48 +6626,227 @@ function closeCcosModal() {
     if (m) m.style.display = 'none';
 }
 
-async function handleManualCcosCookieSubmit(event) {
+function toggleCcosManualSection() {
+    const sec = document.getElementById('sectionCcosManual');
+    if (sec) sec.style.display = (sec.style.display === 'none') ? 'block' : 'none';
+}
+
+function backToStep1CcosLogin() {
+    const s1 = document.getElementById('boxStep1CcosLogin');
+    const s2 = document.getElementById('boxStep2CcosOtp');
+    if (s1) s1.style.display = 'block';
+    if (s2) s2.style.display = 'none';
+}
+
+async function handleDirectCcosLoginSubmit(event) {
     if (event) event.preventDefault();
-    const inp = document.getElementById('manualCcosCookieInput');
-    const msg = document.getElementById('manualCcosMsg');
-    const btn = document.getElementById('btnSaveCcosCookie');
-    if (!inp || !inp.value.trim()) return;
+    const uInp = document.getElementById('loginCcosUsername');
+    const pInp = document.getElementById('loginCcosPassword');
+    const btn = document.getElementById('btnDirectCcosLoginSubmit');
+    const msg = document.getElementById('ccosLoginStatusMsg');
 
-    if (btn) { btn.disabled = true; btn.innerText = 'Đang lưu & test...'; }
-    if (msg) { msg.style.display = 'none'; }
+    const username = uInp ? uInp.value.trim() : '';
+    const password = pInp ? pInp.value : '';
 
-    try {
-        const res = await fetch('/api/ccos/update-cookie', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cookie: inp.value.trim() })
-        });
-        const data = await res.json();
+    if (!username || !password) {
         if (msg) {
             msg.style.display = 'block';
-            msg.style.background = data.success ? '#dcfce7' : '#fee2e2';
-            msg.style.color = data.success ? '#166534' : '#991b1b';
-            msg.innerText = data.message || (data.success ? 'Thành công!' : 'Thất bại');
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Vui lòng nhập tên truy nhập và mật khẩu!';
         }
-        if (data.success) {
-            inp.value = '';
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerText = 'ĐANG XỬ LÝ...'; }
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0f9ff';
+        msg.style.color = '#0284c7';
+        msg.innerText = 'Đang kết nối xác thực CAS CCOS...';
+    }
+
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, system: 'ccos' })
+        });
+        const data = await res.json();
+
+        if (data.success && data.token) {
+            if (msg) {
+                msg.style.background = '#f0fdf4';
+                msg.style.color = '#15803d';
+                msg.innerText = 'Đăng nhập CCOS thành công!';
+            }
+            window._isCcosConnected = true;
             setTimeout(() => {
-                openCcosModal();
+                closeCcosModal();
                 updateServicesStatus();
-            }, 800);
+            }, 600);
+        } else if (data.otp_required) {
+            currentCcosOtpSessionId = data.session_id;
+            const s1 = document.getElementById('boxStep1CcosLogin');
+            const s2 = document.getElementById('boxStep2CcosOtp');
+            if (s1) s1.style.display = 'none';
+            if (s2) s2.style.display = 'block';
+            const uLabel = document.getElementById('otpCcosUserLabel');
+            if (uLabel) uLabel.innerText = data.username || username;
+            const otpInp = document.getElementById('loginCcosOtp');
+            if (otpInp) { otpInp.value = ''; otpInp.focus(); }
+        } else {
+            if (msg) {
+                msg.style.background = '#fef2f2';
+                msg.style.color = '#dc2626';
+                msg.innerText = data.error || 'Đăng nhập CCOS thất bại. Kiểm tra lại thông tin!';
+            }
         }
     } catch (e) {
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Lỗi kết nối máy chủ: ' + e.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'ĐĂNG NHẬP CCOS'; }
+    }
+}
+
+async function handleDirectCcosOtpSubmit(event) {
+    if (event) event.preventDefault();
+    const otpInp = document.getElementById('loginCcosOtp');
+    const btn = document.getElementById('btnDirectCcosOtpSubmit');
+    const msg = document.getElementById('ccosOtpStatusMsg');
+
+    const otpVal = otpInp ? otpInp.value.trim() : '';
+    if (!otpVal) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Vui lòng nhập mã OTP SMS!';
+        }
+        return;
+    }
+
+    if (!currentCcosOtpSessionId) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Phiên OTP đã hết hạn, vui lòng bấm quay lại để đăng nhập lại.';
+        }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerText = 'ĐANG XÁC THỰC...'; }
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0f9ff';
+        msg.style.color = '#0284c7';
+        msg.innerText = 'Đang gửi mã xác thực OTP lên hệ thống...';
+    }
+
+    try {
+        const res = await fetch('/api/login/otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: currentCcosOtpSessionId, otp: otpVal })
+        });
+        const data = await res.json();
+
+        if (data.success && data.token) {
+            if (msg) {
+                msg.style.background = '#f0fdf4';
+                msg.style.color = '#15803d';
+                msg.innerText = 'Xác thực OTP CCOS thành công!';
+            }
+            window._isCcosConnected = true;
+            setTimeout(() => {
+                closeCcosModal();
+                updateServicesStatus();
+            }, 600);
+        } else {
+            if (msg) {
+                msg.style.background = '#fef2f2';
+                msg.style.color = '#dc2626';
+                msg.innerText = data.error || 'Mã OTP không đúng hoặc đã hết hạn!';
+            }
+        }
+    } catch (e) {
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Lỗi kết nối máy chủ: ' + e.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'XÁC NHẬN OTP'; }
+    }
+}
+
+async function logoutCcosSession() {
+    try {
+        await fetch('/api/ccos/logout', { method: 'POST' });
+    } catch (e) {}
+    window._isCcosConnected = false;
+    closeCcosModal();
+    updateServicesStatus();
+}
+
+async function handleDirectCcosCookieSubmit(event) {
+    if (event) event.preventDefault();
+    const inp = document.getElementById('ccosCookieInput');
+    const msg = document.getElementById('ccosStatusMsg');
+    const btn = document.getElementById('btnSaveCcosCookie');
+    const cookieVal = inp ? inp.value.trim() : '';
+    if (!cookieVal) {
         if (msg) {
             msg.style.display = 'block';
             msg.style.background = '#fee2e2';
             msg.style.color = '#991b1b';
-            msg.innerText = 'Lỗi gửi yêu cầu: ' + e;
+            msg.innerText = 'Vui lòng nhập Cookie CCOS (SessionDB / SESSIONID)';
+        }
+        return;
+    }
+    if (btn) { btn.disabled = true; btn.innerText = 'Đang lưu...'; }
+    try {
+        const res = await fetch('/api/ccos/update-cookie', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookie: cookieVal })
+        });
+        const data = await res.json();
+        if (msg) {
+            msg.style.display = 'block';
+            if (data.success) {
+                msg.style.background = '#dcfce7';
+                msg.style.color = '#166534';
+                msg.innerText = data.message || 'Đã lưu Cookie CCOS thành công!';
+                if (inp) inp.value = '';
+                window._isCcosConnected = true;
+                setTimeout(() => { closeCcosModal(); updateServicesStatus(); }, 1200);
+            } else {
+                msg.style.background = '#fee2e2';
+                msg.style.color = '#991b1b';
+                msg.innerText = data.message || 'Lỗi khi lưu Cookie CCOS';
+            }
+        }
+    } catch (err) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fee2e2';
+            msg.style.color = '#991b1b';
+            msg.innerText = 'Không thể kết nối máy chủ: ' + err.message;
         }
     } finally {
-        if (btn) { btn.disabled = false; btn.innerText = 'LƯU & TEST KẾT NỐI'; }
+        if (btn) { btn.disabled = false; btn.innerText = 'LƯU COOKIE THỦ CÔNG'; }
     }
 }
 
+// ==========================================
+// QUẢN LÝ POPUP & KẾT NỐI TTS MỚI
+// ==========================================
 function toggleTtsNewPopup(event) {
     if (event) event.stopPropagation();
     const m = document.getElementById('modalTtsNewSync');
@@ -6387,56 +6854,89 @@ function toggleTtsNewPopup(event) {
     if (m.style.display === 'block') {
         closeTtsNewModal();
     } else {
-        closeWelcomeTtsModal();
         openTtsNewModal();
     }
 }
 
-function openTtsNewModal() {
+function openTtsWebLoginPage() {
+    window.open('https://tts.vnptnet.vn', '_blank');
+}
+
+async function checkAndSyncTtsNewNow() {
+    const msg = document.getElementById('loginTtsNewStatusMsg');
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0f9ff';
+        msg.style.color = '#0284c7';
+        msg.innerText = 'Đang kiểm tra token từ phiên đăng nhập...';
+    }
+    try {
+        const res = await fetch('/api/current_user');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.ttsnew_token) {
+                setTtsNewAuthToken(data.ttsnew_token);
+                if (data.ttsnew_user) {
+                    localStorage.setItem('ttsnew_auth_user', JSON.stringify({
+                        username: data.ttsnew_user.userName || data.ttsnew_user.username || 'KTV',
+                        displayName: data.ttsnew_user.displayName || data.ttsnew_user.name || 'KTV',
+                        email: data.ttsnew_user.email || '',
+                        userId: data.ttsnew_user.userId || 0
+                    }));
+                }
+                if (msg) {
+                    msg.style.background = '#f0fdf4';
+                    msg.style.color = '#15803d';
+                    msg.innerText = 'Đã nhận token thành công!';
+                }
+                applyUserSessionState();
+                updateServicesStatus();
+                openTtsNewModal();
+                return;
+            }
+        }
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Chưa nhận được token. Vui lòng đăng nhập trên trang tts.vnptnet.vn trước!';
+        }
+    } catch (e) {
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Lỗi kết nối máy chủ: ' + e.message;
+        }
+    }
+}
+
+async function openTtsNewModal() {
     const m = document.getElementById('modalTtsNewSync');
     if (!m) return;
     m.style.display = 'block';
 
-    const tok = getTtsNewAuthToken();
-    const user = getTtsNewAuthUser();
+    updateTtsNewBookmarkletLink();
+
+    let tok = getTtsNewAuthToken();
+    let user = getTtsNewAuthUser();
+
     const connBox = document.getElementById('ttsNewConnectedBox');
     const s1 = document.getElementById('boxStep1TtsNewLogin');
     const s2 = document.getElementById('boxStep2TtsNewOtp');
 
     if (tok) {
-        // ĐÃ ĐĂNG NHẬP -> CHỈ HIỆN KHUNG THÔNG TIN VÀ NÚT ĐĂNG XUẤT
         if (connBox) connBox.style.display = 'flex';
-        const title = document.getElementById('ttsNewConnectedTitle');
-        const sub = document.getElementById('ttsNewConnectedSub');
-        const name = (user && (user.displayName || user.username)) || 'Kỹ thuật viên';
-        const uName = (user && user.username) || '--';
-        const idPart = (user && user.userId) ? ` (ID: ${user.userId})` : '';
-        if (title) title.innerText = `✅ Đã kết nối: ${name}`;
-        if (sub) sub.innerText = `Tài khoản: ${uName}${idPart} — Sẵn sàng ký nhận xử lý/đóng phiếu.`;
         if (s1) s1.style.display = 'none';
         if (s2) s2.style.display = 'none';
+        const title = document.getElementById('ttsNewConnectedTitle');
+        const sub = document.getElementById('ttsNewConnectedSub');
+        const uName = (user && (user.username || user.displayName)) || 'KTV';
+        const dName = (user && user.displayName) || uName;
+        if (title) title.innerText = `Đã kết nối tài khoản: ${uName}`;
+        if (sub) sub.innerText = `KTV: ${dName} — Sẵn sàng tiền kiểm và ký duyệt phiếu OneOSS.`;
     } else {
-        // CHƯA ĐĂNG NHẬP -> HIỆN FORM ĐĂNG NHẬP
         if (connBox) connBox.style.display = 'none';
         backToStep1TtsNewLogin();
-        const uInp = document.getElementById('loginTtsNewUsername');
-        if (uInp && !uInp.value) uInp.focus();
     }
-}
-
-function closeTtsNewModal() {
-    const m = document.getElementById('modalTtsNewSync');
-    if (m) m.style.display = 'none';
-}
-
-// Stub functions for BTools & CEM modals (modals removed per user request)
-function closeBtoolsModal() {}
-function closeCemModal() {}
-
-function logoutTtsNewSession() {
-    clearTtsNewAuthToken();
-    openTtsNewModal();
-    updateServicesStatus();
 }
 
 let currentTtsNewOtpSessionId = '';
@@ -6501,6 +7001,7 @@ async function handleDirectTtsNewLoginSubmit(event) {
         if (data.success && (data.ttsnew_token || data.token)) {
             const tok = data.ttsnew_token || data.token;
             setTtsNewAuthToken(tok);
+            applyUserSessionState();
             if (msg) {
                 msg.style.background = '#f0fdf4';
                 msg.style.color = '#15803d';
@@ -6509,6 +7010,7 @@ async function handleDirectTtsNewLoginSubmit(event) {
             setTimeout(() => {
                 closeTtsNewModal();
                 updateServicesStatus();
+                loadTickets(true);
             }, 600);
         } else if (data.otp_required) {
             currentTtsNewOtpSessionId = data.session_id;
@@ -6523,7 +7025,7 @@ async function handleDirectTtsNewLoginSubmit(event) {
         } else {
             if (btn) {
                 btn.disabled = false;
-                btn.innerText = 'ĐĂNG NHẬP TTS MỚI';
+                btn.innerHTML = '<span>ĐĂNG NHẬP TTS MỚI</span>';
             }
             if (msg) {
                 msg.style.background = '#fef2f2';
@@ -6534,7 +7036,7 @@ async function handleDirectTtsNewLoginSubmit(event) {
     } catch (e) {
         if (btn) {
             btn.disabled = false;
-            btn.innerText = 'ĐĂNG NHẬP TTS MỚI';
+            btn.innerHTML = '<span>ĐĂNG NHẬP TTS MỚI</span>';
         }
         if (msg) {
             msg.style.background = '#fef2f2';
@@ -6561,6 +7063,16 @@ async function handleDirectTtsNewOtpSubmit(event) {
         return;
     }
 
+    if (!currentTtsNewOtpSessionId) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Chưa có phiên đăng nhập TTS Mới hoặc container vừa khởi động lại. Vui lòng bấm "Quay lại nhập tài khoản" để thực hiện Bước 1 trước!';
+        }
+        return;
+    }
+
     if (btn) {
         btn.disabled = true;
         btn.innerText = 'ĐANG XÁC THỰC OTP...';
@@ -6583,11 +7095,7 @@ async function handleDirectTtsNewOtpSubmit(event) {
         if (data.success && (data.ttsnew_token || data.token)) {
             const tok = data.ttsnew_token || data.token;
             setTtsNewAuthToken(tok);
-            if (data.token && data.token !== tok && !data.token.startsWith('Bearer ')) {
-                setTtsAuthSession(data.token, data.user);
-                applyUserSessionState();
-                loadTickets(true);
-            }
+            applyUserSessionState();
             if (msg) {
                 msg.style.background = '#f0fdf4';
                 msg.style.color = '#15803d';
@@ -6597,11 +7105,12 @@ async function handleDirectTtsNewOtpSubmit(event) {
                 closeTtsNewModal();
                 backToStep1TtsNewLogin();
                 updateServicesStatus();
+                loadTickets(true);
             }, 600);
         } else {
             if (btn) {
                 btn.disabled = false;
-                btn.innerText = 'XÁC NHẬN OTP';
+                btn.innerHTML = '<span>XÁC NHẬN OTP</span>';
             }
             if (msg) {
                 msg.style.background = '#fef2f2';
@@ -6612,7 +7121,7 @@ async function handleDirectTtsNewOtpSubmit(event) {
     } catch (e) {
         if (btn) {
             btn.disabled = false;
-            btn.innerText = 'XÁC NHẬN OTP';
+            btn.innerHTML = '<span>XÁC NHẬN OTP</span>';
         }
         if (msg) {
             msg.style.background = '#fef2f2';
@@ -6622,22 +7131,596 @@ async function handleDirectTtsNewOtpSubmit(event) {
     }
 }
 
+function updateTtsNewBookmarkletLink() {
+    const a = document.getElementById('ttsNewBookmarkletBtn');
+    if (!a) return;
+    const currentOrigin = window.location.origin + window.location.pathname;
+    const bmCode = "javascript:(function(){try{var t=localStorage.getItem('TOKEN')||sessionStorage.getItem('TOKEN')||'';if(!t){for(var i=0;i<localStorage.length;i++){var v=localStorage.getItem(localStorage.key(i));if(v&&v.indexOf('eyJ')===0&&v.split('.').length===3){t=v;break;}}}if(!t){alert('Chưa tìm thấy token TTS Mới trên trang này! Vui lòng đăng nhập tts.vnptnet.vn trước.');return;}window.location.href='" + currentOrigin + "?sync_ttsnew_token='+encodeURIComponent(t);}catch(e){alert('Lỗi: '+e);}})();";
+    a.setAttribute('href', bmCode);
+}
 
+async function saveManualTtsNewToken() {
+    const inp = document.getElementById('txtManualTtsNewToken');
+    const msg = document.getElementById('loginTtsNewStatusMsg');
+    let raw = (inp ? inp.value : '').trim();
+    if (!raw) {
+        alert('Vui lòng dán chuỗi Token JWT (bắt đầu bằng eyJ...)');
+        return;
+    }
+    const match = raw.match(/eyJ[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+/);
+    if (!match) {
+        alert('Không tìm thấy Token JWT hợp lệ (chuỗi token phải có định dạng header.payload.signature bắt đầu bằng eyJ...)');
+        return;
+    }
+    const tok = match[0];
+    const parsed = parseJwt(tok);
+    if (!parsed) {
+        alert('Token không đúng cấu trúc JWT hoặc bị lỗi!');
+        return;
+    }
+    setTtsNewAuthToken(tok);
+    const u = getTtsNewAuthUser();
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0fdf4';
+        msg.style.color = '#15803d';
+        msg.innerText = 'Đã kết nối thành công KTV: ' + (u ? (u.displayName || u.username) : 'KTV');
+    }
+    if (inp) inp.value = '';
+    applyUserSessionState();
+    updateServicesStatus();
+    loadTickets(true);
+    openTtsNewModal();
+}
+
+function closeTtsNewModal() {
+    const m = document.getElementById('modalTtsNewSync');
+    if (m) m.style.display = 'none';
+}
+
+function logoutTtsNewSession() {
+    clearTtsNewAuthToken();
+    clearTtsAuthSession();
+    openTtsNewModal();
+    updateServicesStatus();
+    loadTickets(true);
+}
+
+function closeAllSyncModals() {
+    closeTtsNewModal();
+    closeBtoolsModal();
+    closeCemModal();
+}
+
+let currentBtoolsOtpSessionId = null;
+let currentCemOtpSessionId = null;
+
+function toggleBtoolsManualSection() {
+    const s = document.getElementById('sectionBtoolsManual');
+    if (s) s.style.display = (s.style.display === 'none' || !s.style.display) ? 'block' : 'none';
+}
+
+function backToStep1BtoolsLogin() {
+    const s1 = document.getElementById('boxStep1BtoolsLogin');
+    const s2 = document.getElementById('boxStep2BtoolsOtp');
+    if (s1) s1.style.display = 'block';
+    if (s2) s2.style.display = 'none';
+    const msg = document.getElementById('btoolsOtpStatusMsg');
+    if (msg) msg.style.display = 'none';
+}
+
+function toggleBtoolsPopup(event) {
+    if (event) event.stopPropagation();
+    const m = document.getElementById('modalBtoolsSync');
+    if (!m) return;
+    const isShowing = m.style.display === 'block';
+    closeAllSyncModals();
+    if (!isShowing) {
+        m.style.display = 'block';
+        const isConn = !!window._isBtoolsConnected;
+        const loggedBox = document.getElementById('boxBtoolsLoggedInState');
+        const s1 = document.getElementById('boxStep1BtoolsLogin');
+        const s2 = document.getElementById('boxStep2BtoolsOtp');
+        if (isConn) {
+            if (loggedBox) loggedBox.style.display = 'flex';
+            if (s1) s1.style.display = 'none';
+            if (s2) s2.style.display = 'none';
+        } else {
+            if (loggedBox) loggedBox.style.display = 'none';
+            if (s1) s1.style.display = 'block';
+            if (s2) s2.style.display = 'none';
+            const inp = document.getElementById('loginBtoolsUsername');
+            if (inp) inp.focus();
+        }
+    }
+}
+
+function closeBtoolsModal() {
+    const m = document.getElementById('modalBtoolsSync');
+    if (m) m.style.display = 'none';
+}
+
+async function handleDirectBtoolsLoginSubmit(event) {
+    if (event) event.preventDefault();
+    const uInp = document.getElementById('loginBtoolsUsername');
+    const pInp = document.getElementById('loginBtoolsPassword');
+    const btn = document.getElementById('btnDirectBtoolsLoginSubmit');
+    const msg = document.getElementById('btoolsLoginStatusMsg');
+
+    const username = uInp ? uInp.value.trim() : '';
+    const password = pInp ? pInp.value : '';
+
+    if (!username || !password) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Vui lòng nhập tên truy nhập và mật khẩu!';
+        }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerText = 'ĐANG XỬ LÝ...'; }
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0f9ff';
+        msg.style.color = '#0284c7';
+        msg.innerText = 'Đang kết nối xác thực CAS BTools (10.159.21.241)...';
+    }
+
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, system: 'btools' })
+        });
+        const data = await res.json();
+
+        if (data.success && data.token) {
+            if (msg) {
+                msg.style.background = '#f0fdf4';
+                msg.style.color = '#15803d';
+                msg.innerText = 'Đăng nhập BTools thành công!';
+            }
+            window._isBtoolsConnected = true;
+            setTimeout(() => {
+                closeBtoolsModal();
+                updateServicesStatus();
+            }, 600);
+        } else if (data.otp_required) {
+            currentBtoolsOtpSessionId = data.session_id;
+            const s1 = document.getElementById('boxStep1BtoolsLogin');
+            const s2 = document.getElementById('boxStep2BtoolsOtp');
+            if (s1) s1.style.display = 'none';
+            if (s2) s2.style.display = 'block';
+            const uLabel = document.getElementById('otpBtoolsUserLabel');
+            if (uLabel) uLabel.innerText = data.username || username;
+            const otpInp = document.getElementById('loginBtoolsOtp');
+            if (otpInp) { otpInp.value = ''; otpInp.focus(); }
+        } else {
+            if (msg) {
+                msg.style.background = '#fef2f2';
+                msg.style.color = '#dc2626';
+                msg.innerText = data.error || 'Đăng nhập BTools thất bại. Kiểm tra lại thông tin!';
+            }
+        }
+    } catch (e) {
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Lỗi kết nối máy chủ: ' + e.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'ĐĂNG NHẬP BTOOLS'; }
+    }
+}
+
+async function handleDirectBtoolsOtpSubmit(event) {
+    if (event) event.preventDefault();
+    const otpInp = document.getElementById('loginBtoolsOtp');
+    const btn = document.getElementById('btnDirectBtoolsOtpSubmit');
+    const msg = document.getElementById('btoolsOtpStatusMsg');
+
+    const otpVal = otpInp ? otpInp.value.trim() : '';
+    if (!otpVal) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Vui lòng nhập mã OTP!';
+        }
+        return;
+    }
+
+    if (!currentBtoolsOtpSessionId) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Chưa có phiên đăng nhập BTools hoặc container vừa khởi động lại. Vui lòng quay lại Bước 1 bấm ĐĂNG NHẬP lại!';
+        }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerText = 'ĐANG XÁC THỰC OTP...'; }
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0f9ff';
+        msg.style.color = '#0284c7';
+        msg.innerText = 'Đang xác thực OTP với CAS BTools, vui lòng chờ...';
+    }
+
+    try {
+        const res = await fetch('/api/login/otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: currentBtoolsOtpSessionId, otp: otpVal })
+        });
+        const data = await res.json();
+
+        if (data.success && data.token) {
+            if (msg) {
+                msg.style.background = '#f0fdf4';
+                msg.style.color = '#15803d';
+                msg.innerText = 'Xác thực OTP BTools thành công!';
+            }
+            window._isBtoolsConnected = true;
+            setTimeout(() => {
+                closeBtoolsModal();
+                updateServicesStatus();
+            }, 600);
+        } else {
+            if (msg) {
+                msg.style.background = '#fef2f2';
+                msg.style.color = '#dc2626';
+                msg.innerText = data.error || 'Mã OTP không đúng hoặc đã hết hạn!';
+            }
+        }
+    } catch (e) {
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Lỗi kết nối máy chủ: ' + e.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'XÁC NHẬN OTP'; }
+    }
+}
+
+async function logoutBtoolsSession() {
+    try {
+        await fetch('/api/btools/cookie', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookie: '' })
+        });
+    } catch (e) {}
+    window._isBtoolsConnected = false;
+    closeBtoolsModal();
+    updateServicesStatus();
+}
+
+async function handleDirectBtoolsCookieSubmit(event) {
+    if (event) event.preventDefault();
+    const inp = document.getElementById('btoolsCookieInput');
+    const msg = document.getElementById('btoolsStatusMsg');
+    const btn = document.getElementById('btnSaveBtoolsCookie');
+    const cookieVal = inp ? inp.value.trim() : '';
+    if (!cookieVal) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fee2e2';
+            msg.style.color = '#991b1b';
+            msg.innerText = 'Vui lòng nhập JSESSIONID hoặc Cookie BTools';
+        }
+        return;
+    }
+    if (btn) { btn.disabled = true; btn.innerText = 'Đang lưu...'; }
+    try {
+        const res = await fetch('/api/btools/cookie', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookie: cookieVal })
+        });
+        const data = await res.json();
+        if (msg) {
+            msg.style.display = 'block';
+            if (data.success) {
+                msg.style.background = '#dcfce7';
+                msg.style.color = '#166534';
+                msg.innerText = data.message || 'Đã lưu Cookie BTools thành công!';
+                if (inp) inp.value = '';
+                window._isBtoolsConnected = true;
+                setTimeout(() => { closeBtoolsModal(); updateServicesStatus(); }, 1200);
+            } else {
+                msg.style.background = '#fee2e2';
+                msg.style.color = '#991b1b';
+                msg.innerText = data.message || 'Lỗi khi lưu Cookie BTools';
+            }
+        }
+    } catch (err) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fee2e2';
+            msg.style.color = '#991b1b';
+            msg.innerText = 'Không thể kết nối máy chủ: ' + err.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'LƯU COOKIE THỦ CÔNG'; }
+    }
+}
+
+function toggleCemManualSection() {
+    const s = document.getElementById('sectionCemManual');
+    if (s) s.style.display = (s.style.display === 'none' || !s.style.display) ? 'block' : 'none';
+}
+
+function backToStep1CemLogin() {
+    const s1 = document.getElementById('boxStep1CemLogin');
+    const s2 = document.getElementById('boxStep2CemOtp');
+    if (s1) s1.style.display = 'block';
+    if (s2) s2.style.display = 'none';
+    const msg = document.getElementById('cemOtpStatusMsg');
+    if (msg) msg.style.display = 'none';
+}
+
+function toggleCemPopup(event) {
+    if (event) event.stopPropagation();
+    const m = document.getElementById('modalCemSync');
+    if (!m) return;
+    const isShowing = m.style.display === 'block';
+    closeAllSyncModals();
+    if (!isShowing) {
+        m.style.display = 'block';
+        const isConn = !!window._isCemConnected;
+        const loggedBox = document.getElementById('boxCemLoggedInState');
+        const s1 = document.getElementById('boxStep1CemLogin');
+        const s2 = document.getElementById('boxStep2CemOtp');
+        if (isConn) {
+            if (loggedBox) loggedBox.style.display = 'flex';
+            if (s1) s1.style.display = 'none';
+            if (s2) s2.style.display = 'none';
+        } else {
+            if (loggedBox) loggedBox.style.display = 'none';
+            if (s1) s1.style.display = 'block';
+            if (s2) s2.style.display = 'none';
+            const inp = document.getElementById('loginCemUsername');
+            if (inp) inp.focus();
+        }
+    }
+}
+
+function closeCemModal() {
+    const m = document.getElementById('modalCemSync');
+    if (m) m.style.display = 'none';
+}
+
+async function handleDirectCemLoginSubmit(event) {
+    if (event) event.preventDefault();
+    const uInp = document.getElementById('loginCemUsername');
+    const pInp = document.getElementById('loginCemPassword');
+    const btn = document.getElementById('btnDirectCemLoginSubmit');
+    const msg = document.getElementById('cemLoginStatusMsg');
+
+    const username = uInp ? uInp.value.trim() : '';
+    const password = pInp ? pInp.value : '';
+
+    if (!username || !password) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Vui lòng nhập tên truy nhập và mật khẩu!';
+        }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerText = 'ĐANG XỬ LÝ...'; }
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0f9ff';
+        msg.style.color = '#0284c7';
+        msg.innerText = 'Đang kết nối xác thực CAS CEM (VNPT Media)...';
+    }
+
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, system: 'cem' })
+        });
+        const data = await res.json();
+
+        if (data.success && data.token) {
+            if (msg) {
+                msg.style.background = '#f0fdf4';
+                msg.style.color = '#15803d';
+                msg.innerText = 'Đăng nhập CEM thành công!';
+            }
+            window._isCemConnected = true;
+            setTimeout(() => {
+                closeCemModal();
+                updateServicesStatus();
+            }, 600);
+        } else if (data.otp_required) {
+            currentCemOtpSessionId = data.session_id;
+            const s1 = document.getElementById('boxStep1CemLogin');
+            const s2 = document.getElementById('boxStep2CemOtp');
+            if (s1) s1.style.display = 'none';
+            if (s2) s2.style.display = 'block';
+            const uLabel = document.getElementById('otpCemUserLabel');
+            if (uLabel) uLabel.innerText = data.username || username;
+            const otpInp = document.getElementById('loginCemOtp');
+            if (otpInp) { otpInp.value = ''; otpInp.focus(); }
+        } else {
+            if (msg) {
+                msg.style.background = '#fef2f2';
+                msg.style.color = '#dc2626';
+                msg.innerText = data.error || 'Đăng nhập CEM thất bại. Kiểm tra lại thông tin!';
+            }
+        }
+    } catch (e) {
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Lỗi kết nối máy chủ: ' + e.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'ĐĂNG NHẬP CEM'; }
+    }
+}
+
+async function handleDirectCemOtpSubmit(event) {
+    if (event) event.preventDefault();
+    const otpInp = document.getElementById('loginCemOtp');
+    const btn = document.getElementById('btnDirectCemOtpSubmit');
+    const msg = document.getElementById('cemOtpStatusMsg');
+
+    const otpVal = otpInp ? otpInp.value.trim() : '';
+    if (!otpVal) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Vui lòng nhập mã OTP!';
+        }
+        return;
+    }
+
+    if (!currentCemOtpSessionId) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Chưa có phiên đăng nhập CEM hoặc container vừa khởi động lại. Vui lòng bấm "Quay lại nhập tài khoản" để thực hiện Bước 1 trước!';
+        }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerText = 'ĐANG XÁC THỰC OTP...'; }
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0f9ff';
+        msg.style.color = '#0284c7';
+        msg.innerText = 'Đang xác thực OTP với CEM, vui lòng chờ...';
+    }
+
+    try {
+        const res = await fetch('/api/login/otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: currentCemOtpSessionId, otp: otpVal })
+        });
+        const data = await res.json();
+
+        if (data.success && data.token) {
+            if (msg) {
+                msg.style.background = '#f0fdf4';
+                msg.style.color = '#15803d';
+                msg.innerText = 'Xác thực OTP CEM thành công!';
+            }
+            window._isCemConnected = true;
+            setTimeout(() => {
+                closeCemModal();
+                updateServicesStatus();
+            }, 600);
+        } else {
+            if (msg) {
+                msg.style.background = '#fef2f2';
+                msg.style.color = '#dc2626';
+                msg.innerText = data.error || 'Mã OTP không đúng hoặc đã hết hạn!';
+            }
+        }
+    } catch (e) {
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Lỗi kết nối máy chủ: ' + e.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'XÁC NHẬN OTP'; }
+    }
+}
+
+async function logoutCemSession() {
+    try {
+        await fetch('/api/cem/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: '', raw_cookie: '' })
+        });
+    } catch (e) {}
+    window._isCemConnected = false;
+    closeCemModal();
+    updateServicesStatus();
+}
+
+async function handleDirectCemAuthSubmit(event) {
+    if (event) event.preventDefault();
+    const inp = document.getElementById('cemApiKeyInput');
+    const msg = document.getElementById('cemStatusMsg');
+    const btn = document.getElementById('btnSaveCemAuth');
+    const keyVal = inp ? inp.value.trim() : '';
+    if (!keyVal) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fee2e2';
+            msg.style.color = '#991b1b';
+            msg.innerText = 'Vui lòng nhập API Key hoặc Cookie CEM';
+        }
+        return;
+    }
+    if (btn) { btn.disabled = true; btn.innerText = 'Đang lưu...'; }
+    try {
+        const res = await fetch('/api/cem/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: keyVal, raw_cookie: keyVal })
+        });
+        const data = await res.json();
+        if (msg) {
+            msg.style.display = 'block';
+            if (data.success) {
+                msg.style.background = '#dcfce7';
+                msg.style.color = '#166534';
+                msg.innerText = data.message || 'Đã lưu API Key CEM thành công!';
+                if (inp) inp.value = '';
+                window._isCemConnected = true;
+                setTimeout(() => { closeCemModal(); updateServicesStatus(); }, 1200);
+            } else {
+                msg.style.background = '#fee2e2';
+                msg.style.color = '#991b1b';
+                msg.innerText = data.message || 'Lỗi khi lưu API Key CEM';
+            }
+        }
+    } catch (err) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fee2e2';
+            msg.style.color = '#991b1b';
+            msg.innerText = 'Không thể kết nối máy chủ: ' + err.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'LƯU API KEY THỦ CÔNG'; }
+    }
+}
 
 // Tự động kiểm tra trạng thái các dịch vụ (TTS Cũ, TTS Mới, BTools, CEM, SAPC)
 setTimeout(updateServicesStatus, 500);
 setInterval(updateServicesStatus, 25000);
 
-// Đóng popup TTS (cũ) và TTS (mới) khi click ra ngoài
+// Đóng popup khi click ra ngoài
 document.addEventListener('click', function (e) {
-    const wrapOld = document.getElementById('wrapperTtsOld');
-    if (wrapOld && !wrapOld.contains(e.target)) {
-        closeWelcomeTtsModal();
-    }
     const wrapNew = document.getElementById('wrapperTtsNew');
-    if (wrapNew && !wrapNew.contains(e.target)) {
-        closeTtsNewModal();
-    }
+    if (wrapNew && !wrapNew.contains(e.target)) closeTtsNewModal();
+    const wrapBtools = document.getElementById('wrapperBtools');
+    if (wrapBtools && !wrapBtools.contains(e.target)) closeBtoolsModal();
+    const wrapCem = document.getElementById('wrapperCem');
+    if (wrapCem && !wrapCem.contains(e.target)) closeCemModal();
+    const wrapSapc = document.getElementById('wrapperSapc');
+    if (wrapSapc && !wrapSapc.contains(e.target)) closeSapcModal();
+    const wrapCcos = document.getElementById('wrapperCcos');
+    if (wrapCcos && !wrapCcos.contains(e.target)) closeCcosModal();
 });
 
 // ==========================================

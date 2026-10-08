@@ -220,42 +220,40 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
     target_phone = _normalize_phone(phone_84)
     s_clean = _normalize_date_btools(start_d)
     e_clean = _normalize_date_btools(end_d)
+    BTOOLS_HOST = os.environ.get("BTOOLS_HOST", "10.159.21.241:9267")
+    BTOOLS_BASE_URL = os.environ.get("BTOOLS_URL", f"http://{BTOOLS_HOST}/B_tools_v2")
     query_url = (
-        f"http://10.159.21.241:9267/B_tools_v2/data_view.jsp?"
+        f"{BTOOLS_BASE_URL}/data_view.jsp?"
         f"name={target_phone}&start_d={s_clean}&end_d={e_clean}&submit=T%C3%ACm+Ki%E1%BA%BFm"
     )
 
-    print(f"[BTools] Tra cuu ngam cho thue bao: {target_phone} ({s_clean} -> {e_clean})")
+    print(f"[BTools] Tra cuu ngam cho thue bao: {target_phone} ({s_clean} -> {e_clean}) qua {BTOOLS_HOST}")
 
     # --- PHUONG AN 1: CHAY NGAM HOAN TOAN QUA HTTP REQUEST (SIEU TOC) ---
     cookie_str = get_btools_cookie(driver)
     if cookie_str:
         try:
-            req = urllib.request.Request(
-                query_url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Cookie": cookie_str
-                }
-            )
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                html = resp.read().decode("utf-8", errors="ignore")
+            import requests
+            req_headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Cookie": cookie_str,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Referer": f"{BTOOLS_BASE_URL}/data_view.jsp",
+                "Host": "10.159.21.241:9267",
+                "Connection": "close"
+            }
+            resp = requests.get(query_url, headers=req_headers, timeout=(10, 30))
+            html = resp.text
                 
             valid, err_reason = is_valid_btools_html(html)
             if not valid and ("CAS" in err_reason or "đăng nhập" in err_reason or "login" in err_reason.lower()):
                 print("[BTools] Phien cookie het han, dang lay lai cookie moi...")
                 cookie_str = get_btools_cookie(driver, force_refresh=True)
                 if cookie_str:
-                    req = urllib.request.Request(
-                        query_url,
-                        headers={
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                            "Cookie": cookie_str
-                        }
-                    )
-                    with urllib.request.urlopen(req, timeout=12) as resp2:
-                        html = resp2.read().decode("utf-8", errors="ignore")
-                        valid, err_reason = is_valid_btools_html(html)
+                    req_headers["Cookie"] = cookie_str
+                    resp2 = requests.get(query_url, headers=req_headers, timeout=(10, 30))
+                    html = resp2.text
+                    valid, err_reason = is_valid_btools_html(html)
 
             if valid:
                 data_rows = parse_btools_table_html(html)
