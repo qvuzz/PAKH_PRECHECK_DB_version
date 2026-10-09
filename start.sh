@@ -6,7 +6,10 @@ set -e
 
 echo "=== [PAKH PRECHECK] Dang chuan bi moi truong tren Server ==="
 
-# 1. Tao cac file du lieu can thiet de Docker khong mount nham thanh thu muc
+# 1. Tu dong phat hien va don dep cac thu muc rac do Docker tao nham neu truoc do thieu file
+find . -maxdepth 1 -type d \( -name "*.py" -o -name "*.json" \) -exec rm -rf {} + 2>/dev/null || true
+
+# 2. Tao cac thu muc can thiet
 mkdir -p result scratch models sapccheck templates static routers services
 
 # Kiem tra neu tickets.db bi loi (malformed) thi tu dong backup va lam sach

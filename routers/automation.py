@@ -12,9 +12,10 @@ router = APIRouter(prefix="/api", tags=["Điều khiển Quét & Tự động h�
 
 
 @router.get("/status")
-def get_system_status():
+def get_system_status(region: str = None):
     snap = state.get_snapshot()
-    snap["system_counts"] = get_system_counts()
+    reg_val = (region or "ALL").strip().upper() if region else "ALL"
+    snap["system_counts"] = get_system_counts(region=reg_val)
     return snap
 
 

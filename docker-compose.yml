@@ -50,6 +50,9 @@ services:
       - ./ttsnew_api.py:/app/ttsnew_api.py
       - ./crawler_btools.py:/app/crawler_btools.py
       - ./region_detector.py:/app/region_detector.py
+      - ./spam_call_analyzer.py:/app/spam_call_analyzer.py
+      - ./ai_interpreter.py:/app/ai_interpreter.py
+      - ./cem_client.py:/app/cem_client.py
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:1234/api/status"]
       interval: 30s

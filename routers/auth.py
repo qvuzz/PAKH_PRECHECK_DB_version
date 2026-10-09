@@ -69,17 +69,28 @@ def get_current_user_info(request: Request):
         client_server_token = ""
         client_server_ttsnew = ""
 
+    from region_detector import is_superadmin
+    auth_hdr = request.headers.get("Authorization") or ""
+    client_jwt_user = {}
+    if auth_hdr:
+        from services.session_manager import decode_jwt
+        client_jwt_user = decode_jwt(auth_hdr)
+
+    active_user = client_jwt_user or user_info or lan_ttsnew_usr or (srv_user if is_local else {})
+    is_admin = is_local or is_superadmin(active_user)
+
     return {
         "is_local": is_local,
+        "is_admin": is_admin,
         "client_ip": client_ip,
         "has_server_token": bool(client_server_token),
         "server_user": srv_user if is_local else {},
         "server_token": client_server_token,
         "server_ttsnew_token": client_server_ttsnew,
         "token": token,
-        "user": user_info,
+        "user": user_info or client_jwt_user,
         "ttsnew_token": client_server_ttsnew if is_local else lan_ttsnew_tok,
-        "ttsnew_user": srv_user if is_local else lan_ttsnew_usr
+        "ttsnew_user": srv_user if is_local else (lan_ttsnew_usr or client_jwt_user)
     }
 
 

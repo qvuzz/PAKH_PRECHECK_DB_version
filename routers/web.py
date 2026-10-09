@@ -33,6 +33,10 @@ SPA_ROUTES = [
     "/ttsmoi/voice_sms",
     "/ttsmoi/cuoc-goi",
     "/ttsmoi/call",
+    "/ttsmoi/chan-goi-ngoai-mang",
+    "/ttsmoi/spam-call",
+    "/ttsmoi/spam_call",
+    "/ttsmoi/outbound-block",
     "/ttsmoi/tin-nhan",
     "/ttsmoi/sms",
     "/ttsmoi/khac",
@@ -41,6 +45,20 @@ SPA_ROUTES = [
     "/lich-su",
     "/kiem-tra-luong"
 ]
+
+# Tự động bổ sung các Route phân vùng 3 Miền (mien-bac, mien-trung, mien-nam, mb, mt, mn)
+REGION_SLUGS = ["mien-bac", "mien-trung", "mien-nam", "mb", "mt", "mn"]
+SERVICE_SLUGS = ["data", "mobileinternet", "cuoc-goi", "call", "voice", "voice_sms", "chan-goi-ngoai-mang", "spam-call", "spam_call", "outbound-block", "tin-nhan", "sms", "khac", "other", "thong-ke", "lich-su"]
+
+for reg in REGION_SLUGS:
+    SPA_ROUTES.append(f"/{reg}")
+    SPA_ROUTES.append(f"/ttsmoi/{reg}")
+    SPA_ROUTES.append(f"/ttscu/{reg}")
+    for svc in SERVICE_SLUGS:
+        SPA_ROUTES.append(f"/{reg}/{svc}")
+        SPA_ROUTES.append(f"/ttsmoi/{reg}/{svc}")
+        SPA_ROUTES.append(f"/ttscu/{reg}/{svc}")
+
 
 for route_path in SPA_ROUTES:
     @router.get(route_path, response_class=HTMLResponse, include_in_schema=(route_path == "/"))

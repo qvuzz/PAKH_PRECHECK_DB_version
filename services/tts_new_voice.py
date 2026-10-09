@@ -75,12 +75,19 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
                 "flow_id": t.get("flow_id", ""),
                 "reopen_count": int(t.get("reopen_count") or 0),
                 "last_reopened_date": str(t.get("last_reopened_date") or "").strip(),
-                "processing_content": t.get("processing_content", "")
+                "processing_content": t.get("processing_content", ""),
+                "region": t.get("region"),
+                "ward": t.get("ward", "")
             }
             save_or_update_ticket(rec)
 
         if active_codes:
-            sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type=service_type)
+            scanned_regs = {t.get("region") for t in voice_tickets if t.get("region")}
+            if scanned_regs:
+                for s_reg in scanned_regs:
+                    sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type=service_type, region=s_reg)
+            else:
+                sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type=service_type)
 
         state.log("INFO", f"✅ Đã nạp xong {len(voice_tickets)} phiếu lên bảng. Đang tiến hành tra cứu Core...")
 

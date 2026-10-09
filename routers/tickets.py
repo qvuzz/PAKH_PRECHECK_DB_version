@@ -56,23 +56,38 @@ def get_tickets_api(
     current_user_name = "Quản trị viên"
 
     _, uinfo = resolve_ttsnew_token(client_ip, is_local=is_local, client_tok=client_tok)
+    if not uinfo and client_ip in ACTIVE_LAN_SESSIONS:
+        sess = ACTIVE_LAN_SESSIONS.get(client_ip) or {}
+        uinfo = sess.get("ttsnew_user") or sess.get("user") or {}
+
     from region_detector import is_superadmin, detect_user_region
 
-    if is_superadmin(uinfo):
+    user_reg = detect_user_region(uinfo) if uinfo else None
+    is_region_locked = False
+
+    if is_local or is_superadmin(uinfo):
         user_role = "admin"
         effective_region = (region or "ALL").upper()
-        current_user_name = uinfo.get("displayName") or uinfo.get("userName") or "Quản trị viên"
+        current_user_name = (uinfo.get("displayName") or uinfo.get("userName") or uinfo.get("HoTen") or "Quản trị viên") if uinfo else "Quản trị viên"
+        is_region_locked = False
     elif uinfo:
         user_role = "ktv"
-        user_reg = detect_user_region(uinfo)
-        if region and region != "ALL":
+        # Nếu KTV thuộc vùng cụ thể (VD: tài khoản VNPT HCM / Cần Thơ / ...), khóa chặt ở vùng đó
+        if user_reg:
+            effective_region = user_reg
+            is_region_locked = True
+        elif region and region != "ALL":
             effective_region = region.upper()
+            is_region_locked = True
         else:
-            effective_region = user_reg or "ALL"
+            effective_region = "ALL"
+            is_region_locked = False
         current_user_name = uinfo.get("displayName") or uinfo.get("userName") or "KTV"
     else:
         user_role = "guest"
         effective_region = (region or "ALL").upper()
+        # Nếu truy cập qua link cố định (/mien-nam, /mien-bac, /mien-trung), khóa cố định vùng
+        is_region_locked = bool(region and region.upper() in ("MB", "MN", "MT"))
         current_user_name = ""
 
     tickets = get_all_tickets(
@@ -83,7 +98,37 @@ def get_tickets_api(
         service_type=srv_f,
         region=effective_region
     )
-    sys_counts = get_system_counts()
+
+    # Tự động bù tóm tắt 6 mục cho các phiếu Mobile Internet nếu chưa có hoặc đang là 'null'
+    try:
+        from db_manager import is_mobile_internet_ticket
+        from ai_interpreter import generate_ticket_summary
+        need_db_update = []
+        for t in tickets:
+            pkg = t.get("package_title") or ""
+            tc = t.get("ticket_content") or ""
+            ai_s = str(t.get("ai_summary") or "").strip()
+            if is_mobile_internet_ticket(pkg) and tc:
+                if not ai_s or ai_s == "null" or ai_s == "None" or not ai_s.startswith("1.") or ai_s == tc.strip():
+                    new_sum = generate_ticket_summary(pkg, tc, phone=t.get("phone", ""))
+                    if new_sum and new_sum.strip().startswith("1."):
+                        t["ai_summary"] = new_sum
+                        need_db_update.append((new_sum, t.get("ticket_code"), t.get("phone")))
+
+        if need_db_update:
+            conn_u = get_db_connection()
+            with conn_u:
+                for sum_val, t_code, ph in need_db_update:
+                    if t_code:
+                        clean_c = str(t_code).split("\n")[0].strip()
+                        conn_u.execute("UPDATE tickets SET ai_summary = ? WHERE ticket_code = ? OR ticket_code LIKE ?", (sum_val, clean_c, f"{clean_c}%"))
+                    elif ph:
+                        conn_u.execute("UPDATE tickets SET ai_summary = ? WHERE phone = ?", (sum_val, ph))
+            conn_u.close()
+    except Exception:
+        pass
+
+    sys_counts = get_system_counts(region=effective_region)
     total_cnt, closed_cnt, active_cnt = get_ticket_counts(
         source=src_f, 
         service_type=srv_f, 
@@ -98,6 +143,8 @@ def get_tickets_api(
         "active_count": active_cnt,
         "system_counts": sys_counts,
         "region": effective_region,
+        "user_region": user_reg,
+        "is_region_locked": is_region_locked,
         "user_role": user_role,
         "user_name": current_user_name
     }
@@ -1243,11 +1290,18 @@ async def precheck_one_ticket(request: Request):
                 except Exception:
                     pass
 
+            ai_sum_calc = ""
             if is_mobile_data:
                 status_calc, comment_calc, action_calc, _ = analyze_subscriber_status(
                     existing_clean_data, pkg_title, t_content, phone_84=phone_84,
                     cem_records=cem_recs, app_events=app_evs, incident_time_str=incident_time, driver=driver
                 )
+                if t_content:
+                    try:
+                        from ai_interpreter import generate_ticket_summary
+                        ai_sum_calc = generate_ticket_summary(pkg_title, t_content, phone=phone_84)
+                    except Exception:
+                        pass
             else:
                 status_calc = ""
                 comment_calc = ""
@@ -1263,10 +1317,11 @@ async def precheck_one_ticket(request: Request):
                         status = ?,
                         comment = ?,
                         action_plan = ?,
+                        ai_summary = CASE WHEN ? != '' THEN ? ELSE ai_summary END,
                         prechecked_at = ?,
                         updated_at = CURRENT_TIMESTAMP 
                     WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?
-                """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, now_precheck_str, phone, phone_84, f"%{clean_digits[-9:]}%", incident_time))
+                """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, ai_sum_calc, ai_sum_calc, now_precheck_str, phone, phone_84, f"%{clean_digits[-9:]}%", incident_time))
             else:
                 conn.execute("""
                     UPDATE tickets 
@@ -1277,10 +1332,11 @@ async def precheck_one_ticket(request: Request):
                         status = ?,
                         comment = ?,
                         action_plan = ?,
+                        ai_summary = CASE WHEN ? != '' THEN ? ELSE ai_summary END,
                         prechecked_at = ?,
                         updated_at = CURRENT_TIMESTAMP 
                     WHERE rowid = (SELECT rowid FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1)
-                """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, now_precheck_str, phone, phone_84, f"%{clean_digits[-9:]}%"))
+                """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, ai_sum_calc, ai_sum_calc, now_precheck_str, phone, phone_84, f"%{clean_digits[-9:]}%"))
         conn.close()
 
         state.log("SUCCESS", f"✅ Đã tiền kiểm Core xong cho {phone_84}: Radio={info_res.get('Radio')}, HSS={info_res.get('HSS Profile')}, IP={info_res.get('IPv4')}, NAM={info_res.get('NAM')}")
@@ -1314,6 +1370,8 @@ async def move_ticket_to_step_2_4(request: Request):
             "success": False,
             "message": "Không tìm thấy phiên đăng nhập TTS Mới. Vui lòng kết nối tài khoản KTV trên thanh công cụ trước khi chuyển bước!"
         }
+
+    from ttsnew_api import fetch_active_tickets, api_move_step_2_3_to_2_4
 
     ktv_name = ktv_user.get("displayName") or ktv_user.get("userName") or "Kỹ thuật viên"
 

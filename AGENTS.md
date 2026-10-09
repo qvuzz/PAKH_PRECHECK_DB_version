@@ -85,6 +85,12 @@ Tài liệu này là chỉ dẫn bắt buộc cho mọi trợ lý AI (Antigravit
      3. **Lớp 3 (Gói ZIP triển khai)**: Chạy `python update_deploy_zip.py` để đóng gói cập nhật đè vào file `VNPT_TTS_PRECHECK_DEPLOY.zip`.
    * **Mục tiêu**: Đảm bảo code chạy trên máy trạm dev, thư mục docker server và file nén bàn giao cho KTV luôn đồng bộ 100%, không bị lệch phiên bản.
 
+8. **Quy chuẩn đặc biệt bảo vệ JavaScript Client (`static/js/dashboard.js`) - BẮT BUỘC TUÂN THỦ**:
+   * File `static/js/dashboard.js` điều khiển toàn bộ Single Page App với gần 9.000 dòng code. Bất kỳ một lỗi cú pháp nhỏ (như thiếu dấu đóng ngoặc `});`, sai template string `${...}`) sẽ khiến trình duyệt crash toàn bộ runtime JS, làm đơ toàn bộ Dashboard (treo ở trạng thái "Đang tải dữ liệu phiếu...").
+   * **BẮT BUỘC KIỂM TRA CÚ PHÁP BẰNG NODE.JS**: Sau mỗi lần chỉnh sửa bất kỳ dòng nào trong `static/js/dashboard.js`, **BẮT BUỘC** chạy ngay lệnh:
+     `node -c "static/js/dashboard.js"`
+   * **ĐIỀU KIỆN CHẶN BẮT BUỘC (STRICT GATE)**: Chỉ khi lệnh trên trả về **Exit code 0** (không có lỗi) thì mới được phép đồng bộ sang thư mục Docker và đóng gói ZIP. Tuyệt đối không bàn giao code JS chưa qua kiểm tra cú pháp `node -c`.
+
 ---
 
 ## 🗺️ 2. BẢN ĐỒ CHỈ MỤC CÁC FILE LÕI (CORE REPOSITORY MAP)
@@ -121,6 +127,7 @@ Dự án đã được phân tầng rõ ràng, mọi nghiệp vụ chỉ nằm t
 2. **Sửa giao diện Dashboard / Thêm tab dịch vụ**:
    * Sửa [`templates/dashboard.html`](templates/dashboard.html).
    * Sửa CSS [`static/css/dashboard.css`](static/css/dashboard.css) và JS [`static/js/dashboard.js`](static/js/dashboard.js).
+   * **Bắt buộc**: Chạy `node -c "static/js/dashboard.js"` kiểm tra cú pháp trước khi đồng bộ.
    * Kiểm tra định tuyến SPA tại [`routers/web.py`](routers/web.py) và API lọc tại [`routers/tickets.py`](routers/tickets.py).
 3. **Cập nhật quy tắc đóng phiếu tự động**:
    * Kiểm tra [`routers/tickets.py`](routers/tickets.py) tại các hàm `save_autoclose_config` và điều kiện trigger.

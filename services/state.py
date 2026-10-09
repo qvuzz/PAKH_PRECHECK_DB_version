@@ -38,7 +38,7 @@ class AutomationState:
         self.auto_close_tts_new = False  # Trạng thái tự đóng TTS Mới
         self.scan_scopes = ["tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"]  # Quét tự động toàn bộ phân hệ TTS Mới
         self.auto_close_mode = "none"  # 'tts_new', 'none'
-        self.ai_summary_engine = "qwen"  # 'qwen' (Qwen 2.5 GGUF) hoặc 'regex' (Regex thuần)
+        self.ai_summary_engine = "regex"  # Mặc định 'regex' (Regex thuần), hỗ trợ 'qwen' khi bật
         self.engine = "tts_new"  # Hệ thống TTS Mới
         self.dry_run = False
         self.observe = False

@@ -133,7 +133,7 @@ async def lifespan(app: FastAPI):
     def _live_tts_new_sync_loop():
         while True:
             try:
-                time.sleep(12)
+                time.sleep(45)
                 from ttsnew_api import sync_tts_new_live_steps, get_cached_token
                 tok = get_cached_token()
                 if tok:

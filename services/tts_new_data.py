@@ -146,16 +146,16 @@ def _process_single_ticket(
         ai_summary = existing_db_row["ai_summary"] or ""
         if not ai_summary or not ai_summary.strip().startswith("1.") or ai_summary.strip() == content.strip():
             try:
-                from ai_interpreter import analyze_ticket_with_local_ai, analyze_ticket_offline
-                new_sum = analyze_ticket_with_local_ai(title, content) or analyze_ticket_offline(title, content)
+                from ai_interpreter import generate_ticket_summary
+                new_sum = generate_ticket_summary(title, content, phone=phone_84)
                 if new_sum:
                     ai_summary = new_sum
                     with db_lock:
                         conn_fix = get_db_connection()
                         if clean_c:
                             conn_fix.execute("UPDATE tickets SET ai_summary = ? WHERE ticket_code = ? OR ticket_code LIKE ?", (ai_summary, clean_c, f"{clean_c}%"))
-                        elif incident_time:
-                            conn_fix.execute("UPDATE tickets SET ai_summary = ? WHERE (phone = ? OR phone LIKE ?) AND incident_time = ?", (ai_summary, phone_84, f"%{phone_84[-9:]}%", incident_time))
+                        elif incident_time_str:
+                            conn_fix.execute("UPDATE tickets SET ai_summary = ? WHERE (phone = ? OR phone LIKE ?) AND incident_time = ?", (ai_summary, phone_84, f"%{phone_84[-9:]}%", incident_time_str))
                         else:
                             conn_fix.execute("UPDATE tickets SET ai_summary = ? WHERE rowid = (SELECT rowid FROM tickets WHERE phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1)", (ai_summary, phone_84, f"%{phone_84[-9:]}%"))
                         conn_fix.commit()
@@ -168,7 +168,8 @@ def _process_single_ticket(
         # Định nghĩa các hàm tra cứu con chạy song song
         def _fetch_btools():
             try:
-                raw_bt = extract_btools_single_phone(driver, phone_84, start_d, end_d)
+                with driver_lock:
+                    raw_bt = extract_btools_single_phone(driver, phone_84, start_d, end_d)
                 return standardize_btools_data(raw_bt)
             except Exception as e:
                 state.log("WARN", f"Lỗi BTools {phone_84}: {e}")
@@ -254,7 +255,8 @@ def _process_single_ticket(
             earliest_reg_dt = min([p["reg_dt"] for p in commercial_pkgs if p.get("reg_dt")], default=None)
             start_scan_date = (datetime.now() - timedelta(days=4)).date()
             if earliest_reg_dt and earliest_reg_dt.date() < start_scan_date:
-                clean_data = fetch_supplementary_btools_if_needed(driver, phone_84, clean_data, earliest_reg_dt, start_scan_date)
+                with driver_lock:
+                    clean_data = fetch_supplementary_btools_if_needed(driver, phone_84, clean_data, earliest_reg_dt, start_scan_date)
         except Exception as ex_case2:
             state.log("WARN", f"Lỗi tra cứu bổ sung Case 2 cho {phone_84}: {ex_case2}")
 
@@ -273,7 +275,7 @@ def _process_single_ticket(
             except Exception:
                 pass
 
-        if clean_data is not None:
+        try:
             with open(json_filename, "w", encoding="utf-8") as jf:
                 json.dump({
                     "phone": phone_84,
@@ -282,9 +284,11 @@ def _process_single_ticket(
                     "title": title,
                     "content": content,
                     "ticket_code": ticket_code,
-                    "btools_technical_data": clean_data,
-                    "data": clean_data
+                    "btools_technical_data": clean_data or [],
+                    "data": clean_data or []
                 }, jf, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
 
         # Lưu dữ liệu CEM vào file
         try:
@@ -292,8 +296,13 @@ def _process_single_ticket(
         except Exception:
             pass
 
-        # Tóm tắt thông tin bằng AI / NLP Offline
-        ai_summary = analyze_ticket_with_ai(json_filename)
+        # Tóm tắt thông tin bằng AI / NLP Offline (100% trong bộ nhớ, không phụ thuộc file đĩa)
+        ai_summary = ""
+        try:
+            from ai_interpreter import generate_ticket_summary
+            ai_summary = generate_ticket_summary(title, content, phone=phone_84)
+        except Exception as ex_sum:
+            ai_summary = content
 
         # Phân tích kịch bản mới dựa trên Core / BTools / CEM vừa cào
         status, comment, action_plan, color = analyze_subscriber_status(
@@ -345,7 +354,7 @@ def _process_single_ticket(
         "ticket_status": "Chưa đóng",
         "force_update_status": True,
         "source": "tts_new",
-        "ai_summary": ai_summary if ai_summary else "null",
+        "ai_summary": (ai_summary if ai_summary and ai_summary != "null" else content),
         "reopen_count": reopen_count,
         "last_reopened_date": last_reopened_date,
         "processing_content": ticket.get("processing_content", ""),
@@ -536,17 +545,19 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False):
         enriched_tickets, total_scanned = get_ttsnew_tickets_for_precheck(driver=driver)
         if not enriched_tickets:
             state.log("WARN", f"Đã quét {total_scanned} phiếu trên TTS Mới nhưng không tìm thấy phiếu Mobile Internet nào đang xử lý.")
-            from db_manager import sync_active_tickets_state
-            sync_active_tickets_state([], source="tts_new", key_type="ticket_code", service_type="data")
             return
 
         total_tickets = len(enriched_tickets)
         state.log("SUCCESS", f"Thu được {total_tickets} thuê bao Mobile Internet từ TTS Mới (Tổng {total_scanned} phiếu). Khởi chạy Core Engine đa luồng...")
 
-        # Đồng bộ danh sách phiếu hiện hữu với thực tế trên TTS Mới
+        # Đồng bộ danh sách phiếu hiện hữu với thực tế trên TTS Mới (theo từng phân vùng)
         active_codes = {str(t.get("ticket_code", "")).strip() for t in enriched_tickets if t.get("ticket_code")}
-        if active_codes:
-            from db_manager import sync_active_tickets_state
+        scanned_regs = {t.get("region") for t in enriched_tickets if t.get("region")}
+        from db_manager import sync_active_tickets_state
+        if scanned_regs:
+            for s_reg in scanned_regs:
+                sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data", region=s_reg)
+        elif active_codes:
             sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data")
 
         now = datetime.now()
@@ -623,13 +634,13 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False):
         order_map = {str(t.get("ticket_code", "")).strip(): i for i, t in enumerate(enriched_tickets)}
         excel_summary_list.sort(key=lambda r: order_map.get(str(r.get("ticket_code", "")).strip(), 9999))
 
-        # Xuất file Excel báo cáo riêng cho TTS Mới
-        if excel_summary_list:
-            result_dir = BASE_DIR / "result"
-            os.makedirs(result_dir, exist_ok=True)
-            excel_name = result_dir / f"BaoCao_TienKiem_TTS_NEW_{now.strftime('%Y%m%d_%H%M%S')}.xlsx"
-            saved_excel_file = export_diagnostics_to_excel(excel_summary_list, excel_name, start_d, end_d)
-            state.log("SUCCESS", f"Báo cáo Excel TTS Mới đã lưu: {saved_excel_file}")
+        # Tắt tự động xuất Excel vào thư mục result/ theo yêu cầu để tránh đầy ổ đĩa (KTV có thể bấm Xuất Excel trên giao diện khi cần)
+        # if excel_summary_list:
+        #     result_dir = BASE_DIR / "result"
+        #     os.makedirs(result_dir, exist_ok=True)
+        #     excel_name = result_dir / f"BaoCao_TienKiem_TTS_NEW_{now.strftime('%Y%m%d_%H%M%S')}.xlsx"
+        #     saved_excel_file = export_diagnostics_to_excel(excel_summary_list, excel_name, start_d, end_d)
+        #     state.log("SUCCESS", f"Báo cáo Excel TTS Mới đã lưu: {saved_excel_file}")
 
         mode_str = "Tự động đóng 2 vòng" if state.should_auto_close("tts_new") else "Chỉ hiển thị, đóng thủ công"
         state.log("SUCCESS", f"⚡ Hoàn tất tiền kiểm siêu tốc (Đa luồng) {len(excel_summary_list)} phiếu TTS Mới (Chế độ: {mode_str}).")

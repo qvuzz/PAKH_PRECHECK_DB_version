@@ -298,14 +298,14 @@ def execute_tts_old_data_cycle():
         # Xuất Excel phục vụ lưu trữ file
         driver.switch_to.window(tts_tab_handle)
         saved_excel_file = None
-        if excel_summary_list:
-            state.current_step = "Xuất báo cáo Excel"
-            os.makedirs(result_dir, exist_ok=True)
-            saved_excel_file = export_diagnostics_to_excel(excel_summary_list, excel_name, start_d, end_d)
-            state.log("SUCCESS", f"Báo cáo Excel đã được lưu: {saved_excel_file}")
-
-            if state.open_excel and os.path.exists(saved_excel_file):
-                os.startfile(saved_excel_file)
+        # Tắt tự động xuất Excel vào thư mục result/ theo yêu cầu để tránh đầy ổ đĩa (KTV có thể bấm Xuất Excel trên giao diện khi cần)
+        # if excel_summary_list:
+        #     state.current_step = "Xuất báo cáo Excel"
+        #     os.makedirs(result_dir, exist_ok=True)
+        #     saved_excel_file = export_diagnostics_to_excel(excel_summary_list, excel_name, start_d, end_d)
+        #     state.log("SUCCESS", f"Báo cáo Excel đã được lưu: {saved_excel_file}")
+        #     if state.open_excel and os.path.exists(saved_excel_file):
+        #         os.startfile(saved_excel_file)
 
         # Refresh lại tab TTS về trang sự cố
         driver.switch_to.window(tts_tab_handle)

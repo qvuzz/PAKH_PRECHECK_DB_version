@@ -33,6 +33,55 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
     reopen_count = int(ticket.get("reopen_count") or 0)
     last_reopened_date = str(ticket.get("last_reopened_date") or "").strip()
 
+    # =========================================================================
+    # 0. CHUYÊN BIỆT: NHÓM SỰ CỐ SPAM CUỘC GỌI / CHẶN GỌI NGOẠI MẠNG / LIÊN MẠNG
+    # (Bỏ hoàn toàn gọi Core SAPC và Bỏ cảnh báo Phiếu mở lại theo quy chuẩn)
+    # =========================================================================
+    from spam_call_analyzer import is_outbound_block_ticket, analyze_spam_call_ticket
+
+    if is_outbound_block_ticket(title, ticket_content):
+        ccos_att = ticket.get("ccos_attachments")
+        s_res = analyze_spam_call_ticket(title, ticket_content, ccos_att, phone=phone_84)
+
+        has_commit = s_res.get("has_commitment", False)
+        carrier_disp = s_res.get("carrier_display", "Ngoại mạng")
+        summary_text = s_res.get("summary", "")
+
+        if has_commit:
+            status = "ĐÃ CÓ BẢN CAM KẾT"
+            color = "green"
+        else:
+            status = "CHƯA CÓ BẢN CAM KẾT"
+            color = "orange"
+
+        raw_step_check = f"{step_name} {code}".lower()
+        is_step_23 = ("2.3" in raw_step_check) or ("xử lý pakh" in raw_step_check)
+        comment = "Chuyển 2.4" if is_step_23 else summary_text
+        action_plan = "Chuyển 2.4" if is_step_23 else summary_text
+
+        return {
+            "status": status,
+            "color": color,
+            "action_plan": action_plan,
+            "comment": comment,
+            "real_packages": "--",
+            "formatted_pkg": "--",
+            "rat_types": "2G/3G/4G Thoại",
+            "cem_data": f"Liên mạng {carrier_disp}",
+            "app_usage": "--",
+            "ai_summary": summary_text,
+            "nam": "--",
+            "cell_primary": carrier_disp,
+            "is_outbound_block": True,
+            "carriers": s_res.get("carriers", []),
+            "carrier_display": carrier_disp,
+            "has_commitment": has_commit,
+            "commitment_display": s_res.get("commitment_display", "Không"),
+            "commitment_source": s_res.get("commitment_source", "Không"),
+            "commitment_files": s_res.get("commitment_files", []),
+            "spam_summary": summary_text
+        }
+
     # Nhận diện nếu caller truyền driver vào vị trí tham số thứ 3
     if sapc_client is not None and hasattr(sapc_client, "session") is False and hasattr(sapc_client, "execute_cdp_cmd"):
         driver = sapc_client

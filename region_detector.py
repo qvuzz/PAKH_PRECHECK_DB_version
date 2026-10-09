@@ -513,13 +513,24 @@ def is_superadmin(user_info: dict) -> bool:
     """
     Kiểm tra tài khoản KTV có quyền Super Admin toàn quyền (Quản trị viên 3 Miền).
     Cụ thể: account 'quangvu', email 'quangvu@vnpt.vn', hoặc các tài khoản admin/root.
+    Hỗ trợ cấu trúc thông tin từ cả TTS Mới (JWT) và TTS Cũ (Session CAS).
     """
     if not user_info:
         return False
     username = str(
         user_info.get("userName") or 
         user_info.get("username") or 
+        user_info.get("TaiKhoan") or
+        user_info.get("taikhoan") or
         user_info.get("ma_nd") or 
+        ""
+    ).lower().strip()
+
+    display_name = str(
+        user_info.get("displayName") or 
+        user_info.get("name") or 
+        user_info.get("HoTen") or 
+        user_info.get("hoten") or 
         ""
     ).lower().strip()
     
@@ -529,15 +540,19 @@ def is_superadmin(user_info: dict) -> bool:
         ""
     ).lower().strip()
 
-    # 1. Khớp chính xác username quangvu hoặc email quangvu@vnpt.vn
-    if username == "quangvu" or email == "quangvu@vnpt.vn":
+    # 1. Khớp username quangvu hoặc chứa quangvu
+    if "quangvu" in username or username == "quangvu":
         return True
 
-    # 2. Khớp các biến thể email quangvu@... hoặc quangvu....@vnpt.vn
-    if email.startswith("quangvu@") or email.startswith("quangvu."):
+    # 2. Khớp email quangvu
+    if "quangvu" in email or email == "quangvu@vnpt.vn":
         return True
 
-    # 3. Whitelist tài khoản Quản trị viên hệ thống
+    # 3. Khớp tên hiển thị Lê Quang Vũ
+    if "lê quang vũ" in display_name or "le quang vu" in display_name or "quangvu" in display_name:
+        return True
+
+    # 4. Whitelist tài khoản Quản trị viên hệ thống
     if username in ("admin", "superadmin", "quantri", "root", "dev"):
         return True
 

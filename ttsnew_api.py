@@ -1396,14 +1396,18 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
     try:
         from db_manager import get_db_connection
         conn = get_db_connection()
-        db_rows = conn.execute("""
-            SELECT ticket_id, ticket_code, phone, flow_id, ticket_status 
-            FROM tickets 
-            WHERE source = 'tts_new' AND (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%')
-        """).fetchall()
-
-        if not db_rows:
+        try:
+            db_rows = conn.execute("""
+                SELECT ticket_id, ticket_code, phone, flow_id, ticket_status 
+                FROM tickets 
+                WHERE source = 'tts_new' AND (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%')
+            """).fetchall()
+            cached_rows = [dict(r) for r in db_rows]
+        finally:
             conn.close()
+            conn = None
+
+        if not cached_rows:
             return {"success": True, "updated": 0}
 
         active_map = {}
@@ -1430,8 +1434,11 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
         updated_count = 0
         known_tids = set()
         known_codes = set()
+        pending_updates = []
+        pending_closes = []
+        step_call_budget = 5  # Giới hạn tối đa 5 cuộc gọi get-next-step mỗi chu kỳ để chống nghẽn luồng
 
-        for row in db_rows:
+        for row in cached_rows:
             tid_str = str(row["ticket_id"] or "")
             raw_code = str(row["ticket_code"] or "")
             clean_c = raw_code.split("\n")[0].strip()
@@ -1443,13 +1450,14 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
             matched_it = active_map.get(tid_str) or active_map.get(clean_c)
             if matched_it:
                 latest_flow_id = matched_it.get("id")
-                c_name = str(matched_it.get("stepName") or "").strip()
-                c_proc = str(matched_it.get("processDefinitionName") or "").strip()
+                c_name = str(matched_it.get("stepName") or matched_it.get("processNodeName") or "").strip()
+                c_proc = str(matched_it.get("processDefinitionName") or matched_it.get("processInstanceName") or "").strip()
                 
-                if not c_name and latest_flow_id:
+                if not c_name and latest_flow_id and step_call_budget > 0:
+                    step_call_budget -= 1
                     try:
                         url_step = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={latest_flow_id}"
-                        r_step = requests.get(url_step, headers=headers, timeout=3).json()
+                        r_step = requests.get(url_step, headers=headers, timeout=2).json()
                         c_nodes = (r_step.get("data") or {}).get("currentNodes", [])
                         if c_nodes:
                             c_node = c_nodes[0]
@@ -1466,68 +1474,88 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
                 new_ticket_code = "\n".join(new_code_lines)
 
                 if str(row["flow_id"]) != str(latest_flow_id) or raw_code != new_ticket_code:
-                    conn.execute("""
-                        UPDATE tickets 
-                        SET flow_id = ?, ticket_code = ?, updated_at = CURRENT_TIMESTAMP 
-                        WHERE ticket_id = ? AND source = 'tts_new'
-                    """, (latest_flow_id, new_ticket_code, row["ticket_id"]))
-                    updated_count += 1
+                    pending_updates.append((latest_flow_id, new_ticket_code, row["ticket_id"]))
             else:
                 # Phiếu không còn nằm trong active_list -> tự động đánh dấu đã đóng trên TTS Mới
-                try:
-                    conn.execute("""
-                        UPDATE tickets 
-                        SET ticket_status = 'Đã đóng', closed_at = COALESCE(closed_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP 
-                        WHERE ticket_id = ? AND source = 'tts_new'
-                    """, (row["ticket_id"],))
-                    updated_count += 1
-                except Exception:
-                    pass
+                pending_closes.append(row["ticket_id"])
 
-        conn.commit()
-        conn.close()
-        conn = None
+        # Thực thi ghi DB thần tốc (< 5ms) không chiếm lock lâu
+        if pending_updates or pending_closes:
+            conn_w = get_db_connection()
+            try:
+                with conn_w:
+                    for l_flow_id, n_code, t_id in pending_updates:
+                        conn_w.execute("""
+                            UPDATE tickets 
+                            SET flow_id = ?, ticket_code = ?, updated_at = CURRENT_TIMESTAMP 
+                            WHERE ticket_id = ? AND source = 'tts_new'
+                        """, (l_flow_id, n_code, t_id))
+                        updated_count += 1
+                    for t_id in pending_closes:
+                        conn_w.execute("""
+                            UPDATE tickets 
+                            SET ticket_status = 'Đã đóng', closed_at = COALESCE(closed_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP 
+                            WHERE ticket_id = ? AND source = 'tts_new'
+                        """, (t_id,))
+                        updated_count += 1
+            finally:
+                conn_w.close()
 
-        # 2. PHÁT HIỆN & TỰ ĐỘNG NẠP PHIẾU MỚI TINH VÀO ĐÚNG PHÂN HỆ MODULE
+        # 2. PHÁT HIỆN & TỰ ĐỘNG NẠP PHIẾU MỚI TINH VÀO ĐÚNG PHÂN HỆ MODULE (Giới hạn tối đa 5 phiếu/lần để tránh đơ)
+        new_candidates = []
         for it in active_list:
             it_tid = str(it.get("ticketId") or "")
             it_code = str(it.get("ticketCode") or "").split("\n")[0].strip()
             if (it_tid and it_tid not in known_tids) and (it_code and it_code not in known_codes):
-                try:
-                    en_ticket = enrich_ticket_customer(it, token)
-                    phone_val = normalize_phone_vn(en_ticket.get("phone") or "")
-                    if phone_val:
-                        inc_time = str(en_ticket.get("incident_time") or en_ticket.get("created_time") or "").strip()
-                        rec = {
-                            "phone": phone_val,
-                            "incident_time": inc_time,
-                            "package_title": it.get("title", "Mobile Internet"),
-                            "ticket_content": it.get("content", ""),
-                            "status": "CHỜ TIỀN KIỂM",
-                            "real_packages": "--",
-                            "rat_types": "--",
-                            "cem_data": "--",
-                            "app_usage": "--",
-                            "ai_summary": it.get("content", ""),
-                            "comment": "",
-                            "action_plan": "",
-                            "ticket_status": "Chưa đóng",
-                            "force_update_status": True,
-                            "source": "tts_new",
-                            "created_time": it.get("requestDate", ""),
-                            "ticket_code": en_ticket.get("ticket_code") or it_code,
-                            "ticket_id": it.get("ticketId"),
-                            "flow_id": it.get("id"),
-                            "reopen_count": int(en_ticket.get("reopen_count") or it.get("reopenCount") or 0),
-                            "last_reopened_date": str(en_ticket.get("last_reopened_date") or it.get("lastReopenedDate") or "").strip()
-                        }
-                        save_or_update_ticket(rec)
-                        updated_count += 1
-                        known_tids.add(it_tid)
-                        if it_code:
-                            known_codes.add(it_code)
-                except Exception:
-                    pass
+                new_candidates.append(it)
+
+        for it in new_candidates[:5]:
+            it_tid = str(it.get("ticketId") or "")
+            it_code = str(it.get("ticketCode") or "").split("\n")[0].strip()
+            try:
+                en_ticket = enrich_ticket_customer(it, token)
+                phone_val = normalize_phone_vn(en_ticket.get("phone") or "")
+                if phone_val:
+                    inc_time = str(en_ticket.get("incident_time") or en_ticket.get("created_time") or "").strip()
+                    pkg_t = str(it.get("title") or "Mobile Internet").strip()
+                    c_text = str(it.get("content") or "").strip()
+                    rec_sum = ""
+                    if c_text:
+                        try:
+                            from ai_interpreter import generate_ticket_summary
+                            rec_sum = generate_ticket_summary(pkg_t, c_text, phone=phone_val)
+                        except Exception:
+                            rec_sum = c_text
+                    rec = {
+                        "phone": phone_val,
+                        "incident_time": inc_time,
+                        "package_title": pkg_t,
+                        "ticket_content": c_text,
+                        "status": "CHỜ TIỀN KIỂM",
+                        "real_packages": "--",
+                        "rat_types": "--",
+                        "cem_data": "--",
+                        "app_usage": "--",
+                        "ai_summary": rec_sum or c_text,
+                        "comment": "",
+                        "action_plan": "",
+                        "ticket_status": "Chưa đóng",
+                        "force_update_status": True,
+                        "source": "tts_new",
+                        "created_time": it.get("requestDate", ""),
+                        "ticket_code": en_ticket.get("ticket_code") or it_code,
+                        "ticket_id": it.get("ticketId"),
+                        "flow_id": it.get("id"),
+                        "reopen_count": int(en_ticket.get("reopen_count") or it.get("reopenCount") or 0),
+                        "last_reopened_date": str(en_ticket.get("last_reopened_date") or it.get("lastReopenedDate") or "").strip()
+                    }
+                    save_or_update_ticket(rec)
+                    updated_count += 1
+                    known_tids.add(it_tid)
+                    if it_code:
+                        known_codes.add(it_code)
+            except Exception:
+                pass
 
         return {"success": True, "updated": updated_count}
     except Exception as ex:
