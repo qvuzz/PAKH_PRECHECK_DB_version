@@ -625,9 +625,16 @@ def get_ttsnew_tickets_for_precheck(driver=None, max_workers: int = 8, service_t
             token = extract_token_from_browser(driver, force_refresh=True)
             if not token:
                 from services.state import state
-                state.log("WARN", "⚠️ Token TTS Mới đã hết hạn. Vui lòng đăng nhập lại trên Dashboard hoặc trình duyệt.")
+                state.log("WARN", "⚠️ Token TTS Mới đã hết hạn (401). Vui lòng bấm 'TTS (mới)' ở thanh trên cùng để đăng nhập lại.")
                 return ([], 0)
-            raw_tickets = fetch_active_tickets(token, limit=1000)
+            try:
+                raw_tickets = fetch_active_tickets(token, limit=1000)
+            except urllib.error.HTTPError as he2:
+                if he2.code == 401:
+                    from services.state import state
+                    state.log("WARN", "⚠️ Token TTS Mới không hợp lệ trên cổng OneOSS (401). Vui lòng bấm 'TTS (mới)' ở thanh trên cùng để đăng nhập lại.")
+                    return ([], 0)
+                raise
         else:
             raise
     if service_type == "data":

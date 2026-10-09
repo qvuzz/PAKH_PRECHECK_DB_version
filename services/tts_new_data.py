@@ -646,7 +646,11 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False):
         state.log("SUCCESS", f"⚡ Hoàn tất tiền kiểm siêu tốc (Đa luồng) {len(excel_summary_list)} phiếu TTS Mới (Chế độ: {mode_str}).")
 
     except Exception as e:
-        state.log("ERROR", f"Lỗi trong chu kỳ tiền kiểm TTS Mới: {e}")
+        err_str = str(e)
+        if "401" in err_str or "Unauthorized" in err_str:
+            state.log("WARN", "⚠️ Token TTS Mới đã hết hạn hoặc chưa kết nối (401). Vui lòng bấm 'TTS (mới)' ở góc trên để đăng nhập lại.")
+        else:
+            state.log("ERROR", f"Lỗi trong chu kỳ tiền kiểm TTS Mới: {e}")
     finally:
         state.current_step = "Hoàn tất tiền kiểm TTS Mới"
         if not state.is_running:

@@ -250,7 +250,11 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
         return len(voice_tickets)
 
     except Exception as e:
-        state.log("ERROR", f"Lỗi quét phiếu {lbl} TTS Mới: {e}")
+        err_str = str(e)
+        if "401" in err_str or "Unauthorized" in err_str:
+            state.log("WARN", f"⚠️ Token TTS Mới đã hết hạn (401). Tạm dừng quét {lbl}, vui lòng bấm 'TTS (mới)' để đăng nhập lại.")
+        else:
+            state.log("ERROR", f"Lỗi quét phiếu {lbl} TTS Mới: {e}")
         return 0
     finally:
         state.status = "IDLE"
