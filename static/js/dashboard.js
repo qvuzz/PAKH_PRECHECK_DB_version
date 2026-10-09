@@ -4648,10 +4648,10 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
             })
         });
         let data = {};
+        const rawText = await res.text().catch(() => "");
         try {
-            data = await res.json();
+            data = JSON.parse(rawText);
         } catch (jsonErr) {
-            const rawText = await res.text().catch(() => "");
             throw new Error(`Máy chủ phản hồi lỗi (${res.status}): ${rawText.slice(0, 150) || 'Lỗi không xác định'}`);
         }
         if (data.success) {
@@ -4705,7 +4705,7 @@ async function handleMoveToStep24(ticketCode, phone, ticketId, flowId, btnElem) 
         `• Mã phiếu: ${cleanTicketCode}\n` +
         `• Số điện thoại: ${phone}\n` +
         `• Chuyển từ: Bước 2.3  ➔  Bước: 2.4 Đánh giá, báo cáo tình hình xử lý\n` +
-        `• Đơn vị nhận: Trung tâm Vận hành khai thác mạng Khu vực miền Nam/Tổ Dịch vụ (SOC2)\n` +
+        `• Đơn vị nhận: Tổ Dịch vụ (SOC) phụ trách quy trình OneOSS\n` +
         `• Ý kiến phân tích: "${displayComment}"\n` +
         `• Phương án xử lý: "${displayPlan}"\n\n` +
         `Bạn có chắc chắn muốn chuyển phiếu này sang bước 2.4 không?`;
@@ -4738,10 +4738,10 @@ async function handleMoveToStep24(ticketCode, phone, ticketId, flowId, btnElem) 
             })
         });
         let data = {};
+        const rawText = await res.text().catch(() => "");
         try {
-            data = await res.json();
+            data = JSON.parse(rawText);
         } catch (jsonErr) {
-            const rawText = await res.text().catch(() => "");
             throw new Error(`Máy chủ phản hồi lỗi (${res.status}): ${rawText.slice(0, 150) || 'Lỗi không xác định'}`);
         }
         if (data.success) {

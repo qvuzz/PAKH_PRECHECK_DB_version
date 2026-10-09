@@ -46,14 +46,89 @@ def _is_jwt_valid(tok_str: str) -> bool:
     return bool(tok_str and len(tok_str) > 30)
 
 
-def save_cached_token(token: str):
-    """Lưu token vào file cache để tái sử dụng."""
+def save_cached_token(token: str, region: str = None, user_info: dict = None):
+    """Lưu token vào file cache để tái sử dụng, hỗ trợ lưu phân vùng theo từng miền (MN, MT, MB)."""
     try:
-        data = {"token": token, "updated_at": time.time()}
+        if not region and user_info:
+            from region_detector import detect_user_region
+            region = detect_user_region(user_info)
+
+        data = {}
+        if TOKEN_CACHE_FILE.exists():
+            try:
+                with open(TOKEN_CACHE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                pass
+
+        data["token"] = token
+        data["updated_at"] = time.time()
+        if region and region in ("MN", "MT", "MB"):
+            data["region"] = region
+            regions = data.setdefault("regions", {})
+            regions[region] = {"token": token, "updated_at": time.time()}
+
         with open(TOKEN_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, indent=2, ensure_ascii=False)
     except Exception:
         pass
+
+
+def get_cached_tokens_by_region() -> dict:
+    """
+    Lấy danh sách các token còn hiệu lực cho từng miền: {'MN': tok, 'MT': tok, 'MB': tok}
+    Duyệt từ TOKEN_CACHE_FILE (mục 'regions') và lan_sessions.json / ACTIVE_LAN_SESSIONS.
+    """
+    result = {}
+
+    # 1. Từ TOKEN_CACHE_FILE
+    if TOKEN_CACHE_FILE.exists():
+        try:
+            with open(TOKEN_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                reg_map = data.get("regions", {})
+                for reg_k, info in reg_map.items():
+                    tok = (info.get("token") if isinstance(info, dict) else str(info or "")).strip()
+                    if tok and _is_jwt_valid(tok):
+                        result[reg_k] = tok
+                top_tok = (data.get("token") or "").strip()
+                top_reg = (data.get("region") or "").strip()
+                if top_tok and _is_jwt_valid(top_tok):
+                    if top_reg in ("MN", "MT", "MB"):
+                        result.setdefault(top_reg, top_tok)
+                    else:
+                        result.setdefault("MN", top_tok)
+        except Exception:
+            pass
+
+    # 2. Quét từ lan_sessions
+    sessions = {}
+    lan_file = BASE_DIR / "lan_sessions.json"
+    if lan_file.exists():
+        try:
+            with open(lan_file, "r", encoding="utf-8") as f:
+                sessions = json.load(f)
+        except Exception:
+            pass
+
+    try:
+        from services.session_manager import ACTIVE_LAN_SESSIONS
+        merged = dict(sessions)
+        merged.update(ACTIVE_LAN_SESSIONS)
+    except Exception:
+        merged = sessions
+
+    from region_detector import detect_user_region
+    for ip, s in merged.items():
+        if isinstance(s, dict):
+            tok = (s.get("ttsnew_token") or "").strip()
+            if tok and _is_jwt_valid(tok):
+                u = s.get("ttsnew_user") or s.get("user") or {}
+                reg = detect_user_region(u)
+                if reg in ("MN", "MT", "MB") and reg not in result:
+                    result[reg] = tok
+
+    return result
 
 
 def get_cached_token() -> str:
@@ -1375,10 +1450,13 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
         return {"success": False, "message": f"Lỗi ngoại lệ khi chuyển bước 2.4: {str(e)}"}
 
 
-def sync_tts_new_live_steps(token: str = "") -> dict:
+def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
     """
     Đồng bộ live siêu tốc (REST API OneOSS Gateway, < 1.5 giây) trạng thái bước và flow_id 
     của các phiếu TTS Mới đang mở trên dashboard mà không cần cào lại BTools/SAPC/CEM.
+    HỖ TRỢ ĐỒNG BỘ ĐÓNG PHIẾU AN TOÀN THEO TỪNG MIỀN (SCOPED REGIONAL SYNC):
+    - Token thuộc Miền nào (MN, MT, MB) thì CHỈ đồng bộ và rà soát đóng phiếu cho đúng Miền đó.
+    - Tuyệt đối không bao giờ đóng nhầm hay can thiệp vào phiếu của Miền khác!
     """
     if not token or not str(token).strip():
         token = get_cached_token()
@@ -1393,22 +1471,52 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
     except Exception as e:
         return {"success": False, "message": f"Lỗi fetch active tickets: {e}"}
 
+    # Xác định Miền mục tiêu (target_region)
+    from region_detector import detect_ticket_region
+    sync_reg = target_region
+    if not sync_reg or sync_reg == "ALL":
+        detected_regs = []
+        for it in active_list[:10]:
+            r = detect_ticket_region({
+                "ticket_code": it.get("ticketCode") or "",
+                "step_name": it.get("stepName") or it.get("processNodeName") or "",
+                "process_name": it.get("processDefinitionName") or it.get("processInstanceName") or "",
+                "assignedUnitName": it.get("assignedUnitName") or ""
+            })
+            if r in ("MN", "MT", "MB"):
+                detected_regs.append(r)
+        if detected_regs:
+            sync_reg = max(set(detected_regs), key=detected_regs.count)
+
     try:
         from db_manager import get_db_connection
         conn = get_db_connection()
         try:
-            db_rows = conn.execute("""
-                SELECT ticket_id, ticket_code, phone, flow_id, ticket_status 
-                FROM tickets 
-                WHERE source = 'tts_new' AND (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%')
-            """).fetchall()
+            # CHỈ lấy các phiếu chưa đóng thuộc đúng sync_reg (nếu xác định được sync_reg)
+            if sync_reg in ("MN", "MT", "MB"):
+                db_rows = conn.execute("""
+                    SELECT ticket_id, ticket_code, phone, flow_id, ticket_status, region 
+                    FROM tickets 
+                    WHERE source = 'tts_new' 
+                      AND region = ? 
+                      AND (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%')
+                """, (sync_reg,)).fetchall()
+            else:
+                # Nếu chưa xác định được vùng (ví dụ active_list rỗng),
+                # lấy tất cả nhưng TUYỆT ĐỐI KHÔNG tự động đóng phiếu để bảo vệ dữ liệu
+                db_rows = conn.execute("""
+                    SELECT ticket_id, ticket_code, phone, flow_id, ticket_status, region 
+                    FROM tickets 
+                    WHERE source = 'tts_new' 
+                      AND (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%')
+                """).fetchall()
             cached_rows = [dict(r) for r in db_rows]
+
+            # Lấy tập hợp ticket_id đã có trong DB toàn hệ thống để tránh nạp trùng
+            existing_all_tids = {str(r[0]) for r in conn.execute("SELECT ticket_id FROM tickets WHERE ticket_id IS NOT NULL").fetchall()}
         finally:
             conn.close()
             conn = None
-
-        if not cached_rows:
-            return {"success": True, "updated": 0}
 
         active_map = {}
         for it in active_list:
@@ -1432,11 +1540,12 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
         from services.state import normalize_phone_vn
 
         updated_count = 0
+        closed_count = 0
         known_tids = set()
         known_codes = set()
         pending_updates = []
         pending_closes = []
-        step_call_budget = 5  # Giới hạn tối đa 5 cuộc gọi get-next-step mỗi chu kỳ để chống nghẽn luồng
+        step_call_budget = 5
 
         for row in cached_rows:
             tid_str = str(row["ticket_id"] or "")
@@ -1476,10 +1585,14 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
                 if str(row["flow_id"]) != str(latest_flow_id) or raw_code != new_ticket_code:
                     pending_updates.append((latest_flow_id, new_ticket_code, row["ticket_id"]))
             else:
-                # Phiếu không còn nằm trong active_list -> tự động đánh dấu đã đóng trên TTS Mới
-                pending_closes.append(row["ticket_id"])
+                # 🎯 PHIẾU ĐÃ BỊ ĐÓNG TRỰC TIẾP TRÊN ONEOSS (Không còn trong active_list)
+                # CHỈ ĐÓNG KHI:
+                # 1. Xác định được vùng miền cụ thể (sync_reg là 'MN', 'MT' hoặc 'MB')
+                # 2. Phiếu trong DB thuộc đúng vùng miền này (row['region'] == sync_reg)
+                if sync_reg in ("MN", "MT", "MB") and row.get("region") == sync_reg and row.get("ticket_id"):
+                    pending_closes.append(row["ticket_id"])
 
-        # Thực thi ghi DB thần tốc (< 5ms) không chiếm lock lâu
+        # Thực thi cập nhật DB thần tốc (< 5ms)
         if pending_updates or pending_closes:
             conn_w = get_db_connection()
             try:
@@ -1491,13 +1604,19 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
                             WHERE ticket_id = ? AND source = 'tts_new'
                         """, (l_flow_id, n_code, t_id))
                         updated_count += 1
-                    for t_id in pending_closes:
-                        conn_w.execute("""
-                            UPDATE tickets 
-                            SET ticket_status = 'Đã đóng', closed_at = COALESCE(closed_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP 
-                            WHERE ticket_id = ? AND source = 'tts_new'
-                        """, (t_id,))
-                        updated_count += 1
+
+                    if pending_closes:
+                        for t_id in pending_closes:
+                            conn_w.execute("""
+                                UPDATE tickets 
+                                SET ticket_status = 'Đã đóng', 
+                                    closed_at = CURRENT_TIMESTAMP, 
+                                    closed_by = 'Đóng trên OneOSS', 
+                                    updated_at = CURRENT_TIMESTAMP 
+                                WHERE ticket_id = ? AND source = 'tts_new' AND region = ?
+                            """, (t_id, sync_reg))
+                            closed_count += 1
+                        print(f"[LIVE SYNC] 🎯 Đã đồng bộ đóng {closed_count} phiếu Miền {sync_reg} (đóng trực tiếp trên OneOSS)", flush=True)
             finally:
                 conn_w.close()
 
@@ -1506,7 +1625,7 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
         for it in active_list:
             it_tid = str(it.get("ticketId") or "")
             it_code = str(it.get("ticketCode") or "").split("\n")[0].strip()
-            if (it_tid and it_tid not in known_tids) and (it_code and it_code not in known_codes):
+            if (it_tid and it_tid not in known_tids and it_tid not in existing_all_tids) and (it_code and it_code not in known_codes):
                 new_candidates.append(it)
 
         for it in new_candidates[:5]:
@@ -1526,6 +1645,15 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
                             rec_sum = generate_ticket_summary(pkg_t, c_text, phone=phone_val)
                         except Exception:
                             rec_sum = c_text
+
+                    # 🎯 Xác định Miền (MB, MN, MT) CHUẨN XÁC 100% từ chính Quy trình OneOSS (SOC1/SOC2/SOC3)
+                    t_reg = detect_ticket_region({
+                        "ticket_code": en_ticket.get("ticket_code") or it_code,
+                        "step_name": it.get("stepName") or it.get("processNodeName") or "",
+                        "process_name": it.get("processDefinitionName") or it.get("processInstanceName") or "",
+                        "assignedUnitName": it.get("assignedUnitName") or ""
+                    }, default_region=sync_reg or "MN")
+
                     rec = {
                         "phone": phone_val,
                         "incident_time": inc_time,
@@ -1547,7 +1675,8 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
                         "ticket_id": it.get("ticketId"),
                         "flow_id": it.get("id"),
                         "reopen_count": int(en_ticket.get("reopen_count") or it.get("reopenCount") or 0),
-                        "last_reopened_date": str(en_ticket.get("last_reopened_date") or it.get("lastReopenedDate") or "").strip()
+                        "last_reopened_date": str(en_ticket.get("last_reopened_date") or it.get("lastReopenedDate") or "").strip(),
+                        "region": t_reg
                     }
                     save_or_update_ticket(rec)
                     updated_count += 1
@@ -1557,7 +1686,7 @@ def sync_tts_new_live_steps(token: str = "") -> dict:
             except Exception:
                 pass
 
-        return {"success": True, "updated": updated_count}
+        return {"success": True, "region": sync_reg, "updated": updated_count, "closed": closed_count}
     except Exception as ex:
         if 'conn' in locals() and conn:
             try:

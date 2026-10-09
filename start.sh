@@ -32,6 +32,17 @@ fi
 [ -f ccos_cookie_cache.json ] || echo "{}" > ccos_cookie_cache.json
 [ -f sapccheck/sapc_cookies.json ] || echo "[]" > sapccheck/sapc_cookies.json
 
+# 2. Tu dong chuan hoa phan vung theo Quy trinh OneOSS (SOC1=MB, SOC2=MN, SOC3=MT) va phuc hoi phieu MN bi dong nham
+if [ -f tickets.db ] && command -v sqlite3 >/dev/null 2>&1; then
+    sqlite3 tickets.db "
+        UPDATE tickets SET region = 'MN' WHERE instr(ticket_code, 'SOC2') > 0 OR instr(ticket_code, 'SOC 2') > 0;
+        UPDATE tickets SET region = 'MT' WHERE instr(ticket_code, 'SOC3') > 0 OR instr(ticket_code, 'SOC 3') > 0;
+        UPDATE tickets SET region = 'MB' WHERE instr(ticket_code, 'SOC1') > 0 OR instr(ticket_code, 'SOC 1') > 0;
+        UPDATE tickets SET region = 'MN' WHERE (region IS NULL OR region = '' OR region = 'MB' OR region = 'MT') AND instr(ticket_code, 'SOC1') = 0 AND instr(ticket_code, 'SOC 1') = 0 AND instr(ticket_code, 'SOC3') = 0 AND instr(ticket_code, 'SOC 3') = 0;
+        UPDATE tickets SET ticket_status = 'Chưa đóng' WHERE region = 'MN' AND (ticket_status = 'Đã đóng' OR ticket_status = 'Da dong') AND (closed_by IS NULL OR closed_by = '' OR closed_by = 'Kỹ thuật viên') AND updated_at LIKE '%$(date +%Y-%m-%d)%';
+    " 2>/dev/null || true
+fi
+
 # 2. Kiem tra file .env
 if [ ! -f .env ]; then
     if [ -f .env.sample ]; then

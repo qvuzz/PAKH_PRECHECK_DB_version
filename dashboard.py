@@ -134,10 +134,16 @@ async def lifespan(app: FastAPI):
         while True:
             try:
                 time.sleep(45)
-                from ttsnew_api import sync_tts_new_live_steps, get_cached_token
-                tok = get_cached_token()
-                if tok:
-                    sync_tts_new_live_steps(tok)
+                from ttsnew_api import sync_tts_new_live_steps, get_cached_tokens_by_region, get_cached_token
+                reg_tokens = get_cached_tokens_by_region()
+                if reg_tokens:
+                    for reg_code, tok in reg_tokens.items():
+                        if tok:
+                            sync_tts_new_live_steps(tok, target_region=reg_code)
+                else:
+                    tok = get_cached_token()
+                    if tok:
+                        sync_tts_new_live_steps(tok)
             except Exception:
                 pass
 

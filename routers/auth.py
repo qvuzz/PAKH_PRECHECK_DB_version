@@ -120,7 +120,9 @@ async def login_tts_step1(request: Request):
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
             if tok_to_save:
-                save_cached_token(tok_to_save)
+                from region_detector import detect_user_region
+                u_reg = detect_user_region(user_info)
+                save_cached_token(tok_to_save, region=u_reg if u_reg in ("MN", "MT", "MB") else "MN", user_info=user_info)
         elif system == "btools":
             from btools_manager import save_btools_cookie
             save_btools_cookie(token, verify=False)
@@ -143,7 +145,9 @@ async def login_tts_step1(request: Request):
                 if ttsnew_token:
                     ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_token"] = ttsnew_token
                     ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
-                    save_cached_token(ttsnew_token)
+                    from region_detector import detect_user_region
+                    u_reg = detect_user_region(user_info)
+                    save_cached_token(ttsnew_token, region=u_reg if u_reg in ("MN", "MT", "MB") else "MN", user_info=user_info)
                 if token:
                     save_cached_auth(token, user_info)
         _save_lan_sessions()
@@ -319,7 +323,9 @@ async def save_ttsnew_token_api(request: Request):
     _save_lan_sessions()
 
     if is_local:
-        save_cached_token(tok_input)
+        from region_detector import detect_user_region
+        u_reg = detect_user_region(user_info)
+        save_cached_token(tok_input, region=u_reg if u_reg in ("MN", "MT", "MB") else "MN", user_info=user_info)
 
     u_name = user_info.get("displayName") or user_info.get("username") or "KTV"
     try:

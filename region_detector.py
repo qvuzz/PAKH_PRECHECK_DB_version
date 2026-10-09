@@ -455,16 +455,14 @@ def normalize_to_new_province(raw_input: Optional[str]) -> Tuple[Optional[str], 
 
 def detect_ticket_region(ticket_data: dict, default_region: str = "MN") -> str:
     """
-    Tự động nhận diện Miền (MB, MN, MT) của một phiếu phản ánh.
-    NGUỒN 1 (CHÍNH XÁC NHẤT):
-    - Tên quy trình / Tên bước / Mã phiếu chứa SOC1 -> MB (Miền Bắc)
-    - Tên quy trình / Tên bước / Mã phiếu chứa SOC2 -> MT (Miền Trung)
-    - Tên quy trình / Tên bước / Mã phiếu chứa SOC3 -> MN (Miền Nam)
-    NGUỒN 2:
-    - Bóc tách từ Tỉnh/Thành phố hoặc địa bàn chuẩn 34 Tỉnh mới
-    - Bóc tách từ Cell ID mã tỉnh
+    Tự động nhận diện Miền (MB, MN, MT) của một phiếu phản ánh theo chuẩn QUY TRÌNH ONEOSS (BPMN / Step / Unit).
+    TUÂN THỦ TUYỆT ĐỐI YÊU CẦU:
+    - Bóc tách trực tiếp từ Quy trình OneOSS (Tên bước / Tên quy trình / Đơn vị tiếp nhận):
+      * SOC 1 / NET 1 / Miền Bắc -> MB (Miền Bắc)
+      * SOC 2 / NET 2 / Miền Nam -> MN (Miền Nam)
+      * SOC 3 / NET 3 / Miền Trung -> MT (Miền Trung)
+    - TUYỆT ĐỐI KHÔNG SUY ĐOÁN THEO MÃ TỈNH / ĐỊA CHỈ KHÁCH BÁO / CELL ID.
     """
-    # 🌟 ƯU TIÊN SỐ 1: Bóc tách từ Tên bước / Tên quy trình / Mã phiếu / Đơn vị tiếp nhận (SOC1 / SOC2 / SOC3)
     search_text = " ".join([
         str(ticket_data.get("ticket_code") or ""),
         str(ticket_data.get("step_name") or ""),
@@ -475,36 +473,13 @@ def detect_ticket_region(ticket_data: dict, default_region: str = "MN") -> str:
         str(ticket_data.get("assignedUnitName") or "")
     ]).upper()
 
-    if "SOC1" in search_text or "SOC 1" in search_text or "MIỀN BẮC" in search_text or "MIEN BAC" in search_text:
+    # Bóc tách trực tiếp từ Quy trình OneOSS (Tên bước / Tên quy trình / Đơn vị tiếp nhận BPMN)
+    if any(k in search_text for k in ("SOC1", "SOC 1", "NET1", "NET 1", "MIỀN BẮC", "MIEN BAC", "VHKT MB", "VHKTM-B", "KHU VỰC 1", "KHU VUC 1", "KV1", "KV 1")):
         return "MB"
-    if "SOC2" in search_text or "SOC 2" in search_text or "MIỀN TRUNG" in search_text or "MIEN TRUNG" in search_text:
-        return "MT"
-    if "SOC3" in search_text or "SOC 3" in search_text or "MIỀN NAM" in search_text or "MIEN NAM" in search_text:
+    if any(k in search_text for k in ("SOC2", "SOC 2", "NET2", "NET 2", "MIỀN NAM", "MIEN NAM", "VHKT MN", "VHKTM-N", "KHU VỰC 2", "KHU VUC 2", "KV2", "KV 2")):
         return "MN"
-
-    # 2. Thử từ province
-    prov = ticket_data.get("province") or ticket_data.get("tinh_tp") or ticket_data.get("ward") or ""
-    if prov:
-        _, reg = normalize_to_new_province(prov)
-        if reg:
-            return reg
-
-    # 3. Thử từ Cell Name
-    cell_name = ticket_data.get("cell_name") or ticket_data.get("cell_id") or ""
-    if cell_name:
-        m = re.search(r'[-_]([A-Za-z]{3})(?:[-_]|$)', cell_name)
-        if m:
-            code = m.group(1).upper()
-            _, reg = normalize_to_new_province(code)
-            if reg:
-                return reg
-
-    # 4. Thử từ địa chỉ / địa bàn / nội dung
-    addr = ticket_data.get("dia_chi") or ticket_data.get("address") or ticket_data.get("noi_dung") or ticket_data.get("ticket_content") or ""
-    if addr:
-        _, reg = normalize_to_new_province(addr)
-        if reg:
-            return reg
+    if any(k in search_text for k in ("SOC3", "SOC 3", "NET3", "NET 3", "MIỀN TRUNG", "MIEN TRUNG", "VHKT MT", "VHKTM-T", "KHU VỰC 3", "KHU VUC 3", "KV3", "KV 3")):
+        return "MT"
 
     return default_region
 
@@ -563,30 +538,28 @@ def detect_user_region(user_info: dict) -> str:
     """
     Nhận diện vùng miền của User KTV khi đăng nhập TTS Mới (OneOSS).
     Nếu user thuộc Super Admin (quangvu, quangvu@vnpt.vn, admin localhost) -> Trả về 'ALL'
-    Nếu không -> Trả về 'MB', 'MN' hoặc 'MT'.
+    Nếu không -> Trả về 'MB', 'MN' hoặc 'MT' theo chuẩn Quy trình OneOSS (SOC1/SOC2/SOC3).
     """
     if is_superadmin(user_info):
         return "ALL"
 
     username = str(user_info.get("userName") or user_info.get("username") or user_info.get("ma_nd") or "").lower()
 
-    # Nhận diện theo tên tỉnh hoặc mã đơn vị trong thông tin KTV
+    # Nhận diện theo mã đơn vị / tên đơn vị / quy trình phụ trách trong OneOSS
     full_text = " ".join([
         str(user_info.get("don_vi") or ""),
         str(user_info.get("ma_don_vi") or ""),
         str(user_info.get("ten_don_vi") or ""),
-        str(user_info.get("tinh") or ""),
-        str(user_info.get("province") or ""),
+        str(user_info.get("region") or ""),
         username
     ]).lower()
 
-    if any(k in full_text for k in ("soc1", "soc 1", "mienbac", "miền bắc", "mb", "hanoi", "haiphong", "bacninh", "thainguyen")):
+    if any(k in full_text for k in ("soc1", "soc 1", "net1", "net 1", "mienbac", "miền bắc", "mb", "kv1")):
         return "MB"
-    if any(k in full_text for k in ("soc2", "soc 2", "mientrung", "miền trung", "mt", "danang", "hue", "quangnam", "gialai", "daklak")):
-        return "MT"
-    if any(k in full_text for k in ("soc3", "soc 3", "miennam", "miền nam", "mn", "hcm", "cantho", "dongnai", "tayninh", "camau", "angiang", "lamdong")):
+    if any(k in full_text for k in ("soc2", "soc 2", "net2", "net 2", "miennam", "miền nam", "mn", "kv2")):
         return "MN"
+    if any(k in full_text for k in ("soc3", "soc 3", "net3", "net 3", "mientrung", "miền trung", "mt", "kv3")):
+        return "MT"
 
-    # Mặc định theo tỉnh của user nếu có
-    _, reg = normalize_to_new_province(full_text)
-    return reg or "MN"
+    return user_info.get("region") or "MN"
+
