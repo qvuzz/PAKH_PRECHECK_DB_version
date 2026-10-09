@@ -1659,7 +1659,7 @@ function switchTableTab(tab) {
         filterStatus.value = 'all';
     }
 
-    // Hiển thị ngay hiệu ứng Skeleton mượt mà trong tbody
+    // Hiển thị hiệu ứng Skeleton mượt mà nếu chưa có sẵn cache (tránh chớp trắng khi chuyển tab nhanh)
     const tbody = document.getElementById('ticketsBody');
     const isDataService = (currentService === 'data');
     const isSpamCallService = (currentService === 'spam_call');
@@ -1669,12 +1669,18 @@ function switchTableTab(tab) {
     const isSimService = (currentService === 'sim');
     const hideCemSkeleton = isCallService || isSmsService || isSpamCallService || isRoamingService || isSimService;
     const totalCols = isSpamCallService ? 10 : (hideCemSkeleton ? 11 : (isDataService ? 13 : 12));
-    if (tbody) {
+
+    const searchInputVal = document.getElementById('searchInput') ? document.getElementById('searchInput').value : '';
+    const curStatusFilterVal = (currentService === 'data' && filterStatus) ? filterStatus.value : 'all';
+    const expectedCacheKey = `${tab}_${currentSystem}_${currentService}_${currentRegion || 'ALL'}_${curStatusFilterVal}_${searchInputVal}`;
+    const hasFreshModuleCache = window.ticketsModuleCache && window.ticketsModuleCache[expectedCacheKey] && (Date.now() - window.ticketsModuleCache[expectedCacheKey].timestamp < 30000);
+
+    if (!hasFreshModuleCache && tbody) {
         renderTicketsSkeleton(tbody, totalCols);
     }
 
     lastTicketsSignature = "";
-    loadTickets(true, true);
+    loadTickets(false, true);
 }
 
 async function precheckSingleTicket(phone, incidentTime, btnElem) {
@@ -1691,6 +1697,7 @@ async function precheckSingleTicket(phone, incidentTime, btnElem) {
         });
         const data = await res.json();
         if (data.success) {
+            clearTicketsModuleCache();
             lastTicketsSignature = "";
             await loadTickets(true);
             await fetchStatus();
@@ -1712,6 +1719,142 @@ async function precheckSingleTicket(phone, incidentTime, btnElem) {
     }
 }
 
+// ==============================================================================
+// BỘ NHỚ ĐỆM CLIENT (SWR CACHE - INSTANT MODULE SWITCHING)
+// ==============================================================================
+window.ticketsModuleCache = window.ticketsModuleCache || {};
+
+function clearTicketsModuleCache() {
+    window.ticketsModuleCache = {};
+}
+
+function applyTicketsData(data, force = false) {
+    if (!data) return;
+
+    // 🎯 Đồng bộ Widget Phân vùng 3 Miền & Vai trò Admin trên Header
+    const authRoleTag = document.getElementById('authRoleTag');
+    const authUserName = document.getElementById('authUserName');
+    const authPill = document.getElementById('authPill');
+    const unauthBtn = document.getElementById('unauthBtn');
+
+    if (data.user_role === 'admin') {
+        isSystemAdmin = true;
+        if (authRoleTag) {
+            authRoleTag.innerText = 'ADMIN';
+            authRoleTag.className = 'auth-role-tag admin';
+        }
+    } else {
+        if (authRoleTag) {
+            authRoleTag.innerText = 'KTV';
+            authRoleTag.className = 'auth-role-tag ktv';
+        }
+    }
+
+    const regWrap = document.getElementById('regionSelectWrapper');
+    if (regWrap) regWrap.style.display = 'flex';
+    const regSelect = document.getElementById('regionSelect');
+    const isAdmin = (data.user_role === 'admin') || isSystemAdmin || checkIsUserAdmin();
+    const navAdminSec = document.getElementById('navAdminSection');
+    if (navAdminSec) {
+        navAdminSec.style.display = 'block';
+    }
+
+    if (regSelect) {
+        if (isAdmin) {
+            isSystemAdmin = true;
+            isRegionLocked = false;
+            urlRouteRegion = null;
+            try { localStorage.setItem('pakh_is_admin', 'true'); } catch(e) {}
+            applyRegionUI(false);
+            const activeVal = currentRegion || data.region || 'ALL';
+            if (regSelect.value !== activeVal) {
+                regSelect.value = activeVal;
+            }
+        } else if (data.is_region_locked || (data.user_region && data.user_role === 'ktv')) {
+            isRegionLocked = true;
+            currentRegion = data.user_region || data.region || currentRegion;
+            applyRegionUI(true);
+            if (regSelect.value !== currentRegion) {
+                regSelect.value = currentRegion;
+            }
+        } else if (urlRouteRegion) {
+            isRegionLocked = true;
+            currentRegion = urlRouteRegion;
+            applyRegionUI(true);
+        } else {
+            isRegionLocked = false;
+            applyRegionUI(false);
+            const activeVal = currentRegion || data.region || 'ALL';
+            if (regSelect.value !== activeVal) {
+                regSelect.value = activeVal;
+            }
+        }
+    }
+
+    // Cập nhật tên hiển thị từ server nếu có
+    if (data.user_role === 'guest' || !data.user_name) {
+        if (!getTtsNewAuthToken()) {
+            window.currentApiUserName = '';
+            if (authPill) authPill.style.display = 'none';
+            if (unauthBtn) unauthBtn.style.display = 'inline-flex';
+        }
+    } else if (data.user_name && data.user_name !== 'KTV' && data.user_name !== 'Quản trị viên') {
+        window.currentApiUserName = data.user_name;
+        if (authUserName) {
+            authUserName.innerText = `Xin chào, ${data.user_name}`;
+        }
+        if (authPill) authPill.style.display = 'inline-flex';
+        if (unauthBtn) unauthBtn.style.display = 'none';
+    }
+
+    const tickets = data.tickets || [];
+
+    if (data.system_counts) {
+        const sc = data.system_counts;
+        const bOldData = document.getElementById('badgeOldData');
+        const bOldVoice = document.getElementById('badgeOldVoice');
+        const bOldApiData = document.getElementById('badgeOldApiData');
+        const bOldApiVoice = document.getElementById('badgeOldApiVoice');
+        const bNewData = document.getElementById('badgeNewData');
+        const bNewCall = document.getElementById('badgeNewCall');
+        const bNewSpamCall = document.getElementById('badgeNewSpamCall');
+        const bNewSms = document.getElementById('badgeNewSms');
+        const bNewRoaming = document.getElementById('badgeNewRoaming');
+        const bNewSim = document.getElementById('badgeNewSim');
+        const bNewOther = document.getElementById('badgeNewOther');
+        const bNewVoice = document.getElementById('badgeNewVoice');
+        const bTotalClosed = document.getElementById('badgeTotalClosed');
+        const bTotalAll = document.getElementById('badgeTotalAll');
+
+        updateNavBadge(bOldData, sc.tts_old_data);
+        updateNavBadge(bOldVoice, sc.tts_old_voice);
+        updateNavBadge(bOldApiData, sc.tts_old_api_data);
+        updateNavBadge(bOldApiVoice, sc.tts_old_api_voice);
+        updateNavBadge(bNewData, sc.tts_new_data);
+        updateNavBadge(bNewCall, sc.tts_new_call);
+        updateNavBadge(bNewSpamCall, sc.tts_new_spam_call);
+        updateNavBadge(bNewSms, sc.tts_new_sms);
+        updateNavBadge(bNewRoaming, sc.tts_new_roaming);
+        updateNavBadge(bNewSim, sc.tts_new_sim);
+        updateNavBadge(bNewOther, sc.tts_new_other);
+        updateNavBadge(bNewVoice, sc.tts_new_voice);
+        if (bTotalClosed) bTotalClosed.innerText = sc.total_closed || 0;
+        if (bTotalAll) bTotalAll.innerText = sc.total_all || 0;
+
+        const statTotal = document.getElementById('statTotalTickets');
+        const statClosed = document.getElementById('statClosedTickets');
+        if (statTotal) statTotal.innerText = (sc.today_total !== undefined ? sc.today_total : (sc.total_all || 0)).toLocaleString();
+        if (statClosed) statClosed.innerText = (sc.today_closed !== undefined ? sc.today_closed : (sc.total_closed || 0)).toLocaleString();
+    }
+
+    if (document.getElementById('badgeActiveCount')) document.getElementById('badgeActiveCount').innerText = data.active_count || 0;
+    if (document.getElementById('badgeClosedCount')) document.getElementById('badgeClosedCount').innerText = data.closed_count || 0;
+    if (document.getElementById('badgeAllCount')) document.getElementById('badgeAllCount').innerText = data.total_count || 0;
+
+    cachedTickets = tickets;
+    renderTicketsTable(force);
+}
+
 async function loadTickets(force = false, resetPage = false) {
     if (isHistoryStatsView || isUserManagementView) {
         return;
@@ -1726,20 +1869,34 @@ async function loadTickets(force = false, resetPage = false) {
             return;
         }
 
-        // Hủy bỏ request trước đó nếu đang chạy dở để tránh Race Condition khi bấm nhanh
-        if (activeTicketsAbortController) {
-            try { activeTicketsAbortController.abort(); } catch (e) {}
-        }
-        activeTicketsAbortController = new AbortController();
-        const signal = activeTicketsAbortController.signal;
         const requestedTab = currentTableTab;
         const requestedSystem = currentSystem;
         const requestedService = currentService;
 
         const search = document.getElementById('searchInput') ? document.getElementById('searchInput').value : '';
         const filterStatusElem = document.getElementById('filterStatus');
-        // Chỉ áp dụng filterStatus cho dịch vụ data (Mobile Internet), các nghiệp vụ khác luôn để 'all'
         const statusFilter = (currentService === 'data' && filterStatusElem) ? filterStatusElem.value : 'all';
+
+        // ⚡ INSTANT CACHE: Kiểm tra bộ nhớ RAM trước (0ms phản hồi)
+        const cacheKey = `${requestedTab}_${requestedSystem}_${requestedService}_${currentRegion || 'ALL'}_${statusFilter}_${search}`;
+        const cachedItem = window.ticketsModuleCache ? window.ticketsModuleCache[cacheKey] : null;
+        const now = Date.now();
+
+        if (cachedItem && (now - cachedItem.timestamp < 30000)) {
+            // Hiển thị ngay lập tức không cần đợi mạng!
+            applyTicketsData(cachedItem.data, force);
+            // Nếu dữ liệu còn tươi (< 6 giây) và không bị ép buộc làm mới thì dừng luôn
+            if (now - cachedItem.timestamp < 6000 && !force) {
+                return;
+            }
+        }
+
+        // Hủy bỏ request trước đó nếu đang chạy dở để tránh Race Condition khi bấm nhanh
+        if (activeTicketsAbortController) {
+            try { activeTicketsAbortController.abort(); } catch (e) {}
+        }
+        activeTicketsAbortController = new AbortController();
+        const signal = activeTicketsAbortController.signal;
 
         const clientAuthTok = getTtsNewAuthToken() || (getTtsAuthSession() ? getTtsAuthSession().token : '');
         const reqHeaders = clientAuthTok ? { 'Authorization': clientAuthTok } : {};
@@ -1755,128 +1912,14 @@ async function loadTickets(force = false, resetPage = false) {
             return;
         }
 
-        // 🎯 Đồng bộ Widget Phân vùng 3 Miền & Vai trò Admin trên Header
-        const authRoleTag = document.getElementById('authRoleTag');
-        const authUserName = document.getElementById('authUserName');
-        const authPill = document.getElementById('authPill');
-        const unauthBtn = document.getElementById('unauthBtn');
+        // Lưu vào bộ nhớ đệm client
+        if (!window.ticketsModuleCache) window.ticketsModuleCache = {};
+        window.ticketsModuleCache[cacheKey] = {
+            data: data,
+            timestamp: Date.now()
+        };
 
-        if (data.user_role === 'admin') {
-            isSystemAdmin = true;
-            if (authRoleTag) {
-                authRoleTag.innerText = 'ADMIN';
-                authRoleTag.className = 'auth-role-tag admin';
-            }
-        } else {
-            if (authRoleTag) {
-                authRoleTag.innerText = 'KTV';
-                authRoleTag.className = 'auth-role-tag ktv';
-            }
-        }
-
-        const regWrap = document.getElementById('regionSelectWrapper');
-        if (regWrap) regWrap.style.display = 'flex';
-        const regSelect = document.getElementById('regionSelect');
-        const isAdmin = (data.user_role === 'admin') || isSystemAdmin || checkIsUserAdmin();
-        const navAdminSec = document.getElementById('navAdminSection');
-        if (navAdminSec) {
-            navAdminSec.style.display = 'block';
-        }
-
-        if (regSelect) {
-            if (isAdmin) {
-                isSystemAdmin = true;
-                isRegionLocked = false;
-                urlRouteRegion = null;
-                try { localStorage.setItem('pakh_is_admin', 'true'); } catch(e) {}
-                applyRegionUI(false);
-                const activeVal = currentRegion || data.region || 'ALL';
-                if (regSelect.value !== activeVal) {
-                    regSelect.value = activeVal;
-                }
-            } else if (data.is_region_locked || (data.user_region && data.user_role === 'ktv')) {
-                isRegionLocked = true;
-                currentRegion = data.user_region || data.region || currentRegion;
-                applyRegionUI(true);
-                if (regSelect.value !== currentRegion) {
-                    regSelect.value = currentRegion;
-                }
-            } else if (urlRouteRegion) {
-                isRegionLocked = true;
-                currentRegion = urlRouteRegion;
-                applyRegionUI(true);
-            } else {
-                isRegionLocked = false;
-                applyRegionUI(false);
-                const activeVal = currentRegion || data.region || 'ALL';
-                if (regSelect.value !== activeVal) {
-                    regSelect.value = activeVal;
-                }
-            }
-        }
-
-        // Cập nhật tên hiển thị từ server nếu có
-        if (data.user_role === 'guest' || !data.user_name) {
-            if (!getTtsNewAuthToken()) {
-                window.currentApiUserName = '';
-                if (authPill) authPill.style.display = 'none';
-                if (unauthBtn) unauthBtn.style.display = 'inline-flex';
-            }
-        } else if (data.user_name && data.user_name !== 'KTV' && data.user_name !== 'Quản trị viên') {
-            window.currentApiUserName = data.user_name;
-            if (authUserName) {
-                authUserName.innerText = `Xin chào, ${data.user_name}`;
-            }
-            if (authPill) authPill.style.display = 'inline-flex';
-            if (unauthBtn) unauthBtn.style.display = 'none';
-        }
-
-        const tickets = data.tickets || [];
-
-        if (data.system_counts) {
-            const sc = data.system_counts;
-            const bOldData = document.getElementById('badgeOldData');
-            const bOldVoice = document.getElementById('badgeOldVoice');
-            const bOldApiData = document.getElementById('badgeOldApiData');
-            const bOldApiVoice = document.getElementById('badgeOldApiVoice');
-            const bNewData = document.getElementById('badgeNewData');
-            const bNewCall = document.getElementById('badgeNewCall');
-            const bNewSpamCall = document.getElementById('badgeNewSpamCall');
-            const bNewSms = document.getElementById('badgeNewSms');
-            const bNewRoaming = document.getElementById('badgeNewRoaming');
-            const bNewSim = document.getElementById('badgeNewSim');
-            const bNewOther = document.getElementById('badgeNewOther');
-            const bNewVoice = document.getElementById('badgeNewVoice');
-            const bTotalClosed = document.getElementById('badgeTotalClosed');
-            const bTotalAll = document.getElementById('badgeTotalAll');
-
-            updateNavBadge(bOldData, sc.tts_old_data);
-            updateNavBadge(bOldVoice, sc.tts_old_voice);
-            updateNavBadge(bOldApiData, sc.tts_old_api_data);
-            updateNavBadge(bOldApiVoice, sc.tts_old_api_voice);
-            updateNavBadge(bNewData, sc.tts_new_data);
-            updateNavBadge(bNewCall, sc.tts_new_call);
-            updateNavBadge(bNewSpamCall, sc.tts_new_spam_call);
-            updateNavBadge(bNewSms, sc.tts_new_sms);
-            updateNavBadge(bNewRoaming, sc.tts_new_roaming);
-            updateNavBadge(bNewSim, sc.tts_new_sim);
-            updateNavBadge(bNewOther, sc.tts_new_other);
-            updateNavBadge(bNewVoice, sc.tts_new_voice);
-            if (bTotalClosed) bTotalClosed.innerText = sc.total_closed || 0;
-            if (bTotalAll) bTotalAll.innerText = sc.total_all || 0;
-
-            const statTotal = document.getElementById('statTotalTickets');
-            const statClosed = document.getElementById('statClosedTickets');
-            if (statTotal) statTotal.innerText = (sc.today_total !== undefined ? sc.today_total : (sc.total_all || 0)).toLocaleString();
-            if (statClosed) statClosed.innerText = (sc.today_closed !== undefined ? sc.today_closed : (sc.total_closed || 0)).toLocaleString();
-        }
-
-        if (document.getElementById('badgeActiveCount')) document.getElementById('badgeActiveCount').innerText = data.active_count || 0;
-        if (document.getElementById('badgeClosedCount')) document.getElementById('badgeClosedCount').innerText = data.closed_count || 0;
-        if (document.getElementById('badgeAllCount')) document.getElementById('badgeAllCount').innerText = data.total_count || 0;
-
-        cachedTickets = tickets;
-        renderTicketsTable(force);
+        applyTicketsData(data, force);
 
     } catch (e) {
         if (e.name === 'AbortError') {
@@ -4198,6 +4241,7 @@ async function closeTtsNewTicketApi(ticketCode, phone, incidentTime, btnElem, re
         }
         if (data.success) {
             alert(data.message || `Đã xử lý thành công phiếu ${ticketCode}!`);
+            clearTicketsModuleCache();
             lastTicketsSignature = "";
             await loadTickets(true);
             await fetchStatus();
@@ -4288,6 +4332,7 @@ async function handleMoveToStep24(ticketCode, phone, ticketId, flowId, btnElem) 
         }
         if (data.success) {
             alert(data.message || `Đã chuyển thành công phiếu ${ticketCode} sang bước 2.4!`);
+            clearTicketsModuleCache();
             lastTicketsSignature = "";
             await loadTickets(true);
             await fetchStatus();
@@ -4729,6 +4774,7 @@ async function triggerManualScan() {
     } catch (e) {
         console.error("Lỗi kích hoạt quét ngay:", e);
     } finally {
+        clearTicketsModuleCache();
         await fetchStatus();
         await loadTickets(true);
         setTimeout(() => {

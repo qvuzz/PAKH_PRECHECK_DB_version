@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -179,6 +180,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# GZip Compression Middleware (Nén payload JSON 900KB xuống ~60KB giúp tải cực nhanh)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Mount Static Directory
 static_dir = BASE_DIR / "static"

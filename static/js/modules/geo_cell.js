@@ -123,7 +123,7 @@ async function triggerAsyncCellLookup(ticketKey, phone, currentRadio) {
                     const quickBtn = wardVal ? ` <button type="button" onclick="quickApplyWardFromCell('${escapeHtml(phone)}', '${escapeHtml(incTime)}', '${escapeHtml(ticketKey)}', '${escapeHtml(wardVal)}', '${escapeHtml(data.province || '')}', this, event)" style="background:transparent; border:none; cursor:pointer; font-size:10px; padding:0; line-height:1; vertical-align:middle; color:#1d4ed8;" title="Cập nhật nhanh Phường/Xã (${escapeHtml(wardVal)}) vào Tóm tắt Nội dung"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle;"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg></button>` : '';
                     compactLocEl.innerHTML = ` (${escapeHtml(loc)})${quickBtn}`;
                 }
-                updateAllWardAudits();
+                updateSingleWardAudit(ticketKey);
             }
         }
     } catch (e) {
@@ -261,7 +261,7 @@ async function triggerAsyncTicketBoundaryLookup(ticketId, ticketKey) {
             const data = await res.json();
             if (data && data.success) {
                 ttsNewTicketBoundaryCache[ticketId] = data;
-                updateAllWardAudits();
+                updateSingleWardAudit(ticketKey);
             }
         }
     } catch (e) {
@@ -538,7 +538,47 @@ function evaluateTicketWardStatus(t, ticketKey, rawCemIncident) {
     }
 }
 
+function updateSingleWardAudit(ticketKey) {
+    if (!ticketKey || typeof cachedTickets === 'undefined' || !Array.isArray(cachedTickets)) return;
+    const box = document.getElementById(`ward-status-box-${ticketKey}`);
+    const compactBadge = document.getElementById(`compact-ward-badge-${ticketKey}`);
+    if (!box && !compactBadge) return;
+
+    const t = cachedTickets.find((item, idx) => {
+        const key = (item.phone + '_' + (item.incident_time || item.ticket_code || idx)).replace(/[^a-zA-Z0-9]/g, '_');
+        return key === ticketKey;
+    });
+    if (!t || t.source !== 'tts_new') return;
+
+    let rawCemIncident = (t.cem_data_incident || '').trim();
+    if (!rawCemIncident && t.cem_data && t.cem_data !== '--') {
+        const rawCem = t.cem_data.trim();
+        if (rawCem.includes('[TIẾP NHẬN]') && rawCem.includes('[GẦN NHẤT]')) {
+            const parts = rawCem.split('[GẦN NHẤT]');
+            rawCemIncident = parts[0].replace('[TIẾP NHẬN]', '').trim();
+        } else {
+            rawCemIncident = 'Chưa quét theo ngày tiếp nhận (Bấm Tiền kiểm lại)';
+        }
+    }
+
+    const audit = evaluateTicketWardStatus(t, ticketKey, rawCemIncident);
+    if (box) {
+        box.outerHTML = audit.badgeHtml;
+    }
+    if (compactBadge) {
+        compactBadge.innerHTML = audit.compactBadge;
+    }
+}
+
+let updateAllWardAuditsDebounceTimer = null;
 function updateAllWardAudits() {
+    if (updateAllWardAuditsDebounceTimer) {
+        clearTimeout(updateAllWardAuditsDebounceTimer);
+    }
+    updateAllWardAuditsDebounceTimer = setTimeout(updateAllWardAuditsActual, 150);
+}
+
+function updateAllWardAuditsActual() {
     if (typeof cachedTickets === 'undefined' || !Array.isArray(cachedTickets) || cachedTickets.length === 0) return;
     cachedTickets.forEach((t, idx) => {
         if (t.source !== 'tts_new') return;
