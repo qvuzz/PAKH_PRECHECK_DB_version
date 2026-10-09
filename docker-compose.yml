@@ -33,11 +33,17 @@ services:
       - ./ttsnew_token_cache.json:/app/ttsnew_token_cache.json
       - ./lan_sessions.json:/app/lan_sessions.json
       - ./ccos_cookie_cache.json:/app/ccos_cookie_cache.json
-      - ./sapccheck/sapc_cookies.json:/app/sapccheck/sapc_cookies.json
-      # Thư viện danh mục gói cước & công nghệ sóng mạng
+      # Toàn bộ module kiểm tra SAPC / HSS / Profile
+      - ./sapccheck:/app/sapccheck
+      # Cấu hình Phân vùng KTV SOC & Whitelist tài khoản WebApp
+      - ./user_regions.json:/app/user_regions.json
+      # Thư viện danh mục gói cước, nguyên nhân sự cố & kịch bản đóng phiếu
       - ./rattype.json:/app/rattype.json
       - ./serviceid.json:/app/serviceid.json
       - ./diagnostic_scenarios.json:/app/diagnostic_scenarios.json
+      - ./incident_causes_ttsnew.json:/app/incident_causes_ttsnew.json
+      - ./incident_causes_catalog.json:/app/incident_causes_catalog.json
+      - ./DANH_MUC_KICH_BAN_DONG_PHIEU_MOBILE_INTERNET.xlsx:/app/DANH_MUC_KICH_BAN_DONG_PHIEU_MOBILE_INTERNET.xlsx
       # Giao diện Web & Code cập nhật trực tiếp (Live update không cần rebuild image)
       - ./templates:/app/templates
       - ./static:/app/static
@@ -46,13 +52,19 @@ services:
       - ./db_manager.py:/app/db_manager.py
       - ./dashboard.py:/app/dashboard.py
       - ./report_bot.py:/app/report_bot.py
+      - ./scenarios_engine.py:/app/scenarios_engine.py
       - ./btools_manager.py:/app/btools_manager.py
       - ./ttsnew_api.py:/app/ttsnew_api.py
+      - ./tts_old_api.py:/app/tts_old_api.py
       - ./crawler_btools.py:/app/crawler_btools.py
       - ./region_detector.py:/app/region_detector.py
       - ./spam_call_analyzer.py:/app/spam_call_analyzer.py
       - ./ai_interpreter.py:/app/ai_interpreter.py
       - ./cem_client.py:/app/cem_client.py
+      - ./auth_extractor.py:/app/auth_extractor.py
+      - ./data_processor.py:/app/data_processor.py
+      - ./ccos_client.py:/app/ccos_client.py
+      - ./services_checker.py:/app/services_checker.py
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:1234/api/status"]
       interval: 30s

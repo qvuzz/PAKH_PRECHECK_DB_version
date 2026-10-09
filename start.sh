@@ -31,6 +31,9 @@ fi
 [ -f lan_sessions.json ] || echo "{}" > lan_sessions.json
 [ -f ccos_cookie_cache.json ] || echo "{}" > ccos_cookie_cache.json
 [ -f sapccheck/sapc_cookies.json ] || echo "[]" > sapccheck/sapc_cookies.json
+[ -f user_regions.json ] || echo '{"users":[]}' > user_regions.json
+[ -f incident_causes_ttsnew.json ] || echo "{}" > incident_causes_ttsnew.json
+[ -f incident_causes_catalog.json ] || echo "{}" > incident_causes_catalog.json
 
 # 2. Tu dong chuan hoa phan vung theo Quy trinh OneOSS (SOC1=MB, SOC2=MN, SOC3=MT) va phuc hoi phieu MN bi dong nham
 if [ -f tickets.db ] && command -v sqlite3 >/dev/null 2>&1; then
