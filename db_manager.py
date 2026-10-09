@@ -724,28 +724,50 @@ def save_tickets_bulk(ticket_list):
     for t in ticket_list:
         save_or_update_ticket(t)
 
-DATA_PKG_SQL = "(package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước Mobile Internet%' AND package_title NOT LIKE '%Mobile Internet (M0/Gói Data)%' AND package_title NOT LIKE '%CVQT - DV Mobile Internet (Data)%')"
-
-CALL_PKG_SQL = """(
-    package_title LIKE '%Gọi đi trong nước%' 
-    OR package_title LIKE '%Nhận cuộc gọi đến trong nước%' 
-    OR package_title LIKE '%Nhận cuộc gọi dến trong nước%'
-    OR package_title LIKE '%Cuộc gọi đi và đến%'
-    OR package_title LIKE '%Bị khóa Spam cuộc gọi%'
-    OR package_title LIKE '%Giữ cuộc gọi%'
-    OR package_title LIKE '%Gọi Quốc tế%'
-    OR package_title LIKE '%VoWifi%'
+ROAMING_PKG_SQL = """(
+    package_title LIKE '%CVQT%' 
+    OR package_title LIKE '%Chuyển vùng quốc tế%' 
+    OR package_title LIKE '%Roaming%'
 )"""
 
-SMS_PKG_SQL = """(
-    package_title LIKE '%nhận tin nhắn%' 
-    OR package_title LIKE '%khóa spam tin nhắn%' 
-    OR package_title LIKE '%Tin nhắn (SMS)%' 
-    OR package_title LIKE '%Tin nhắn (sms)%' 
-    OR package_title LIKE '%gửi tin nhắn đi và đến%' 
-    OR package_title LIKE '%gửi tin nhắn đi%' 
-    OR package_title LIKE '%Tin nhắn rác%'
-    OR (package_title LIKE '%Tin nhắn%' AND package_title NOT LIKE '%CVQT%')
+SIM_PKG_SQL = """(
+    package_title LIKE '%SIM_%' 
+    OR package_title LIKE '%MultiSIM%' 
+    OR package_title LIKE '%eSIM%' 
+    OR package_title LIKE 'SIM %' 
+    OR package_title LIKE '%SIM khai báo%'
+)"""
+
+DATA_PKG_SQL = f"(package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước Mobile Internet%' AND package_title NOT LIKE '%Mobile Internet (M0/Gói Data)%' AND package_title NOT LIKE '%CVQT - DV Mobile Internet (Data)%' AND NOT {ROAMING_PKG_SQL})"
+
+CALL_PKG_SQL = f"""(
+    (
+        package_title LIKE '%Gọi đi trong nước%' 
+        OR package_title LIKE '%Nhận cuộc gọi đến trong nước%' 
+        OR package_title LIKE '%Nhận cuộc gọi dến trong nước%'
+        OR package_title LIKE '%Cuộc gọi đi và đến%'
+        OR package_title LIKE '%Bị khóa Spam cuộc gọi%'
+        OR package_title LIKE '%Giữ cuộc gọi%'
+        OR package_title LIKE '%Gọi Quốc tế%'
+        OR package_title LIKE '%VoWifi%'
+    )
+    AND NOT {ROAMING_PKG_SQL}
+    AND NOT {SIM_PKG_SQL}
+)"""
+
+SMS_PKG_SQL = f"""(
+    (
+        package_title LIKE '%nhận tin nhắn%' 
+        OR package_title LIKE '%khóa spam tin nhắn%' 
+        OR package_title LIKE '%Tin nhắn (SMS)%' 
+        OR package_title LIKE '%Tin nhắn (sms)%' 
+        OR package_title LIKE '%gửi tin nhắn đi và đến%' 
+        OR package_title LIKE '%gửi tin nhắn đi%' 
+        OR package_title LIKE '%Tin nhắn rác%'
+        OR (package_title LIKE '%Tin nhắn%' AND package_title NOT LIKE '%CVQT%')
+    )
+    AND NOT {ROAMING_PKG_SQL}
+    AND NOT {SIM_PKG_SQL}
 )"""
 
 SPAM_CALL_PKG_SQL = """(
@@ -760,7 +782,7 @@ SPAM_CALL_PKG_SQL = """(
     )
 )"""
 
-OTHER_PKG_SQL = f"(NOT {DATA_PKG_SQL} AND NOT {CALL_PKG_SQL} AND NOT {SMS_PKG_SQL})"
+OTHER_PKG_SQL = f"(NOT {DATA_PKG_SQL} AND NOT {CALL_PKG_SQL} AND NOT {SMS_PKG_SQL} AND NOT {ROAMING_PKG_SQL} AND NOT {SIM_PKG_SQL})"
 VOICE_PKG_SQL = f"(package_title IS NULL OR NOT {DATA_PKG_SQL})"
 
 def is_mobile_internet_ticket(package_title: str) -> bool:
@@ -804,6 +826,10 @@ def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", s
             service_sql = f" AND {SMS_PKG_SQL}"
         elif service_type in ("other", "khac"):
             service_sql = f" AND {OTHER_PKG_SQL}"
+        elif service_type in ("roaming", "cvqt", "chuyen_vung_quoc_te"):
+            service_sql = f" AND {ROAMING_PKG_SQL}"
+        elif service_type in ("sim", "sim_multisim"):
+            service_sql = f" AND {SIM_PKG_SQL}"
         elif service_type in ("spam_call", "outbound_block", "chan_goi_ngoai_mang"):
             service_sql = f" AND {SPAM_CALL_PKG_SQL}"
         elif service_type == "voice_sms":
@@ -883,6 +909,8 @@ def get_system_counts(region=None):
         "tts_new_call": 0,
         "tts_new_sms": 0,
         "tts_new_other": 0,
+        "tts_new_roaming": 0,
+        "tts_new_sim": 0,
         "tts_new_spam_call": 0,
         "tts_new_voice": 0,
         "tts_old_api_data": 0,
@@ -951,6 +979,24 @@ def get_system_counts(region=None):
               {reg_cond}
         """, reg_params).fetchone()
         counts["tts_new_other"] = c_other[0] if c_other else 0
+
+        c_roaming = conn.execute(f"""
+            SELECT count(*) FROM tickets 
+            WHERE source = 'tts_new' 
+              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+              AND {ROAMING_PKG_SQL}
+              {reg_cond}
+        """, reg_params).fetchone()
+        counts["tts_new_roaming"] = c_roaming[0] if c_roaming else 0
+
+        c_sim = conn.execute(f"""
+            SELECT count(*) FROM tickets 
+            WHERE source = 'tts_new' 
+              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+              AND {SIM_PKG_SQL}
+              {reg_cond}
+        """, reg_params).fetchone()
+        counts["tts_new_sim"] = c_sim[0] if c_sim else 0
 
         c_spam_call = conn.execute(f"""
             SELECT count(*) FROM tickets 
@@ -1074,6 +1120,10 @@ def get_ticket_counts(source=None, service_type=None, search=None, region=None):
             query += f" AND {SMS_PKG_SQL}"
         elif service_type in ("other", "khac"):
             query += f" AND {OTHER_PKG_SQL}"
+        elif service_type in ("roaming", "cvqt", "chuyen_vung_quoc_te"):
+            query += f" AND {ROAMING_PKG_SQL}"
+        elif service_type in ("sim", "sim_multisim"):
+            query += f" AND {SIM_PKG_SQL}"
         elif service_type in ("spam_call", "outbound_block", "chan_goi_ngoai_mang"):
             query += f" AND {SPAM_CALL_PKG_SQL}"
         elif service_type == "voice_sms":
@@ -1119,7 +1169,7 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
         query += " AND region = ?"
         params.append(region)
 
-    # Lọc theo loại nghiệp vụ (data / call / sms / other / spam_call / voice_sms)
+    # Lọc theo loại nghiệp vụ (data / call / sms / other / spam_call / voice_sms / roaming / sim)
     if service_type == "data":
         query += f" AND {DATA_PKG_SQL}"
     elif service_type in ("call", "voice", "cuoc_goi"):
@@ -1128,6 +1178,10 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
         query += f" AND {SMS_PKG_SQL}"
     elif service_type in ("other", "khac"):
         query += f" AND {OTHER_PKG_SQL}"
+    elif service_type in ("roaming", "cvqt", "chuyen_vung_quoc_te"):
+        query += f" AND {ROAMING_PKG_SQL}"
+    elif service_type in ("sim", "sim_multisim"):
+        query += f" AND {SIM_PKG_SQL}"
     elif service_type in ("spam_call", "outbound_block", "chan_goi_ngoai_mang"):
         query += f" AND {SPAM_CALL_PKG_SQL}"
     elif service_type == "voice_sms":
@@ -1314,12 +1368,13 @@ def normalize_staff_name(name: str) -> str:
         return "Hoàng Thị Lan Phương"
     return n
 
-def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_filter=None):
+def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_filter=None, region=None):
     """
     Thống kê tổng hợp số liệu phân tích chuyên sâu cho các phiếu đã đóng:
     - time_filter: 'all', 'today', '7days', '30days'
     - source_filter: 'all', 'tts_old', 'tts_new'
     - service_filter: 'all', 'data' (Mobile Internet), 'voice_sms' (Thoại/SMS/Gói/PA Khác), 'call', 'sms', 'other'
+    - region: 'ALL', 'MB', 'MN', 'MT'
     """
     init_db()
     conn = get_db_connection()
@@ -1327,6 +1382,11 @@ def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_
         where = ["(ticket_status = 'Đã đóng' OR ticket_status = 'Da dong')"]
         params = []
         today_str = datetime.now().strftime("%Y-%m-%d")
+
+        # 🎯 Phân vùng miền (MB / MN / MT)
+        if region and str(region).strip().upper() != "ALL":
+            where.append("region = ?")
+            params.append(str(region).strip().upper())
 
         if time_filter == "today":
             where.append("(SUBSTR(updated_at, 1, 10) = ? OR updated_at LIKE ?)")
@@ -1354,6 +1414,10 @@ def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_
                 where.append(SMS_PKG_SQL)
             elif service_filter in ('other', 'goi_cuoc'):
                 where.append(OTHER_PKG_SQL)
+            elif service_filter in ('roaming', 'cvqt', 'chuyen_vung_quoc_te'):
+                where.append(ROAMING_PKG_SQL)
+            elif service_filter in ('sim', 'sim_multisim'):
+                where.append(SIM_PKG_SQL)
             elif service_filter == 'voice_sms':
                 where.append(VOICE_PKG_SQL)
 
@@ -1375,6 +1439,8 @@ def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_
                 SUM(CASE WHEN {DATA_PKG_SQL} THEN 1 ELSE 0 END) as data_cnt,
                 SUM(CASE WHEN {CALL_PKG_SQL} THEN 1 ELSE 0 END) as call_cnt,
                 SUM(CASE WHEN {SMS_PKG_SQL} THEN 1 ELSE 0 END) as sms_cnt,
+                SUM(CASE WHEN {ROAMING_PKG_SQL} THEN 1 ELSE 0 END) as roaming_cnt,
+                SUM(CASE WHEN {SIM_PKG_SQL} THEN 1 ELSE 0 END) as sim_cnt,
                 SUM(CASE WHEN {OTHER_PKG_SQL} THEN 1 ELSE 0 END) as other_cnt,
                 SUM(CASE WHEN {VOICE_PKG_SQL} THEN 1 ELSE 0 END) as voice_cnt
             FROM tickets WHERE {where_sql}
@@ -1397,22 +1463,30 @@ def get_closed_tickets_analytics(time_filter="all", source_filter=None, service_
         auto_pct = round(auto_cnt * 100.0 / tool_closed, 1) if tool_closed else 0
         synced_pct = round(synced_cnt * 100.0 / total, 1) if total else 0
 
-        # Hôm nay đóng bao nhiêu (Tách phiếu KTV/Tool thực đóng vs phiếu đồng bộ)
+        # Hôm nay đóng bao nhiêu (Tách phiếu KTV/Tool thực đóng vs phiếu đồng bộ, lọc theo vùng miền)
+        today_reg_sql = ""
+        today_params = [today_str]
+        if region and str(region).strip().upper() != "ALL":
+            today_reg_sql = " AND region = ?"
+            today_params.append(str(region).strip().upper())
+
         today_manual_q = f"""
             SELECT COUNT(*) FROM tickets 
             WHERE (ticket_status = 'Đã đóng' OR ticket_status = 'Da dong') 
               AND closed_by IS NOT NULL AND closed_by != ''
               AND SUBSTR(updated_at, 1, 10) = ?
+              {today_reg_sql}
         """
-        today_m_row = conn.execute(today_manual_q, [today_str]).fetchone()
+        today_m_row = conn.execute(today_manual_q, today_params).fetchone()
         today_manual_cnt = today_m_row[0] if today_m_row else 0
 
         today_total_q = f"""
             SELECT COUNT(*) FROM tickets 
             WHERE (ticket_status = 'Đã đóng' OR ticket_status = 'Da dong') 
               AND SUBSTR(updated_at, 1, 10) = ?
+              {today_reg_sql}
         """
-        today_t_row = conn.execute(today_total_q, [today_str]).fetchone()
+        today_t_row = conn.execute(today_total_q, today_params).fetchone()
         today_total_cnt = today_t_row[0] if today_t_row else 0
         today_synced_cnt = max(0, today_total_cnt - today_manual_cnt)
 

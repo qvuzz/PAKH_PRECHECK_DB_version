@@ -2,7 +2,7 @@
 # Quản lý xác thực tài khoản KTV, phân quyền LAN/Local và OTP
 
 import time
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 from services.state import state
 from services.session_manager import (
     ACTIVE_LAN_SESSIONS, 
@@ -111,6 +111,22 @@ async def login_tts_step1(request: Request):
         token = result.get("token", "")
         ttsnew_token = result.get("ttsnew_token", "")
         user_info = result.get("user", {})
+
+        # KIỂM SOÁT PHÂN QUYỀN TRUY CẬP NGHIÊM NGẶT (WHITELIST)
+        if system in ("tts_new", "tts_old", "tts"):
+            from region_detector import is_user_permitted
+            permitted, matched_u = is_user_permitted(user_info or {"username": username})
+            if not permitted:
+                u_disp = (user_info.get("displayName") or user_info.get("name") or user_info.get("HoTen") or username)
+                print(f"[AUTH API] 🚫 Từ chối truy cập cho [{u_disp}]: Tài khoản chưa có trong danh sách phân vùng!", flush=True)
+                return {
+                    "success": False,
+                    "message": f"Tài khoản [{u_disp}] chưa được cấp quyền truy cập WebApp. Vui lòng liên hệ Quản trị viên hệ thống để khai báo thông tin và phân vùng TT SOC."
+                }
+            if matched_u and isinstance(user_info, dict):
+                user_info["soc"] = matched_u.get("soc", "")
+                user_info["region"] = matched_u.get("region", "")
+
         if client_ip not in ACTIVE_LAN_SESSIONS:
             ACTIVE_LAN_SESSIONS[client_ip] = {}
 
@@ -205,6 +221,22 @@ async def login_tts_step2_otp(request: Request):
         ttsnew_token = result.get("ttsnew_token", "")
         user_info = result.get("user", {})
         system = result.get("system", "tts_new")
+
+        # KIỂM SOÁT PHÂN QUYỀN TRUY CẬP NGHIÊM NGẶT (WHITELIST)
+        if system in ("tts_new", "tts_old", "tts"):
+            from region_detector import is_user_permitted
+            permitted, matched_u = is_user_permitted(user_info)
+            if not permitted:
+                u_disp = (user_info.get("displayName") or user_info.get("name") or user_info.get("HoTen") or "KTV")
+                print(f"[AUTH API] 🚫 Từ chối truy cập OTP cho [{u_disp}]: Tài khoản chưa có trong danh sách phân vùng!", flush=True)
+                return {
+                    "success": False,
+                    "message": f"Tài khoản [{u_disp}] chưa được cấp quyền truy cập WebApp. Vui lòng liên hệ Quản trị viên hệ thống để khai báo thông tin và phân vùng TT SOC."
+                }
+            if matched_u and isinstance(user_info, dict):
+                user_info["soc"] = matched_u.get("soc", "")
+                user_info["region"] = matched_u.get("region", "")
+
         if client_ip not in ACTIVE_LAN_SESSIONS:
             ACTIVE_LAN_SESSIONS[client_ip] = {}
         if system == "tts_new":
@@ -213,7 +245,9 @@ async def login_tts_step2_otp(request: Request):
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_user"] = user_info
             ACTIVE_LAN_SESSIONS[client_ip]["ttsnew_timestamp"] = time.time()
             if tok_to_save:
-                save_cached_token(tok_to_save)
+                from region_detector import detect_user_region
+                u_reg = detect_user_region(user_info)
+                save_cached_token(tok_to_save, region=u_reg if u_reg in ("MN", "MT", "MB") else "MN", user_info=user_info)
         elif system == "btools":
             from btools_manager import save_btools_cookie
             save_btools_cookie(token, verify=False)
@@ -333,3 +367,58 @@ async def save_ttsnew_token_api(request: Request):
     except Exception:
         pass
     return {"success": True, "message": "Xác thực và lưu token TTS Mới thành công!"}
+
+
+def _check_is_admin(request: Request, body_token: str = "") -> bool:
+    """Kiểm tra quyền Quản trị viên hệ thống (Superadmin hoặc Localhost)."""
+    client_ip = _get_client_ip(request)
+    if client_ip in ("127.0.0.1", "localhost", "::1"):
+        return True
+    auth_hdr = request.headers.get("Authorization") or body_token or ""
+    from services.session_manager import decode_jwt
+    from region_detector import is_superadmin
+    uinfo = decode_jwt(auth_hdr) if auth_hdr else {}
+    if not uinfo and client_ip in ACTIVE_LAN_SESSIONS:
+        sess = ACTIVE_LAN_SESSIONS.get(client_ip) or {}
+        uinfo = sess.get("ttsnew_user") or sess.get("user") or {}
+    return is_superadmin(uinfo)
+
+
+@router.get("/admin/users")
+async def get_admin_users_api(request: Request):
+    from region_detector import get_user_regions_config
+    cfg = get_user_regions_config()
+    is_admin = _check_is_admin(request)
+    return {
+        "success": True,
+        "is_admin": is_admin,
+        "users": cfg.get("users", []),
+        "soc_mapping": cfg.get("soc_mapping", {"SOC1": "MB", "SOC2": "MN", "SOC3": "MT"})
+    }
+
+
+@router.post("/admin/users")
+async def save_admin_user_api(request: Request):
+    body = await request.json()
+    tok = body.get("token") or ""
+    if not _check_is_admin(request, body_token=tok):
+        raise HTTPException(
+            status_code=403, 
+            detail="Tài khoản hiện tại không có quyền Quản trị viên (Admin). Vui lòng đăng nhập tài khoản Admin hoặc thao tác trên máy chủ để khai báo nhân viên mới."
+        )
+    from region_detector import save_user_to_config
+    ok, msg = save_user_to_config(body)
+    return {"success": ok, "message": msg}
+
+
+@router.delete("/admin/users/{identifier}")
+async def delete_admin_user_api(identifier: str, request: Request):
+    if not _check_is_admin(request):
+        raise HTTPException(
+            status_code=403, 
+            detail="Tài khoản hiện tại không có quyền Quản trị viên (Admin) để xóa nhân viên."
+        )
+    from region_detector import delete_user_from_config
+    ok, msg = delete_user_from_config(identifier)
+    return {"success": ok, "message": msg}
+

@@ -26,6 +26,10 @@ function selectFlowAuditModule(updateUrl = true) {
     const tableDataView = document.getElementById('tableDataView');
     if (tableDataView) tableDataView.style.display = 'none';
 
+    const userMgmtContainer = document.getElementById('userManagementContainer');
+    if (userMgmtContainer) userMgmtContainer.style.display = 'none';
+    if (typeof isUserManagementView !== 'undefined') isUserManagementView = false;
+
     // 3. Hiện container module kiểm tra luồng
     const container = document.getElementById('flowAuditContainer');
     if (container) {

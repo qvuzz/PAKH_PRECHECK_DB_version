@@ -647,60 +647,22 @@
                 </div>
             </div>
 
-            <!-- NÚT CHUYỂN ĐỔI CHẾ ĐỘ BAN NGÀY / BAN ĐÊM (THEME TOGGLE) -->
-            <button type="button" id="btnThemeToggle" class="btn-theme-toggle" onclick="toggleAppTheme()" title="Chuyển sang Giao diện Ban đêm (Dark mode)">
-                <span id="themeToggleIcon" style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px;"></span>
-                <span id="themeToggleLabel" style="font-size:11.5px; font-weight:700;">Tối</span>
+            <!-- NÚT LÀM MỚI QUÉT TIỀN KIỂM -->
+            <button type="button" id="btnRefreshScan" class="btn-icon-refresh" onclick="triggerManualScan()"
+                title="Làm mới & quét tiền kiểm ngay"
+                style="width:30px; height:30px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; background:#ffffff; border:1px solid #cbd5e1; cursor:pointer; color:#005baa; transition:all 0.15s ease;">
+                <svg id="iconRefreshScan" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                </svg>
             </button>
-        </div>
-    </header>
 
-    <!-- THANH CÔNG CỤ TRÊN CÙNG: CHỈ SỐ RÚT GỌN + BỘ ĐIỀU KHIỂN -->
-    <div class="top-toolbar">
-        <div class="stats-pills">
-            <div class="stat-pill" title="Tổng số phiếu tiếp nhận / cập nhật trong ngày hôm nay">
-                <span>Hôm nay:</span>
-                <strong id="statTotalTickets">0</strong>
-                <span style="color:#64748b; font-size:10.5px;">phiếu</span>
-            </div>
-            <div class="stat-pill" title="Số phiếu đã đóng trong ngày hôm nay">
-                <span>Đã đóng hôm nay:</span>
-                <strong id="statClosedTickets" style="color:#16a34a;">0</strong>
-            </div>
-
-            <!-- WIDGET CHỌN MÔ HÌNH TÓM TẮT NỘI DUNG (QWEN 2.5 / REGEX) -->
-            <div id="aiSummaryWidget" style="display:inline-flex; align-items:center; margin-left:4px;">
-                <div style="display:flex; align-items:center; gap:5px; background:#f8fafc; padding:2px 8px; border-radius:6px; border:1px solid #cbd5e1; height:28px; box-sizing:border-box;">
-                    <span style="font-size:11px; font-weight:700; color:#475569; letter-spacing:0.2px;">Mô hình:</span>
-                    <select id="selectAiSummaryModel" class="control-input" onchange="handleAiSummaryModelChange(this.value)"
-                        title="Chọn mô hình tóm tắt nội dung phản ánh khách hàng"
-                        style="height:22px; font-size:11.5px; font-weight:700; border-radius:4px; padding:0 4px; border:1px solid #94a3b8; background:#ffffff; color:#0f172a; cursor:pointer;">
-                        <option value="regex" selected>Regex (Quy tắc mẫu)</option>
-                        <option value="qwen">Qwen 2.5 (Offline AI)</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-
-        <div class="top-controls-container">
-            <!-- CỤM ĐIỀU KHIỂN TẬP TRUNG (UNIFIED CONTROLS) -->
-            <div id="ctrlUnified" class="ctrl-group-inline"
-                style="display:flex; flex-wrap:wrap; align-items:center; gap:8px;">
-                <!-- Nút icon Refresh làm mới & quét tiền kiểm ngay lập tức -->
-                <button type="button" id="btnRefreshScan" class="btn-icon-refresh" onclick="triggerManualScan()"
-                    title="Làm mới & kích hoạt quét tiền kiểm ngay">
-                    <svg id="iconRefreshScan" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
-                    </svg>
-                </button>
-            </div>
-
-            <!-- NÚT LIVE LOG (TỐI GIẢN CHỈ CÒN CHẤM TRÒN + LIVE LOG) -->
-            <div class="live-log-container" style="margin-left: 6px;">
+            <!-- NÚT LIVE LOG (CHẤM TRÒN + LIVE LOG + DROPDOWN) -->
+            <div class="live-log-container" style="position:relative;">
                 <div class="svc-status-pill live-log-trigger" id="pillLiveLog" onclick="toggleLiveLogDropdown(event)"
-                    title="Nhật ký hệ thống (Live Log) - Bấm để xem">
+                    title="Nhật ký hệ thống (Live Log) - Bấm để xem"
+                    style="height:30px; padding:0 10px; display:inline-flex; align-items:center; gap:6px; cursor:pointer;">
                     <span class="svc-status-dot active" id="liveLogDot"></span>
-                    <span class="svc-name">Live Log</span>
+                    <span class="svc-name" style="font-size:11.5px; font-weight:700;">Live Log</span>
                     <span style="font-size:8px; opacity:0.6; margin-left:1px;">▼</span>
                 </div>
 
@@ -708,23 +670,26 @@
                     <div class="live-log-header">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span style="font-size:12.5px; font-weight:700;">Nhật Ký Hệ Thống (Live Log)</span>
-                            <span id="liveLogErrorBadge" class="log-err-badge" style="display:none;">LỖI TIẾN
-                                TRÌNH</span>
+                            <span id="liveLogErrorBadge" class="log-err-badge" style="display:none;">LỖI TIẾN TRÌNH</span>
                         </div>
                         <div style="display:flex; align-items:center; gap:10px;">
-                            <span id="currentStepText"
-                                style="font-size:11.5px; color:#38bdf8; font-weight:600;">--</span>
-                            <button class="btn-clear-log" onclick="clearLocalLogs()"
-                                title="Xóa toàn bộ nhật ký và tắt cảnh báo lỗi">Xóa nhật ký (Tắt cảnh báo)</button>
-                            <button class="btn-close-log" onclick="toggleLiveLogDropdown(event, true)"
-                                title="Đóng">✕</button>
+                            <span id="currentStepText" style="font-size:11.5px; color:#38bdf8; font-weight:600;">--</span>
+                            <button class="btn-clear-log" onclick="clearLocalLogs()" title="Xóa toàn bộ nhật ký và tắt cảnh báo lỗi">Xóa nhật ký (Tắt cảnh báo)</button>
+                            <button class="btn-close-log" onclick="toggleLiveLogDropdown(event, true)" title="Đóng">✕</button>
                         </div>
                     </div>
                     <div id="logTerminal" class="log-terminal"></div>
                 </div>
             </div>
+
+            <!-- NÚT CHUYỂN ĐỔI CHẾ ĐỘ BAN NGÀY / BAN ĐÊM (CHỈ GIỮ ICON, KHÔNG CHỮ) -->
+            <button type="button" id="btnThemeToggle" class="btn-theme-toggle" onclick="toggleAppTheme()"
+                style="width:30px; height:30px; padding:0; border-radius:6px; display:inline-flex; align-items:center; justify-content:center;"
+                title="Chuyển chế độ Sáng / Tối">
+                <span id="themeToggleIcon" style="display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px;"></span>
+            </button>
         </div>
-    </div>
+    </header>
 
     <div class="main-layout">
         <!-- CỘT BÊN TRÁI: MENU NGHIỆP VỤ LỰA CHỌN -->
@@ -809,7 +774,38 @@
                     </div>
                     <span class="nav-badge" id="badgeNewSms">0</span>
                 </button>
-                <button class="nav-item" id="nav-tts_new-other" onclick="selectModule('tts_new', 'other')" title="TTS Mới: Gói cước / PA Khác (Sóng / SIM / CVQT / VAS)">
+                <button class="nav-item" id="nav-tts_new-roaming" onclick="selectModule('tts_new', 'roaming')" title="TTS Mới: Chuyển vùng quốc tế (CVQT / Roaming / Quốc tế)">
+                    <div class="nav-item-left">
+                        <div class="nav-item-icon">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="2" y1="12" x2="22" y2="12"></line>
+                                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                            </svg>
+                        </div>
+                        <div class="nav-item-text">
+                            <span class="nav-item-title">Chuyển vùng quốc tế</span>
+                            <span class="nav-item-sub">CVQT / Roaming / Quốc tế</span>
+                        </div>
+                    </div>
+                    <span class="nav-badge" id="badgeNewRoaming">0</span>
+                </button>
+                <button class="nav-item" id="nav-tts_new-sim" onclick="selectModule('tts_new', 'sim')" title="TTS Mới: Sim / MultiSIM (eSIM / MultiSIM / Kích hoạt mới)">
+                    <div class="nav-item-left">
+                        <div class="nav-item-icon">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M6 2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"></path>
+                                <rect x="7" y="11" width="10" height="9" rx="1"></rect>
+                            </svg>
+                        </div>
+                        <div class="nav-item-text">
+                            <span class="nav-item-title">Sim / MultiSIM</span>
+                            <span class="nav-item-sub">eSIM / MultiSIM / SIM mới</span>
+                        </div>
+                    </div>
+                    <span class="nav-badge" id="badgeNewSim">0</span>
+                </button>
+                <button class="nav-item" id="nav-tts_new-other" onclick="selectModule('tts_new', 'other')" title="TTS Mới: Gói cước & PA Khác (Sóng / Gói cước / VAS / Khác)">
                     <div class="nav-item-left">
                         <div class="nav-item-icon">
                             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -821,8 +817,8 @@
                             </svg>
                         </div>
                         <div class="nav-item-text">
-                            <span class="nav-item-title">Gói cước / PA Khác</span>
-                            <span class="nav-item-sub">Sóng / SIM / CVQT / VAS</span>
+                            <span class="nav-item-title">Gói cước & PA Khác</span>
+                            <span class="nav-item-sub">Gói cước / VAS / Khác</span>
                         </div>
                     </div>
                     <span class="nav-badge" id="badgeNewOther">0</span>
@@ -894,6 +890,28 @@
                     </div>
                 </button>
             </div>
+
+            <!-- NHÓM 5: QUẢN TRỊ HỆ THỐNG (CHỈ DÀNH RIÊNG CHO SUPER ADMIN) -->
+            <div class="nav-section" id="navAdminSection" style="display:none;">
+                <div class="nav-section-title">QUẢN TRỊ HỆ THỐNG</div>
+                <button class="nav-item" id="nav-user-management" onclick="selectUserManagementModule()" title="Khai Báo & Quản Lý Phân Vùng KTV (TT SOC & Whitelist)">
+                    <div class="nav-item-left">
+                        <div class="nav-item-icon">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="9" cy="7" r="4"></circle>
+                                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                            </svg>
+                        </div>
+                        <div class="nav-item-text">
+                            <span class="nav-item-title">Quản Lý Phân Vùng KTV</span>
+                            <span class="nav-item-sub">Khai báo User & TT SOC</span>
+                        </div>
+                    </div>
+                    <span class="nav-badge" id="badgeTotalUsers" style="background:#e0e7ff; color:#3730a3; font-weight:700;">16</span>
+                </button>
+            </div>
         </div>
 
         <!-- BẢNG TƯƠNG TÁC DỮ LIỆU THỰC TẾ (INTERACTIVE DATA GRID) -->
@@ -926,7 +944,10 @@
                             </svg>
                         </div>
                         <div>
-                            <h4 class="ca-title">Dashboard Thống Kê Phiếu Đã Đóng</h4>
+                            <h4 class="ca-title" style="display:flex; align-items:center; gap:8px;">
+                                Dashboard Thống Kê Phiếu Đã Đóng
+                                <span id="caRegionBadge" class="ca-badge-pill ca-badge-blue" style="font-size:12px; font-weight:600; padding:2px 8px;">Toàn quốc</span>
+                            </h4>
                             <p class="ca-subtitle">Phân tích chuyên sâu hiệu quả đóng phiếu, tỷ lệ tự động và phân loại
                                 sự cố</p>
                         </div>
@@ -956,6 +977,8 @@
                             <option value="voice_sms">Thoại/SMS/Gói/PA Khác</option>
                             <option value="thoai">Thoại / Cuộc gọi</option>
                             <option value="sms">Tin nhắn SMS</option>
+                            <option value="roaming">Chuyển vùng quốc tế (CVQT)</option>
+                            <option value="sim">Sim / MultiSIM</option>
                             <option value="goi_cuoc">Gói cước dịch vụ</option>
                         </select>
                     </div>
@@ -1348,6 +1371,188 @@
 
             </div>
 
+            <!-- ============================================================= -->
+            <!-- MODULE QUẢN TRỊ: QUẢN LÝ PHÂN VÙNG NHÂN VIÊN & MÔ HÌNH AI -->
+            <!-- DÀNH RIÊNG CHO QUẢN TRỊ VIÊN (SUPERADMIN) -->
+            <!-- ============================================================= -->
+            <div id="userManagementContainer" class="user-management-container" style="display:none; padding:16px 20px;">
+                <!-- KHỐI 1: CẤU HÌNH MÔ HÌNH AI & PHÂN TÍCH NỘI DUNG -->
+                <div style="background:#ffffff; border:1px solid #cbd5e1; border-radius:10px; padding:14px 18px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.05); display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;">
+                    <div>
+                        <div style="font-size:13.5px; font-weight:800; color:#0f172a; text-transform:uppercase; display:flex; align-items:center; gap:8px;">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#005baa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="3"></circle>
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                            </svg>
+                            Cấu Hình Mô Hình Trí Tuệ Nhân Tạo (AI Model)
+                        </div>
+                        <div style="font-size:12px; color:#64748b; margin-top:3px;">
+                            Chọn thuật toán trích xuất ý định phản ánh khách hàng (chậm mạng, rớt mạng, lỗi ứng dụng, cước phí). Dành riêng cho Super Admin.
+                        </div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:12px; font-weight:700; color:#334155;">Mô hình hiện tại:</span>
+                        <select id="selectAiSummaryModel" class="control-input" onchange="handleAiSummaryModelChange(this.value)"
+                            style="height:32px; font-size:12px; font-weight:700; border-radius:6px; padding:0 10px; border:1px solid #94a3b8; background:#ffffff; color:#0f172a; cursor:pointer;">
+                            <option value="regex" selected>Regex (Quy tắc mẫu viễn thông)</option>
+                            <option value="qwen">Qwen 2.5 (Offline AI On-Premise)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- KHỐI 2: QUẢN LÝ PHÂN VÙNG NHÂN VIÊN (TT SOC & WHITELIST) -->
+                <div class="user-mgmt-header" style="background:#ffffff; border:1px solid #cbd5e1; border-radius:10px; padding:16px 20px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;">
+                        <div>
+                            <div style="font-size:16px; font-weight:800; color:#005baa; text-transform:uppercase; display:flex; align-items:center; gap:8px;">
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#005baa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                    <circle cx="9" cy="7" r="4"></circle>
+                                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                                </svg>
+                                Quản Lý Phân Vùng Nhân Viên Xử Lý (TT SOC)
+                            </div>
+                            <div style="font-size:12px; color:#475569; margin-top:4px; max-width:850px; line-height:1.5;">
+                                Cấu hình danh sách tài khoản KTV được phép truy cập WebApp và gán đơn vị Trung tâm SOC tương ứng.
+                                Hệ thống tự động nhận diện phân vùng làm việc khi KTV đăng nhập (SOC1: Miền Bắc, SOC2: Miền Nam, SOC3: Miền Trung). 
+                                <strong>Chỉ các tài khoản trong danh sách này mới được quyền truy cập hệ thống.</strong>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-primary" onclick="openUserModal()"
+                            style="background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; font-weight:700; font-size:12.5px; padding:8px 16px; border-radius:6px; border:none; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 2px 6px rgba(13,113,220,0.3);">
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                            Thêm Nhân Viên Mới
+                        </button>
+                    </div>
+
+                    <!-- THANH TÌM KIẾM & BỘ LỌC SOC -->
+                    <div style="display:flex; align-items:center; gap:12px; margin-top:16px; padding-top:14px; border-top:1px solid #e2e8f0; flex-wrap:wrap;">
+                        <div style="position:relative; flex:1; min-width:240px; max-width:400px;">
+                            <input type="text" id="searchUserMgmtInput" oninput="filterAdminUsersTable()"
+                                placeholder="Tìm theo tên, username, email..."
+                                style="width:100%; height:34px; padding:6px 12px 6px 32px; font-size:12px; border:1px solid #cbd5e1; border-radius:6px; outline:none; background:#f8fafc; box-sizing:border-box;">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#64748b" stroke-width="2" style="position:absolute; left:10px; top:10px;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <span style="font-size:12px; color:#475569; font-weight:600;">Lọc theo SOC:</span>
+                            <select id="filterSocSelect" onchange="filterAdminUsersTable()"
+                                style="height:34px; font-size:12px; font-weight:600; padding:0 10px; border:1px solid #cbd5e1; border-radius:6px; outline:none; background:#ffffff; color:#1e293b; cursor:pointer;">
+                                <option value="ALL">Tất cả Trung tâm SOC</option>
+                                <option value="SOC1">SOC1 — Miền Bắc (18 tỉnh/TP)</option>
+                                <option value="SOC2">SOC2 — Miền Nam (9 tỉnh/TP)</option>
+                                <option value="SOC3">SOC3 — Miền Trung (7 tỉnh/TP)</option>
+                            </select>
+                        </div>
+                        <div style="margin-left:auto; font-size:12px; color:#64748b;">
+                            Tổng cộng: <strong id="userMgmtCount" style="color:#005baa; font-size:13px;">0</strong> nhân viên
+                        </div>
+                    </div>
+                </div>
+
+                <!-- BẢNG DANH SÁCH NHÂN VIÊN PHÂN VÙNG -->
+                <div style="background:#ffffff; border:1px solid #cbd5e1; border-radius:10px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:left;">
+                            <thead>
+                                <tr style="background:#f1f5f9; color:#334155; border-bottom:2px solid #cbd5e1; font-weight:700;">
+                                    <th style="padding:10px 12px; width:45px; text-align:center;">STT</th>
+                                    <th style="padding:10px 12px; width:120px;">Trung Tâm SOC</th>
+                                    <th style="padding:10px 12px; width:120px;">Khu Vực (Miền)</th>
+                                    <th style="padding:10px 14px;">Họ Và Tên</th>
+                                    <th style="padding:10px 14px;">Tên Đăng Nhập</th>
+                                    <th style="padding:10px 14px;">Email VNPT</th>
+                                    <th style="padding:10px 12px; width:140px; text-align:center;">Vai Trò & Quyền</th>
+                                    <th style="padding:10px 12px; width:110px; text-align:center;">Truy Cập</th>
+                                    <th style="padding:10px 14px; width:120px; text-align:center;">Thao Tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="userMgmtTableBody">
+                                <!-- Dữ liệu nạp động từ JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL THÊM / SỬA NHÂN VIÊN -->
+            <div id="modalUserMgmt" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:99999; align-items:center; justify-content:center;">
+                <div style="background:#ffffff; width:480px; max-width:90%; border-radius:12px; box-shadow:0 20px 40px rgba(0,0,0,0.25); overflow:hidden; border:1px solid #cbd5e1;" onclick="event.stopPropagation()">
+                    <div style="background:linear-gradient(135deg, #005baa 0%, #004b96 100%); color:#ffffff; padding:14px 18px; display:flex; justify-content:space-between; align-items:center;">
+                        <div id="modalUserMgmtTitle" style="font-size:13.5px; font-weight:800; letter-spacing:0.5px; text-transform:uppercase;">
+                            THÊM NHÂN VIÊN MỚI
+                        </div>
+                        <button type="button" onclick="closeUserModal()" style="background:transparent; border:none; color:#ffffff; font-size:18px; cursor:pointer; padding:0 4px; line-height:1;">✕</button>
+                    </div>
+                    <form id="formUserMgmt" onsubmit="handleUserModalSubmit(event)" style="padding:18px 20px; display:flex; flex-direction:column; gap:14px;">
+                        <input type="hidden" id="inputUserOriginalKey" value="">
+                        
+                        <div>
+                            <label style="display:block; font-size:12px; font-weight:700; color:#334155; margin-bottom:5px;">
+                                Trung Tâm SOC Phụ Trách <span style="color:#dc2626;">*</span>
+                            </label>
+                            <select id="inputUserSoc" required
+                                style="width:100%; height:36px; padding:0 10px; font-size:12.5px; font-weight:600; border:1px solid #cbd5e1; border-radius:6px; outline:none; background:#ffffff; color:#0f172a;">
+                                <option value="SOC1">SOC1 — Miền Bắc (18 tỉnh/TP)</option>
+                                <option value="SOC2">SOC2 — Miền Nam (9 tỉnh/TP)</option>
+                                <option value="SOC3">SOC3 — Miền Trung (7 tỉnh/TP)</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label style="display:block; font-size:12px; font-weight:700; color:#334155; margin-bottom:5px;">
+                                Họ Và Tên Nhân Viên <span style="color:#dc2626;">*</span>
+                            </label>
+                            <input type="text" id="inputUserName" required placeholder="Ví dụ: Nguyễn Văn A"
+                                style="width:100%; height:36px; padding:0 12px; font-size:12.5px; border:1px solid #cbd5e1; border-radius:6px; outline:none; box-sizing:border-box;">
+                        </div>
+
+                        <div>
+                            <label style="display:block; font-size:12px; font-weight:700; color:#334155; margin-bottom:5px;">
+                                Tên Đăng Nhập (Username OneOSS) <span style="color:#dc2626;">*</span>
+                            </label>
+                            <input type="text" id="inputUserUsername" required placeholder="Ví dụ: anv"
+                                style="width:100%; height:36px; padding:0 12px; font-size:12.5px; border:1px solid #cbd5e1; border-radius:6px; outline:none; box-sizing:border-box;">
+                        </div>
+
+                        <div>
+                            <label style="display:block; font-size:12px; font-weight:700; color:#334155; margin-bottom:5px;">
+                                Email VNPT <span style="color:#dc2626;">*</span>
+                            </label>
+                            <input type="email" id="inputUserEmail" required placeholder="Ví dụ: anv@vnpt.vn"
+                                style="width:100%; height:36px; padding:0 12px; font-size:12.5px; border:1px solid #cbd5e1; border-radius:6px; outline:none; box-sizing:border-box;">
+                        </div>
+
+                        <div>
+                            <label style="display:block; font-size:12px; font-weight:700; color:#334155; margin-bottom:5px;">
+                                Vai Trò &amp; Quyền Hạn Khai Báo <span style="color:#dc2626;">*</span>
+                            </label>
+                            <select id="inputUserRole" required
+                                style="width:100%; height:36px; padding:0 10px; font-size:12.5px; font-weight:600; border:1px solid #cbd5e1; border-radius:6px; outline:none; background:#ffffff; color:#0f172a;">
+                                <option value="ktv">Kỹ Thuật Viên (KTV — Xử lý theo phân vùng)</option>
+                                <option value="admin">Quản Trị Viên (Admin — Toàn quyền khai báo &amp; quản lý user)</option>
+                            </select>
+                            <div style="font-size:11px; color:#64748b; margin-top:4px;">
+                                * Quản trị viên có quyền khai báo user mới, chỉnh sửa thông tin KTV và gán phân vùng SOC.
+                            </div>
+                        </div>
+
+                        <div id="modalUserMgmtMsg" style="display:none; font-size:12px; padding:8px 10px; border-radius:6px;"></div>
+
+                        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:8px;">
+                            <button type="button" onclick="closeUserModal()"
+                                style="padding:8px 16px; font-size:12.5px; font-weight:600; color:#475569; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer;">
+                                Hủy Bỏ
+                            </button>
+                            <button type="submit" id="btnSubmitUserModal"
+                                style="padding:8px 20px; font-size:12.5px; font-weight:700; color:#ffffff; background:#005baa; border:none; border-radius:6px; cursor:pointer; box-shadow:0 2px 4px rgba(0,91,170,0.3);">
+                                Lưu Thông Tin
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
             <!-- WRAPPER CHỨA BẢNG DANH SÁCH PHIẾU (TỰ ĐỘNG ẨN KHI XEM THỐNG KÊ) -->
             <div id="tableDataView">
                 <div class="table-toolbar">
@@ -1422,12 +1627,12 @@
                     <table id="ticketsTable">
                         <thead>
                             <tr>
-                                <th style="width:38px; text-align:center;">STT</th>
-                                <th id="thTicketCode" style="width:12%; min-width:165px;">Mã Phiếu</th>
+                                <th class="col-stt-header" style="width:36px; min-width:36px; max-width:36px; text-align:center; padding:6px 2px;">STT</th>
+                                <th id="thTicketCode" style="width:11%; min-width:145px;">Mã Phiếu</th>
                                 <th id="thStatus" style="width:6.5%; min-width:85px; text-align:center;">Nhận Định</th>
-                                <th style="width:7%; min-width:95px; text-align:center;">Số Thuê Bao</th>
-                                <th id="thCategory" style="width:7%; min-width:95px; text-align:center;">Loại PAKH</th>
-                                <th id="thIncidentTime" class="sortable-th" style="width:6.5%; min-width:90px; text-align:center;" onclick="toggleIncidentTimeSort()" title="Thứ tự mặc định (Bấm để sắp xếp theo ngày tiếp nhận)">
+                                <th style="width:7%; min-width:92px; text-align:center;">Số Thuê Bao</th>
+                                <th id="thCategory" style="width:6.5%; min-width:90px; text-align:center;">Loại PAKH</th>
+                                <th id="thIncidentTime" class="sortable-th" style="width:6%; min-width:85px; text-align:center;" onclick="toggleIncidentTimeSort()" title="Thứ tự mặc định (Bấm để sắp xếp theo ngày tiếp nhận)">
                                     <div style="display:inline-flex; align-items:center; justify-content:center; gap:4px;">
                                         <span>Tiếp Nhận</span>
                                         <span id="sortIncidentTimeIcon" class="sort-icon">
@@ -1438,13 +1643,13 @@
                                         </span>
                                     </div>
                                 </th>
-                                <th id="thProfile" style="width:8%; min-width:110px;">Hồ Sơ Core</th>
-                                <th id="thInfrastructure" style="width:4.5%; min-width:60px; text-align:center;">Hạ Tầng</th>
+                                <th id="thProfile" style="width:7.5%; min-width:100px;">Hồ Sơ Core</th>
+                                <th id="thInfrastructure" style="width:4%; min-width:50px; text-align:center;">Hạ Tầng</th>
                                 <th id="thCemData" style="width:6.5%; min-width:90px;">Dữ Liệu CEM</th>
-                                <th id="thAiSummary" style="width:12%; min-width:150px;">Tóm Tắt Nội Dung PAKH</th>
-                                <th style="width:12.5%; min-width:150px;">Ý Kiến Phân Tích</th>
-                                <th style="width:12.5%; min-width:150px;">Nội Dung Phản Hồi</th>
-                                <th style="width:6%; min-width:85px; text-align:center;">Thao Tác</th>
+                                <th id="thAiSummary" style="width:23%; min-width:230px;">Tóm Tắt Nội Dung PAKH</th>
+                                <th id="thComment" style="width:6.75%; min-width:85px;">Ý Kiến Phân Tích</th>
+                                <th id="thActionPlan" style="width:6.75%; min-width:85px;">Nội Dung Phản Hồi</th>
+                                <th style="width:6%; min-width:80px; text-align:center;">Thao Tác</th>
                             </tr>
                         </thead>
                         <tbody id="ticketsBody">
@@ -1970,8 +2175,8 @@
     </div>
 
     <script src="/static/js/incident_causes_data.js"></script>
-    <script src="/static/js/dashboard.js?v=8.8"></script>
-    <script src="/static/js/flow_audit.js?v=1.1"></script>
+    <script src="/static/js/dashboard.js?v=9.2"></script>
+    <script src="/static/js/flow_audit.js?v=1.2"></script>
 </body>
 
 </html>

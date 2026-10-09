@@ -38,20 +38,17 @@ function getAppTheme() {
 function updateThemeUI(theme) {
     const btn = document.getElementById('btnThemeToggle');
     const iconSpan = document.getElementById('themeToggleIcon');
-    const labelSpan = document.getElementById('themeToggleLabel');
     if (!btn) return;
 
     if (theme === 'dark') {
         if (iconSpan) {
             iconSpan.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>`;
         }
-        if (labelSpan) labelSpan.innerText = 'Sáng';
         btn.title = 'Chuyển sang Giao diện Ban ngày (Light mode)';
     } else {
         if (iconSpan) {
             iconSpan.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>`;
         }
-        if (labelSpan) labelSpan.innerText = 'Tối';
         btn.title = 'Chuyển sang Giao diện Ban đêm (Dark mode)';
     }
 }
@@ -138,6 +135,7 @@ function checkIsUserAdmin() {
 }
 let isSystemAdmin = checkIsUserAdmin();
 let currentAiEngine = 'regex';
+let isUserManagementView = false;
 
 function escapeHtml(str) {
     if (!str) return '';
@@ -506,6 +504,8 @@ async function fetchStatus() {
             const bNewCall = document.getElementById('badgeNewCall');
             const bNewSpamCall = document.getElementById('badgeNewSpamCall');
             const bNewSms = document.getElementById('badgeNewSms');
+            const bNewRoaming = document.getElementById('badgeNewRoaming');
+            const bNewSim = document.getElementById('badgeNewSim');
             const bNewOther = document.getElementById('badgeNewOther');
             const bNewVoice = document.getElementById('badgeNewVoice');
             const bTotalClosed = document.getElementById('badgeTotalClosed');
@@ -519,6 +519,8 @@ async function fetchStatus() {
             updateNavBadge(bNewCall, sc.tts_new_call);
             updateNavBadge(bNewSpamCall, sc.tts_new_spam_call);
             updateNavBadge(bNewSms, sc.tts_new_sms);
+            updateNavBadge(bNewRoaming, sc.tts_new_roaming);
+            updateNavBadge(bNewSim, sc.tts_new_sim);
             updateNavBadge(bNewOther, sc.tts_new_other);
             updateNavBadge(bNewVoice, sc.tts_new_voice);
             if (bTotalClosed) bTotalClosed.innerText = sc.total_closed || 0;
@@ -705,6 +707,8 @@ function onRegionChange(val) {
     if (currentService === 'call') srvSlug = '/cuoc-goi';
     else if (currentService === 'spam_call') srvSlug = '/chan-goi-ngoai-mang';
     else if (currentService === 'sms') srvSlug = '/tin-nhan';
+    else if (currentService === 'roaming') srvSlug = '/chuyen-vung-quoc-te';
+    else if (currentService === 'sim') srvSlug = '/sim-multisim';
     else if (currentService === 'other') srvSlug = '/khac';
 
     let newPath = regSlug ? `/ttsmoi${regSlug}${srvSlug}` : `/ttsmoi${srvSlug}`;
@@ -715,7 +719,11 @@ function onRegionChange(val) {
     }
 
     lastTicketsSignature = "";
-    loadTickets(true, true);
+    if (isHistoryStatsView) {
+        loadClosedAnalytics();
+    } else {
+        loadTickets(true, true);
+    }
     fetchStatus();
 }
 window.onRegionChange = onRegionChange;
@@ -905,8 +913,42 @@ function selectClosedPeriod(period) {
 
 async function loadClosedAnalytics() {
     try {
-        const res = await fetch(`/api/tickets/closed_stats?period=${encodeURIComponent(currentClosedPeriod)}&source=${encodeURIComponent(currentClosedSource)}&service_type=${encodeURIComponent(currentClosedService)}`);
+        const clientAuthTok = (typeof getTtsNewAuthToken === 'function' ? getTtsNewAuthToken() : '') || 
+                              (typeof getTtsAuthSession === 'function' && getTtsAuthSession() ? getTtsAuthSession().token : '');
+        const reqHeaders = clientAuthTok ? { 'Authorization': clientAuthTok } : {};
+        const regParam = encodeURIComponent(currentRegion || 'ALL');
+        const res = await fetch(`/api/tickets/closed_stats?period=${encodeURIComponent(currentClosedPeriod)}&source=${encodeURIComponent(currentClosedSource)}&service_type=${encodeURIComponent(currentClosedService)}&region=${regParam}`, {
+            headers: reqHeaders
+        });
         const data = await res.json();
+
+        // 🎯 Khóa cố định phân vùng cho KTV nếu server yêu cầu
+        if (data.is_region_locked && !isSystemAdmin) {
+            isRegionLocked = true;
+            if (data.effective_region) {
+                currentRegion = data.effective_region;
+            }
+            applyRegionUI(true);
+        }
+
+        // 🎯 Cập nhật huy hiệu phân vùng trên Dashboard Thống kê
+        const regBadge = document.getElementById('caRegionBadge');
+        if (regBadge) {
+            const effReg = (data.effective_region || currentRegion || 'ALL').toUpperCase();
+            if (effReg === 'MB') {
+                regBadge.innerText = 'Khu vực: Miền Bắc (SOC1)';
+                regBadge.className = 'ca-badge-pill ca-badge-blue';
+            } else if (effReg === 'MN') {
+                regBadge.innerText = 'Khu vực: Miền Nam (SOC2)';
+                regBadge.className = 'ca-badge-pill ca-badge-green';
+            } else if (effReg === 'MT') {
+                regBadge.innerText = 'Khu vực: Miền Trung (SOC3)';
+                regBadge.className = 'ca-badge-pill ca-badge-amber';
+            } else {
+                regBadge.innerText = 'Toàn quốc (3 Miền)';
+                regBadge.className = 'ca-badge-pill ca-badge-purple';
+            }
+        }
 
         // 1. Cập nhật các thẻ KPI chuẩn hóa
         const elTotal = document.getElementById('caValTotal');
@@ -1055,15 +1097,115 @@ function selectHistoryStats(updateUrl = true) {
     if (container) container.style.display = 'block';
 
     // Ẩn hoàn toàn bảng danh sách phiếu
+    isUserManagementView = false;
     const tableDataView = document.getElementById('tableDataView');
     if (tableDataView) tableDataView.style.display = 'none';
     const faContainer = document.getElementById('flowAuditContainer');
     if (faContainer) faContainer.style.display = 'none';
+    const userMgmtContainer = document.getElementById('userManagementContainer');
+    if (userMgmtContainer) userMgmtContainer.style.display = 'none';
 
     const sel = document.getElementById('caServiceSelect');
     if (sel) sel.value = currentClosedService;
 
     loadClosedAnalytics();
+}
+
+function adjustTableColumnsLayout(srv, tab) {
+    const service = srv || currentService || 'data';
+    const currentTab = tab || currentTableTab || 'chua_dong';
+    const thStatus = document.getElementById('thStatus');
+    const thCategory = document.getElementById('thCategory');
+    const thProfile = document.getElementById('thProfile');
+    const thInfrastructure = document.getElementById('thInfrastructure');
+    const thCemData = document.getElementById('thCemData');
+    const thAiSummary = document.getElementById('thAiSummary');
+    const thComment = document.getElementById('thComment');
+    const thActionPlan = document.getElementById('thActionPlan');
+
+    if (service === 'spam_call') {
+        // Module Chặn gọi ngoại mạng:
+        // Khóa cứng STT: 36px (col 1)
+        // Mã Phiếu: 11% (col 2)
+        // Nhà Mạng: 7.5% (col 3)
+        // Số Thuê Bao: 7% (col 4)
+        // Cam Kết & File: 10% (col 5)
+        // Tiếp Nhận: 6% (col 6)
+        // Ẩn: thProfile, thInfrastructure, thCemData
+        // Mở rộng Nội dung (thAiSummary: 26%) và 2 cột 10, 11 (thComment: 12%, thActionPlan: 12%)
+        // Thao Tác: 6%
+        // Tổng: 11 + 7.5 + 7 + 10 + 6 + 26 + 12 + 12 + 6 = 97.5% (+ STT 2.5% = 100%)
+        if (thStatus) { thStatus.style.display = ''; thStatus.innerText = 'Nhà Mạng'; thStatus.style.width = '7.5%'; thStatus.style.minWidth = '80px'; }
+        if (thCategory) { thCategory.innerText = 'Cam Kết & File'; thCategory.style.width = '10%'; thCategory.style.minWidth = '110px'; }
+        if (thProfile) thProfile.style.display = 'none';
+        if (thInfrastructure) thInfrastructure.style.display = 'none';
+        if (thCemData) thCemData.style.display = 'none';
+        if (thAiSummary) { thAiSummary.style.width = '26%'; thAiSummary.style.minWidth = '260px'; }
+        if (thComment) { thComment.style.width = '12%'; thComment.style.minWidth = '120px'; }
+        if (thActionPlan) { thActionPlan.style.width = '12%'; thActionPlan.style.minWidth = '120px'; }
+    } else if (service === 'call' || service === 'sms' || service === 'roaming' || service === 'sim') {
+        // Module Cuộc gọi, Tin nhắn, Chuyển vùng quốc tế, Sim/MultiSIM:
+        // Ẩn: thStatus (0%), thCemData (0%)
+        if (thStatus) thStatus.style.display = 'none';
+        if (thCategory) {
+            if (service === 'call') thCategory.innerText = 'Loại Cuộc Gọi';
+            else if (service === 'sms') thCategory.innerText = 'Loại Tin Nhắn';
+            else if (service === 'roaming') thCategory.innerText = 'Loại CVQT';
+            else if (service === 'sim') thCategory.innerText = 'Loại SIM';
+            thCategory.style.width = '7%';
+            thCategory.style.minWidth = '92px';
+        }
+        if (thProfile) {
+            if (service === 'call') thProfile.innerText = 'Hồ Sơ (HSS/VoLTE)';
+            else if (service === 'roaming') thProfile.innerText = 'Hồ Sơ (SAPC/HLR)';
+            else thProfile.innerText = 'Trạng Thái (SAPC)';
+            thProfile.style.display = '';
+            thProfile.style.width = '8%';
+            thProfile.style.minWidth = '95px';
+        }
+        if (thInfrastructure) {
+            thInfrastructure.innerText = (service === 'sms') ? 'Hạ Tầng' : 'Sóng';
+            thInfrastructure.style.display = '';
+            thInfrastructure.style.width = '4.5%';
+            thInfrastructure.style.minWidth = '52px';
+        }
+        if (thCemData) thCemData.style.display = 'none';
+        if (thAiSummary) { thAiSummary.style.width = '26%'; thAiSummary.style.minWidth = '260px'; }
+        if (thComment) { thComment.style.width = '11%'; thComment.style.minWidth = '115px'; }
+        if (thActionPlan) { thActionPlan.style.width = '11%'; thActionPlan.style.minWidth = '115px'; }
+    } else if (service === 'other') {
+        // Module Gói Cước & PA Khác:
+        if (thStatus) thStatus.style.display = 'none';
+        if (thCategory) { thCategory.innerText = 'Loại PAKH'; thCategory.style.width = '6.5%'; thCategory.style.minWidth = '90px'; }
+        if (thProfile) { thProfile.innerText = 'Gói Cước Core'; thProfile.style.display = ''; thProfile.style.width = '7.5%'; thProfile.style.minWidth = '95px'; }
+        if (thInfrastructure) { thInfrastructure.innerText = 'Hạ Tầng'; thInfrastructure.style.display = ''; thInfrastructure.style.width = '4%'; thInfrastructure.style.minWidth = '50px'; }
+        if (thCemData) { thCemData.style.display = ''; thCemData.innerText = 'Dữ Liệu CEM'; thCemData.style.width = '6.5%'; thCemData.style.minWidth = '85px'; }
+        if (thAiSummary) { thAiSummary.style.width = '25%'; thAiSummary.style.minWidth = '250px'; }
+        if (thComment) { thComment.style.width = '9%'; thComment.style.minWidth = '95px'; }
+        if (thActionPlan) { thActionPlan.style.width = '9%'; thActionPlan.style.minWidth = '95px'; }
+    } else {
+        // Module Data (Mobile Internet) hoặc Toàn bộ CSDL:
+        const hideStatusInData = (currentTab === 'da_dong');
+        if (thStatus) {
+            thStatus.style.display = hideStatusInData ? 'none' : '';
+            thStatus.innerText = 'Nhận Định';
+            thStatus.style.width = '6.5%';
+            thStatus.style.minWidth = '85px';
+        }
+        if (thCategory) { thCategory.innerText = 'Loại PAKH'; thCategory.style.width = '6.5%'; thCategory.style.minWidth = '90px'; }
+        if (thProfile) { thProfile.innerText = 'Hồ Sơ Core'; thProfile.style.display = ''; thProfile.style.width = '7.5%'; thProfile.style.minWidth = '95px'; }
+        if (thInfrastructure) { thInfrastructure.innerText = 'Hạ Tầng'; thInfrastructure.style.display = ''; thInfrastructure.style.width = '4%'; thInfrastructure.style.minWidth = '50px'; }
+        if (thCemData) { thCemData.style.display = ''; thCemData.innerText = 'Dữ Liệu CEM'; thCemData.style.width = '6.5%'; thCemData.style.minWidth = '85px'; }
+        if (hideStatusInData) {
+            if (thAiSummary) { thAiSummary.style.width = '26%'; thAiSummary.style.minWidth = '250px'; }
+            if (thComment) { thComment.style.width = '8.25%'; thComment.style.minWidth = '90px'; }
+            if (thActionPlan) { thActionPlan.style.width = '8.25%'; thActionPlan.style.minWidth = '90px'; }
+        } else {
+            if (thAiSummary) { thAiSummary.style.width = '23%'; thAiSummary.style.minWidth = '230px'; }
+            if (thComment) { thComment.style.width = '6.75%'; thComment.style.minWidth = '85px'; }
+            if (thActionPlan) { thActionPlan.style.width = '6.75%'; thActionPlan.style.minWidth = '85px'; }
+        }
+    }
 }
 
 function selectModule(sys, srv, updateUrl = true) {
@@ -1086,6 +1228,8 @@ function selectModule(sys, srv, updateUrl = true) {
         else if (srv === 'call') srvSlug = '/cuoc-goi';
         else if (srv === 'spam_call') srvSlug = '/chan-goi-ngoai-mang';
         else if (srv === 'sms') srvSlug = '/tin-nhan';
+        else if (srv === 'roaming') srvSlug = '/chuyen-vung-quoc-te';
+        else if (srv === 'sim') srvSlug = '/sim-multisim';
         else if (srv === 'other') srvSlug = '/khac';
         else srvSlug = '/cuoc-goi';
 
@@ -1097,12 +1241,15 @@ function selectModule(sys, srv, updateUrl = true) {
 
     const mainTabs = document.getElementById('mainTabsHeader');
     if (mainTabs) mainTabs.style.display = 'flex';
+    isUserManagementView = false;
     const analyticsBox = document.getElementById('closedAnalyticsContainer');
     if (analyticsBox) analyticsBox.style.display = 'none';
     const tableDataView = document.getElementById('tableDataView');
     if (tableDataView) tableDataView.style.display = 'block';
     const faContainer = document.getElementById('flowAuditContainer');
     if (faContainer) faContainer.style.display = 'none';
+    const userMgmtContainer = document.getElementById('userManagementContainer');
+    if (userMgmtContainer) userMgmtContainer.style.display = 'none';
 
     // Highlight nav item
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.remove('active'));
@@ -1115,74 +1262,38 @@ function selectModule(sys, srv, updateUrl = true) {
         thTicketCode.style.display = 'table-cell';
     }
 
-    // Cập nhật tiêu đề bảng và tiêu đề cột chuyên biệt theo module
-    const thCategory = document.getElementById('thCategory');
-    const thProfile = document.getElementById('thProfile');
-    const thInfrastructure = document.getElementById('thInfrastructure');
-    const thCemData = document.getElementById('thCemData');
+    // Cập nhật tiêu đề bảng theo module
     const thAiSummary = document.getElementById('thAiSummary');
     const tableTitle = document.getElementById('tableTitleText');
 
     if (srv === 'call') {
-        if (thCategory) thCategory.innerText = 'Loại Cuộc Gọi';
-        if (thProfile) thProfile.innerText = 'Hồ Sơ (HSS/VoLTE)';
-        if (thInfrastructure) thInfrastructure.innerText = 'Sóng';
-        if (thCemData) thCemData.innerText = 'Trạm & Cell';
         if (thAiSummary) thAiSummary.innerText = 'Nội Dung Phản Ánh';
-        if (tableTitle) {
-            tableTitle.innerHTML = `<span>Phiếu Cuộc Gọi — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
-        }
-        if (thProfile) thProfile.style.display = '';
-        if (thInfrastructure) thInfrastructure.style.display = '';
-        if (thCemData) thCemData.style.display = '';
+        if (tableTitle) tableTitle.innerHTML = `<span>Phiếu Cuộc Gọi — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
     } else if (srv === 'spam_call') {
-        if (thCategory) thCategory.innerText = 'Cam Kết & File';
         if (thAiSummary) thAiSummary.innerText = 'Tóm Tắt Sự Cố & Phản Ánh';
-        if (tableTitle) {
-            tableTitle.innerHTML = `<span>Phiếu Chặn Gọi Ngoại Mạng — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
-        }
-        // Ẩn các cột hạ tầng/data vô nghĩa với chặn cuộc gọi Spam
-        if (thProfile) thProfile.style.display = 'none';
-        if (thInfrastructure) thInfrastructure.style.display = 'none';
-        if (thCemData) thCemData.style.display = 'none';
+        if (tableTitle) tableTitle.innerHTML = `<span>Phiếu Chặn Gọi Ngoại Mạng — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
     } else if (srv === 'sms') {
-        if (thCategory) thCategory.innerText = 'Loại Tin Nhắn';
-        if (thProfile) { thProfile.innerText = 'Trạng Thái (SAPC)'; thProfile.style.display = ''; }
-        if (thInfrastructure) { thInfrastructure.innerText = 'Hạ Tầng'; thInfrastructure.style.display = ''; }
-        if (thCemData) { thCemData.innerText = 'Dữ Liệu Trạm'; thCemData.style.display = ''; }
         if (thAiSummary) thAiSummary.innerText = 'Nội Dung Tin Nhắn';
-        if (tableTitle) {
-            tableTitle.innerHTML = `<span>Phiếu Tin Nhắn — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
-        }
-    } else if (srv === 'other') {
-        if (thCategory) thCategory.innerText = 'Loại PAKH';
-        if (thProfile) { thProfile.innerText = 'Gói Cước Core'; thProfile.style.display = ''; }
-        if (thInfrastructure) { thInfrastructure.innerText = 'Hạ Tầng'; thInfrastructure.style.display = ''; }
-        if (thCemData) { thCemData.innerText = 'Dữ Liệu CEM'; thCemData.style.display = ''; }
+        if (tableTitle) tableTitle.innerHTML = `<span>Phiếu Tin Nhắn — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
+    } else if (srv === 'roaming') {
         if (thAiSummary) thAiSummary.innerText = 'Nội Dung Phản Ánh';
-        if (tableTitle) {
-            tableTitle.innerHTML = `<span>Phiếu Gói Cước & PA Khác — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
-        }
+        if (tableTitle) tableTitle.innerHTML = `<span>Phiếu Chuyển Vùng Quốc Tế — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
+    } else if (srv === 'sim') {
+        if (thAiSummary) thAiSummary.innerText = 'Nội Dung Phản Ánh';
+        if (tableTitle) tableTitle.innerHTML = `<span>Phiếu Sim / MultiSIM — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
+    } else if (srv === 'other') {
+        if (thAiSummary) thAiSummary.innerText = 'Nội Dung Phản Ánh';
+        if (tableTitle) tableTitle.innerHTML = `<span>Phiếu Gói Cước & PA Khác — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
     } else {
-        // Data (Mobile Internet)
-        if (thCategory) thCategory.innerText = 'Loại PAKH';
-        if (thProfile) { thProfile.innerText = 'Hồ Sơ Core'; thProfile.style.display = ''; }
-        if (thInfrastructure) { thInfrastructure.innerText = 'Hạ Tầng'; thInfrastructure.style.display = ''; }
-        if (thCemData) { thCemData.innerText = 'Dữ Liệu CEM'; thCemData.style.display = ''; }
         if (thAiSummary) thAiSummary.innerText = 'Tóm Tắt Nội Dung PAKH';
-        if (tableTitle) {
-            tableTitle.innerHTML = `<span>Phiếu Mobile Internet — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
-        }
+        if (tableTitle) tableTitle.innerHTML = `<span>Phiếu Mobile Internet — ${sys === 'tts_new' ? 'TTS Mới' : 'TTS Cũ'}</span>`;
     }
 
-    // Ẩn/hiện cột Nhận Định & bộ lọc nhận định & nút Tự đóng
+    // Áp dụng layout độ rộng chuẩn cho tất cả các cột, triệt tiêu việc phình to cột STT
+    adjustTableColumnsLayout(srv, currentTableTab);
+
+    // Ẩn/hiện bộ lọc nhận định & nút Tự đóng
     const isDataSrv = (srv === 'data');
-    const isSpamCallSrv = (srv === 'spam_call');
-    const thStatus = document.getElementById('thStatus');
-    if (thStatus) {
-        thStatus.style.display = (isDataSrv || isSpamCallSrv) ? '' : 'none';
-        thStatus.innerText = isSpamCallSrv ? 'Nhà Mạng' : 'Nhận Định';
-    }
     const filterStatus = document.getElementById('filterStatus');
     if (filterStatus) filterStatus.style.display = isDataSrv ? '' : 'none';
     const ctrlAutoClose = document.getElementById('ctrlAutoCloseUnified');
@@ -1214,12 +1325,15 @@ function selectHistoryModule(tab = 'all', updateUrl = true) {
 
     const mainTabs = document.getElementById('mainTabsHeader');
     if (mainTabs) mainTabs.style.display = 'flex';
+    isUserManagementView = false;
     const analyticsBox = document.getElementById('closedAnalyticsContainer');
     if (analyticsBox) analyticsBox.style.display = 'none';
     const tableDataView = document.getElementById('tableDataView');
     if (tableDataView) tableDataView.style.display = 'block';
     const faContainer = document.getElementById('flowAuditContainer');
     if (faContainer) faContainer.style.display = 'none';
+    const userMgmtContainer = document.getElementById('userManagementContainer');
+    if (userMgmtContainer) userMgmtContainer.style.display = 'none';
 
     document.querySelectorAll('.nav-item').forEach(btn => btn.classList.remove('active'));
     const activeBtn = document.getElementById('nav-all-history');
@@ -1236,8 +1350,8 @@ function selectHistoryModule(tab = 'all', updateUrl = true) {
         thAiSummary.innerText = 'Nội Dung / Tóm Tắt';
     }
 
-    const thStatus = document.getElementById('thStatus');
-    if (thStatus) thStatus.style.display = 'none';
+    adjustTableColumnsLayout('all', tab);
+
     const filterStatus = document.getElementById('filterStatus');
     if (filterStatus) filterStatus.style.display = 'none';
     const ctrlAutoClose = document.getElementById('ctrlAutoCloseUnified');
@@ -1296,6 +1410,10 @@ function handleSpaRoute(pathname) {
         selectModule('tts_new', 'spam_call', false);
     } else if (p === '/ttsmoi/tin-nhan' || p === '/ttsmoi/sms' || p === '/tin-nhan' || p === '/sms') {
         selectModule('tts_new', 'sms', false);
+    } else if (p === '/ttsmoi/chuyen-vung-quoc-te' || p === '/ttsmoi/roaming' || p === '/ttsmoi/cvqt' || p === '/chuyen-vung-quoc-te' || p === '/roaming' || p === '/cvqt') {
+        selectModule('tts_new', 'roaming', false);
+    } else if (p === '/ttsmoi/sim-multisim' || p === '/ttsmoi/sim' || p === '/sim-multisim' || p === '/sim') {
+        selectModule('tts_new', 'sim', false);
     } else if (p === '/ttsmoi/khac' || p === '/ttsmoi/other' || p === '/khac' || p === '/other') {
         selectModule('tts_new', 'other', false);
     } else if (p === '/ttsmoi/voice' || p === '/ttsmoi/voice_sms') {
@@ -1309,6 +1427,10 @@ function handleSpaRoute(pathname) {
     } else if (p === '/kiem-tra-luong' || p === '/flow-audit' || p === '/doi-soat-luong') {
         if (typeof selectFlowAuditModule === 'function') {
             selectFlowAuditModule(false);
+        }
+    } else if (p === '/quan-tri-ktv' || p === '/admin-users' || p === '/phan-vung-ktv') {
+        if (typeof selectUserManagementModule === 'function') {
+            selectUserManagementModule(false);
         }
     } else {
         // Mặc định: TTS Mới - Mobile Internet
@@ -1460,7 +1582,7 @@ function renderTicketsSkeleton(tbody, totalCols = 12) {
     if (!tbody) return;
     const rows = [1, 2, 3, 4, 5, 6].map(i => `
         <tr class="table-skeleton-row">
-            <td style="text-align:center;"><div class="skeleton-bar" style="width:20px; margin:auto;"></div></td>
+            <td class="col-stt-cell" style="width:36px; min-width:36px; max-width:36px; text-align:center; padding:4px 0;"><div class="skeleton-bar" style="width:20px; margin:auto;"></div></td>
             <td><div class="skeleton-bar" style="width:110px;"></div><div class="skeleton-bar" style="width:70px; margin-top:4px;"></div></td>
             ${totalCols === 12 ? '<td><div class="skeleton-bar" style="width:75px; margin:auto;"></div></td>' : ''}
             <td><div class="skeleton-bar" style="width:90px; margin:auto;"></div></td>
@@ -1485,6 +1607,8 @@ function switchTableTab(tab) {
     if (currentService === 'call') srvName = 'Cuộc Gọi';
     else if (currentService === 'spam_call') srvName = 'Chặn Gọi Ngoại Mạng';
     else if (currentService === 'sms') srvName = 'Tin Nhắn';
+    else if (currentService === 'roaming') srvName = 'Chuyển Vùng Quốc Tế';
+    else if (currentService === 'sim') srvName = 'Sim / MultiSIM';
     else if (currentService === 'other') srvName = 'Gói Cước & PA Khác';
     else if (currentService === 'voice_sms') srvName = 'Thoại / SMS';
     else if (currentService === 'all') srvName = '';
@@ -1517,7 +1641,7 @@ function switchTableTab(tab) {
     }
 
     // Chỉ hiển thị dashboard thống kê khi đang ở phân hệ Thống Kê Phiếu Đã Đóng
-    if (!isHistoryStatsView) {
+    if (!isHistoryStatsView && !isUserManagementView) {
         const analyticsBox = document.getElementById('closedAnalyticsContainer');
         if (analyticsBox) analyticsBox.style.display = 'none';
         const tableDataView = document.getElementById('tableDataView');
@@ -1539,7 +1663,9 @@ function switchTableTab(tab) {
         } else {
             if (currentService === 'spam_call') {
                 thAiSummary.innerText = 'Tóm Tắt Sự Cố & Phản Ánh';
-            } else if (currentService === 'call' || currentService === 'sms' || currentService === 'other') {
+            } else if (currentService === 'sms') {
+                thAiSummary.innerText = 'Nội Dung Tin Nhắn';
+            } else if (currentService === 'call' || currentService === 'roaming' || currentService === 'sim' || currentService === 'other') {
                 thAiSummary.innerText = 'Nội Dung Phản Ánh';
             } else {
                 thAiSummary.innerText = 'Tóm Tắt Nội Dung PAKH';
@@ -1548,6 +1674,9 @@ function switchTableTab(tab) {
             thAiSummary.title = '';
         }
     }
+
+    // Khóa cứng cột STT và điều chỉnh các cột theo tab & module
+    adjustTableColumnsLayout(currentService, tab);
 
     // Khi chuyển tab, reset dropdown filterStatus về 'all' để không bị ẩn dữ liệu ngoài ý muốn
     const filterStatus = document.getElementById('filterStatus');
@@ -1559,7 +1688,12 @@ function switchTableTab(tab) {
     const tbody = document.getElementById('ticketsBody');
     const isDataService = (currentService === 'data');
     const isSpamCallService = (currentService === 'spam_call');
-    const totalCols = isSpamCallService ? 10 : (isDataService ? 13 : 12);
+    const isCallService = (currentService === 'call');
+    const isSmsService = (currentService === 'sms');
+    const isRoamingService = (currentService === 'roaming');
+    const isSimService = (currentService === 'sim');
+    const hideCemSkeleton = isCallService || isSmsService || isSpamCallService || isRoamingService || isSimService;
+    const totalCols = isSpamCallService ? 10 : (hideCemSkeleton ? 11 : (isDataService ? 13 : 12));
     if (tbody) {
         renderTicketsSkeleton(tbody, totalCols);
     }
@@ -1578,7 +1712,7 @@ async function precheckSingleTicket(phone, incidentTime, btnElem) {
         const res = await fetch('/api/tickets/precheck_one', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone, incident_time: incidentTime })
+            body: JSON.stringify({ phone, incident_time: incidentTime, service_type: currentService })
         });
         const data = await res.json();
         if (data.success) {
@@ -1604,7 +1738,7 @@ async function precheckSingleTicket(phone, incidentTime, btnElem) {
 }
 
 async function loadTickets(force = false, resetPage = false) {
-    if (isHistoryStatsView) {
+    if (isHistoryStatsView || isUserManagementView) {
         return;
     }
     if (resetPage) {
@@ -1668,8 +1802,13 @@ async function loadTickets(force = false, resetPage = false) {
         const regWrap = document.getElementById('regionSelectWrapper');
         if (regWrap) regWrap.style.display = 'flex';
         const regSelect = document.getElementById('regionSelect');
+        const isAdmin = (data.user_role === 'admin') || isSystemAdmin || checkIsUserAdmin();
+        const navAdminSec = document.getElementById('navAdminSection');
+        if (navAdminSec) {
+            navAdminSec.style.display = 'block';
+        }
+
         if (regSelect) {
-            const isAdmin = (data.user_role === 'admin') || isSystemAdmin || checkIsUserAdmin();
             if (isAdmin) {
                 isSystemAdmin = true;
                 isRegionLocked = false;
@@ -1680,13 +1819,24 @@ async function loadTickets(force = false, resetPage = false) {
                 if (regSelect.value !== activeVal) {
                     regSelect.value = activeVal;
                 }
-            } else if (data.is_region_locked || urlRouteRegion) {
+            } else if (data.is_region_locked || (data.user_region && data.user_role === 'ktv')) {
                 isRegionLocked = true;
-                currentRegion = urlRouteRegion || data.region || currentRegion;
+                currentRegion = data.user_region || data.region || currentRegion;
+                applyRegionUI(true);
+                if (regSelect.value !== currentRegion) {
+                    regSelect.value = currentRegion;
+                }
+            } else if (urlRouteRegion) {
+                isRegionLocked = true;
+                currentRegion = urlRouteRegion;
                 applyRegionUI(true);
             } else {
                 isRegionLocked = false;
                 applyRegionUI(false);
+                const activeVal = currentRegion || data.region || 'ALL';
+                if (regSelect.value !== activeVal) {
+                    regSelect.value = activeVal;
+                }
             }
         }
 
@@ -1718,6 +1868,8 @@ async function loadTickets(force = false, resetPage = false) {
             const bNewCall = document.getElementById('badgeNewCall');
             const bNewSpamCall = document.getElementById('badgeNewSpamCall');
             const bNewSms = document.getElementById('badgeNewSms');
+            const bNewRoaming = document.getElementById('badgeNewRoaming');
+            const bNewSim = document.getElementById('badgeNewSim');
             const bNewOther = document.getElementById('badgeNewOther');
             const bNewVoice = document.getElementById('badgeNewVoice');
             const bTotalClosed = document.getElementById('badgeTotalClosed');
@@ -1731,6 +1883,8 @@ async function loadTickets(force = false, resetPage = false) {
             updateNavBadge(bNewCall, sc.tts_new_call);
             updateNavBadge(bNewSpamCall, sc.tts_new_spam_call);
             updateNavBadge(bNewSms, sc.tts_new_sms);
+            updateNavBadge(bNewRoaming, sc.tts_new_roaming);
+            updateNavBadge(bNewSim, sc.tts_new_sim);
             updateNavBadge(bNewOther, sc.tts_new_other);
             updateNavBadge(bNewVoice, sc.tts_new_voice);
             if (bTotalClosed) bTotalClosed.innerText = sc.total_closed || 0;
@@ -2752,43 +2906,14 @@ function renderTicketsTable(force = false) {
     // Cột Nhận Định / Nhà Mạng và số lượng cột theo từng phân hệ
     const isDataService = (currentService === 'data');
     const isSpamCallService = (currentService === 'spam_call');
-    const totalCols = isSpamCallService ? 10 : (isDataService ? 13 : 12);
+    const isCallService = (currentService === 'call');
+    const isSmsService = (currentService === 'sms');
+    const isRoamingService = (currentService === 'roaming');
+    const isSimService = (currentService === 'sim');
+    const hideCemColumn = isCallService || isSmsService || isSpamCallService || isRoamingService || isSimService;
+    const totalCols = isSpamCallService ? 10 : (hideCemColumn ? 11 : (isDataService ? 13 : 12));
 
-    const thStatus = document.getElementById('thStatus');
-    if (thStatus) {
-        thStatus.style.display = (isDataService || isSpamCallService) ? '' : 'none';
-        if (isSpamCallService) {
-            thStatus.innerText = 'Nhà Mạng';
-            thStatus.style.width = '8%';
-            thStatus.style.minWidth = '80px';
-        } else if (isDataService) {
-            thStatus.innerText = 'Nhận Định';
-            thStatus.style.width = '6.5%';
-            thStatus.style.minWidth = '85px';
-        }
-    }
-    const thCategory = document.getElementById('thCategory');
-    if (thCategory) {
-        if (isSpamCallService) {
-            thCategory.innerText = 'Cam Kết & File';
-            thCategory.style.width = '12%';
-            thCategory.style.minWidth = '130px';
-        } else if (currentService === 'call') {
-            thCategory.innerText = 'Loại Cuộc Gọi';
-        } else if (currentService === 'sms') {
-            thCategory.innerText = 'Loại Tin Nhắn';
-        } else {
-            thCategory.innerText = 'Loại PAKH';
-            thCategory.style.width = '7%';
-            thCategory.style.minWidth = '95px';
-        }
-    }
-    const thProfile = document.getElementById('thProfile');
-    if (thProfile) thProfile.style.display = isSpamCallService ? 'none' : '';
-    const thInfrastructure = document.getElementById('thInfrastructure');
-    if (thInfrastructure) thInfrastructure.style.display = isSpamCallService ? 'none' : '';
-    const thCemData = document.getElementById('thCemData');
-    if (thCemData) thCemData.style.display = isSpamCallService ? 'none' : '';
+    adjustTableColumnsLayout(currentService, currentTableTab);
 
     const filterStatus = document.getElementById('filterStatus');
     if (filterStatus) {
@@ -2809,14 +2934,12 @@ function renderTicketsTable(force = false) {
         } else {
             if (isSpamCallService) {
                 thAiSummary.innerText = 'Tóm Tắt Sự Cố & Phản Ánh';
-                thAiSummary.style.width = '20%';
-                thAiSummary.style.minWidth = '200px';
-            } else if (currentService === 'call' || currentService === 'sms' || currentService === 'other') {
+            } else if (currentService === 'sms') {
+                thAiSummary.innerText = 'Nội Dung Tin Nhắn';
+            } else if (currentService === 'call' || currentService === 'roaming' || currentService === 'sim' || currentService === 'other') {
                 thAiSummary.innerText = 'Nội Dung Phản Ánh';
             } else {
                 thAiSummary.innerText = 'Tóm Tắt Nội Dung PAKH';
-                thAiSummary.style.width = '12%';
-                thAiSummary.style.minWidth = '150px';
             }
             thAiSummary.style.textAlign = '';
             thAiSummary.title = '';
@@ -2912,11 +3035,12 @@ function renderTicketsTable(force = false) {
 
         const pkgTitleLower = (t.package_title || '').toLowerCase();
         const isDataTicket = (currentService === 'data') || (
-            currentService !== 'voice_sms' &&
+            (currentService === 'all' || currentService === '') &&
             (pkgTitleLower.includes('mobile internet') || pkgTitleLower.includes('data')) &&
             !pkgTitleLower.includes('(m0/gói data)') &&
             !pkgTitleLower.includes('gói cước mobile internet') &&
-            !pkgTitleLower.includes('cvqt')
+            !pkgTitleLower.includes('cvqt') &&
+            !pkgTitleLower.includes('roaming')
         );
         const isOtherPakh = !isDataTicket || (currentService === 'voice_sms');
         const isSmsTicket = (currentService === 'sms') ||
@@ -3141,7 +3265,7 @@ function renderTicketsTable(force = false) {
             compactSummaryHtml = `
                 <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding:1px 0;">
                     ${compactWardBadgeHtml}
-                    <div class="compact-ellipsis" style="font-size:11px; color:#1e293b; line-height:1.35; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(compactSummaryTooltip)}">
+                    <div class="compact-summary-text" title="${escapeHtml(compactSummaryTooltip)}">
                         ${escapeHtml(summaryText)}
                     </div>
                 </div>
@@ -3183,7 +3307,7 @@ function renderTicketsTable(force = false) {
                 compactSummaryHtml = `
                     <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding:1px 0;">
                         ${compactWardBadgeHtml}
-                        <div class="compact-ellipsis" style="font-size:11px; color:#1e293b; line-height:1.35; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(compactSummaryTooltip)}">
+                        <div class="compact-summary-text" title="${escapeHtml(compactSummaryTooltip)}">
                             ${escapeHtml(summaryText)}
                         </div>
                     </div>
@@ -3582,7 +3706,7 @@ function renderTicketsTable(force = false) {
                         `;
             }
 
-            if (currentService === 'call') {
+            if (currentService === 'call' || currentService === 'sms' || currentService === 'roaming' || currentService === 'sim') {
                 const isLocked = isNamLocked || raw.includes('NAM: 1') || raw.includes('Khóa dịch vụ') || raw.includes('Khóa GPRS');
                 const callStatusBadge = isLocked
                     ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:11px; padding:3px 8px; border-radius:4px; display:inline-block; font-weight:700;">NAM: 1 (KHÓA DỊCH VỤ)</span>`
@@ -3594,16 +3718,18 @@ function renderTicketsTable(force = false) {
                 if (isStrangeHss) {
                     hssBadge = `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:11px; padding:2px 7px; border-radius:4px; display:inline-block; font-weight:700;" title="Cảnh báo HSS Profile lạ: có thể lỗi cấu hình hoặc chưa kích hoạt VoLTE đúng cách">⚠️ HSS: ${escapeHtml(hssVal)} (PROFILE LẠ)</span>`;
                 } else if (hssVal) {
-                    hssBadge = `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-size:11px; padding:2px 7px; border-radius:4px; display:inline-block; font-weight:700;" title="HSS Profile của thuê bao trên Core (Cần thiết cho cấu hình VoLTE/IMS)">HSS: ${escapeHtml(hssVal)} (VoLTE)</span>`;
+                    hssBadge = `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-size:11px; padding:2px 7px; border-radius:4px; display:inline-block; font-weight:700;" title="HSS Profile của thuê bao trên Core">HSS: ${escapeHtml(hssVal)}</span>`;
                 } else {
-                    hssBadge = `<span style="color:#94a3b8; font-size:10.5px;">HSS: -- (VoLTE chưa xác định)</span>`;
+                    hssBadge = `<span style="color:#94a3b8; font-size:10.5px;">HSS: --</span>`;
                 }
 
                 let pkgContent = '';
+                const pkgTitleSection = (currentService === 'sms') ? 'GÓI TIN NHẮN / DỊCH VỤ:' : ((currentService === 'roaming') ? 'DỊCH VỤ CVQT / ROAMING:' : ((currentService === 'sim') ? 'DỊCH VỤ SIM / MULTISIM:' : 'GÓI THOẠI / DỊCH VỤ:'));
+                const noPkgText = (currentService === 'sms') ? 'Không có gói tin nhắn riêng' : ((currentService === 'roaming') ? 'Không có gói CVQT riêng' : ((currentService === 'sim') ? 'Không có thông tin SIM riêng' : 'Không có gói thoại riêng'));
                 if (sapcItems.length > 0) {
                     pkgContent = `
                         <div style="margin-top:6px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px;">
-                            <div style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; margin-bottom:3px;">GÓI THOẠI / DỊCH VỤ:</div>
+                            <div style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; margin-bottom:3px;">${pkgTitleSection}</div>
                             ${sapcItems.map(item => `
                                 <div style="margin-top:3px; font-size:11px;">
                                     <span style="color:#0f766e; font-weight:700;">${escapeHtml(item.name)}</span>
@@ -3613,7 +3739,7 @@ function renderTicketsTable(force = false) {
                         </div>
                     `;
                 } else {
-                    pkgContent = `<div style="color:#94a3b8; font-size:11px; font-style:italic; margin-top:4px;">Không có gói thoại riêng</div>`;
+                    pkgContent = `<div style="color:#94a3b8; font-size:11px; font-style:italic; margin-top:4px;">${noPkgText}</div>`;
                 }
                 pkgHtml = `
                     <div style="font-family:'JetBrains Mono', monospace; font-size:11.5px;">
@@ -3625,13 +3751,13 @@ function renderTicketsTable(force = false) {
                     </div>
                 `;
 
-                // Bản thu gọn 1 dòng cho cuộc gọi
+                // Bản thu gọn 1 dòng cho cuộc gọi và tin nhắn (bỏ hoàn toàn BTools)
                 let cParts = [];
                 if (hssVal) {
                     if (isStrangeHss) {
                         cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">HSS: ${escapeHtml(hssVal)} (LẠ)</span>`);
                     } else {
-                        cParts.push(`<span style="background:#eff6ff; color:#1d4ed8; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #bfdbfe;">HSS: ${escapeHtml(hssVal)} (VoLTE)</span>`);
+                        cParts.push(`<span style="background:#eff6ff; color:#1d4ed8; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #bfdbfe;">HSS: ${escapeHtml(hssVal)}</span>`);
                     }
                 }
                 cParts.push(isLocked
@@ -3939,6 +4065,10 @@ function renderTicketsTable(force = false) {
             pakhBadgeStyle = 'background:#f3e8ff; color:#7e22ce; border:1px solid #d8b4fe;';
         } else if (lowerType.includes('sms') || lowerType.includes('tin nhắn')) {
             pakhBadgeStyle = 'background:#fef3c7; color:#b45309; border:1px solid #fde68a;';
+        } else if (lowerType.includes('cvqt') || lowerType.includes('roaming') || lowerType.includes('quốc tế') || lowerType.includes('chuyển vùng')) {
+            pakhBadgeStyle = 'background:#e0e7ff; color:#4338ca; border:1px solid #c7d2fe;';
+        } else if (lowerType.includes('sim') || lowerType.includes('esim')) {
+            pakhBadgeStyle = 'background:#fce7f3; color:#be185d; border:1px solid #fbcfe8;';
         } else if (lowerType.includes('gói') || lowerType.includes('goi') || lowerType.includes('cước')) {
             pakhBadgeStyle = 'background:#dcfce7; color:#15803d; border:1px solid #86efac;';
         } else {
@@ -3952,11 +4082,11 @@ function renderTicketsTable(force = false) {
         return `
                     <!-- 1 DÒNG GỌN CHÍNH (COMPACT ROW) -->
                     <tr id="row-main-${ticketKey}" class="ticket-main-row ${isExpanded ? 'is-row-expanded' : ''}">
-                        <td style="text-align:center; vertical-align:middle; padding:2px 2px;">
+                        <td class="col-stt-cell" style="width:36px; min-width:36px; max-width:36px; text-align:center; vertical-align:middle; padding:2px 0;">
                             <div style="display:flex; align-items:center; justify-content:center;">
-                                <button id="btn-toggle-${ticketKey}" class="stt-expand-pill ${isExpanded ? 'is-expanded' : ''}" onclick="toggleTicketRow('${ticketKey}', event)" title="${isExpanded ? 'Bấm để thu nhỏ lại' : 'Bấm để xem chi tiết'}">
+                                <button id="btn-toggle-${ticketKey}" class="stt-expand-pill ${isExpanded ? 'is-expanded' : ''}" onclick="toggleTicketRow('${ticketKey}', event)" title="${isExpanded ? 'Bấm để thu gọn' : 'Bấm để xem chi tiết'}">
                                     <span class="stt-num">${globalIdx + 1}</span>
-                                    <svg class="stt-chevron" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <svg class="stt-chevron" viewBox="0 0 24 24" width="8" height="8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
                                         <polyline points="6 9 12 15 18 9"></polyline>
                                     </svg>
                                 </button>
@@ -3997,6 +4127,7 @@ function renderTicketsTable(force = false) {
                         <td style="text-align:center; vertical-align:middle; padding:2px 2px;">
                             ${compactRatHtml}
                         </td>
+                        ${!hideCemColumn ? `
                         <td style="vertical-align:middle; padding:2px 4px;">
                             <div class="compact-ellipsis" style="font-size:10px; color:#475569;" title="${escapeHtml(t.cem_data || '--')}">
                                 ${(() => {
@@ -4017,6 +4148,7 @@ function renderTicketsTable(force = false) {
                                 })()}
                             </div>
                         </td>
+                        ` : ''}
                         ` : ''}
                         <td style="vertical-align:middle; padding:2px 4px;">
                             ${isSpamCallModule 
@@ -4125,7 +4257,7 @@ function renderTicketsTable(force = false) {
                                 ` : `
                                 <div class="detail-card">
                                     <div class="detail-card-title">
-                                        <span>PROFILE & DỮ LIỆU CEM</span>
+                                        <span>${(isCallService || isSmsService) ? 'HỒ SƠ THUÊ BAO (SAPC / HLR)' : 'PROFILE & DỮ LIỆU CEM'}</span>
                                         <div style="display:flex; align-items:center; gap:8px;">
                                             ${isSmsTicket ? `<button type="button" onclick="openSmscCdrModal('${t.phone}', event)" style="background:#f0fdfa; border:1px solid #99f6e4; color:#0d9488; font-size:10.5px; font-weight:700; border-radius:4px; padding:1px 6px; cursor:pointer;" title="Tra cứu nhật ký tin nhắn SMSC CDR">SMSC CDR ↗</button>` : ''}
                                             <a href="http://10.155.42.218/checkall#" target="_blank" style="font-size:10.5px; color:#005baa; font-weight:700; text-decoration:none;" title="Mở cổng tra cứu SAPC (10.155.42.218/checkall#)">SAPC ↗</a>
@@ -4133,7 +4265,7 @@ function renderTicketsTable(force = false) {
                                     </div>
                                     <div style="flex:1; overflow-y:auto; max-height:290px; font-size:11px; line-height:1.4;">
                                         <div style="margin-bottom:8px;">${pkgHtml}</div>
-                                        ${(t.cem_data && t.cem_data !== '--') || (showVpnAlert && vpnAppName) ? `
+                                        ${(!isCallService && !isSmsService && ((t.cem_data && t.cem_data !== '--') || (showVpnAlert && vpnAppName))) ? `
                                              <div style="border-top:1px dashed #cbd5e1; padding-top:6px; margin-top:6px;">
                                                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                                                      <div style="display:flex; align-items:center; gap:6px;">
@@ -8928,4 +9060,358 @@ async function submitAiTeachFeedback() {
         }
     }
 }
+
+// =========================================================================
+// MODULE QUẢN TRỊ: QUẢN LÝ PHÂN VÙNG NHÂN VIÊN XỬ LÝ (TT SOC / ONEOSS)
+// CHỈ DÀNH RIÊNG CHO QUẢN TRỊ VIÊN (SUPERADMIN)
+// =========================================================================
+let cachedAdminUsers = [];
+
+function selectUserManagementModule(updateUrl = true) {
+    isUserManagementView = true;
+    isHistoryStatsView = false;
+
+    if (updateUrl && window.location.pathname !== '/quan-tri-ktv') {
+        history.pushState({ tab: 'quan-tri-ktv' }, '', '/quan-tri-ktv');
+    }
+
+    // 1. Highlight menu item
+    document.querySelectorAll('.nav-item').forEach(btn => btn.classList.remove('active'));
+    const activeBtn = document.getElementById('nav-user-management');
+    if (activeBtn) activeBtn.classList.add('active');
+
+    // 2. Ẩn tất cả các view khác
+    const mainTabs = document.getElementById('mainTabsHeader');
+    if (mainTabs) mainTabs.style.display = 'none';
+
+    const analyticsBox = document.getElementById('closedAnalyticsContainer');
+    if (analyticsBox) analyticsBox.style.display = 'none';
+
+    const tableDataView = document.getElementById('tableDataView');
+    if (tableDataView) tableDataView.style.display = 'none';
+
+    const flowAuditContainer = document.getElementById('flowAuditContainer');
+    if (flowAuditContainer) flowAuditContainer.style.display = 'none';
+
+    // 3. Hiển thị container Quản lý phân vùng KTV & Mô hình AI
+    const container = document.getElementById('userManagementContainer');
+    if (container) {
+        container.style.display = 'block';
+    }
+
+    // 4. Đồng bộ giá trị mô hình AI
+    const aiSel = document.getElementById('selectAiSummaryModel');
+    if (aiSel && currentAiEngine) {
+        aiSel.value = currentAiEngine;
+    }
+
+    // 5. Tải danh sách KTV từ máy chủ
+    loadAdminUsers();
+}
+window.selectUserManagementModule = selectUserManagementModule;
+
+async function loadAdminUsers() {
+    const tbody = document.getElementById('userMgmtTableBody');
+    if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:30px; color:#64748b;">Đang tải danh sách nhân viên phân vùng...</td></tr>';
+    }
+
+    try {
+        const clientAuthTok = getTtsNewAuthToken() || (getTtsAuthSession() ? getTtsAuthSession().token : '');
+        const reqHeaders = clientAuthTok ? { 'Authorization': clientAuthTok } : {};
+
+        const res = await fetch('/api/admin/users', { headers: reqHeaders });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.users)) {
+            cachedAdminUsers = data.users;
+            const badgeTotal = document.getElementById('badgeTotalUsers');
+            if (badgeTotal) badgeTotal.innerText = cachedAdminUsers.length;
+            const cntText = document.getElementById('userMgmtCount');
+            if (cntText) cntText.innerText = cachedAdminUsers.length;
+            if (data.is_admin) {
+                isSystemAdmin = true;
+                try { localStorage.setItem('pakh_is_admin', 'true'); } catch(e) {}
+            }
+            renderAdminUsersTable(cachedAdminUsers);
+        } else {
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:30px; color:#dc2626;">Không thể lấy danh sách: ${data.detail || data.message || 'Lỗi không xác định'}</td></tr>`;
+            }
+        }
+    } catch (err) {
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:30px; color:#dc2626;">Lỗi kết nối khi tải danh sách: ${err.message}</td></tr>`;
+        }
+    }
+}
+window.loadAdminUsers = loadAdminUsers;
+
+function renderAdminUsersTable(users) {
+    const tbody = document.getElementById('userMgmtTableBody');
+    if (!tbody) return;
+
+    if (!users || users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:36px; color:#64748b;">Không tìm thấy nhân viên nào phù hợp</td></tr>';
+        return;
+    }
+
+    const socBadges = {
+        'SOC1': { socLabel: 'SOC1', socStyle: 'background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;', regLabel: 'Miền Bắc', regStyle: 'background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe;' },
+        'SOC2': { socLabel: 'SOC2', socStyle: 'background:#dcfce7; color:#15803d; border:1px solid #bbf7d0;', regLabel: 'Miền Nam', regStyle: 'background:#f0fdf4; color:#166534; border:1px solid #bbf7d0;' },
+        'SOC3': { socLabel: 'SOC3', socStyle: 'background:#ffedd5; color:#c2410c; border:1px solid #fed7aa;', regLabel: 'Miền Trung', regStyle: 'background:#fdf4ff; color:#86198f; border:1px solid #f0abfc;' }
+    };
+
+    let html = '';
+    users.forEach((u, idx) => {
+        const socKey = (u.soc || 'SOC2').toUpperCase();
+        const b = socBadges[socKey] || { socLabel: socKey, socStyle: 'background:#f1f5f9; color:#475569; border:1px solid #cbd5e1;', regLabel: u.region || '--', regStyle: 'background:#f8fafc; color:#334155; border:1px solid #e2e8f0;' };
+        const uEscaped = escapeHtml(JSON.stringify(u)).replace(/'/g, '&#39;');
+        const isAdminRole = (u.role === 'admin' || u.username === 'quangvu');
+        const isSuperAdminUser = (u.username === 'quangvu');
+
+        html += `
+            <tr style="border-bottom:1px solid #e2e8f0; transition:background 0.15s ease;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                <td style="padding:10px 12px; text-align:center; color:#64748b; font-weight:600;">${idx + 1}</td>
+                <td style="padding:10px 12px;">
+                    <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:800; ${b.socStyle}">
+                        ${b.socLabel}
+                    </span>
+                </td>
+                <td style="padding:10px 12px;">
+                    <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:700; ${b.regStyle}">
+                        ${b.regLabel}
+                    </span>
+                </td>
+                <td style="padding:10px 14px; font-weight:700; color:#0f172a;">
+                    ${escapeHtml(u.name || u.username || '--')}
+                </td>
+                <td style="padding:10px 14px; font-family:\'JetBrains Mono\', monospace; color:#005baa; font-weight:600;">
+                    ${escapeHtml(u.username || '--')}
+                </td>
+                <td style="padding:10px 14px; color:#334155;">
+                    ${escapeHtml(u.email || '--')}
+                </td>
+                <td style="padding:10px 12px; text-align:center;">
+                    ${isAdminRole ? `
+                    <span style="background:#fef3c7; color:#b45309; font-size:11px; font-weight:700; padding:3px 8px; border-radius:4px; border:1px solid #fde68a; display:inline-block;" title="Có quyền khai báo & quản lý user">
+                        Quản Trị Viên (Admin)
+                    </span>
+                    ` : `
+                    <span style="background:#f1f5f9; color:#475569; font-size:11px; font-weight:600; padding:3px 8px; border-radius:4px; border:1px solid #cbd5e1; display:inline-block;">
+                        Kỹ Thuật Viên (KTV)
+                    </span>
+                    `}
+                </td>
+                <td style="padding:10px 12px; text-align:center;">
+                    <span style="background:#f0fdf4; color:#16a34a; font-size:11px; font-weight:700; padding:3px 8px; border-radius:4px; border:1px solid #bbf7d0; display:inline-block;">
+                        Được phép
+                    </span>
+                </td>
+                <td style="padding:10px 14px; text-align:center;">
+                    <div style="display:inline-flex; align-items:center; gap:6px;">
+                        <button type="button" class="btn btn-sm" onclick="openUserModal(JSON.parse(this.dataset.user))" data-user="${uEscaped}"
+                            style="padding:3px 8px; font-size:11px; font-weight:700; color:#0284c7; background:#f0f9ff; border:1px solid #bae6fd; border-radius:4px; cursor:pointer;"
+                            title="Chỉnh sửa thông tin và quyền hạn">
+                            Sửa
+                        </button>
+                        ${!isSuperAdminUser ? `
+                        <button type="button" class="btn btn-sm" onclick="deleteAdminUser('${escapeHtml(u.username)}', '${escapeHtml(u.name || u.username)}')"
+                            style="padding:3px 8px; font-size:11px; font-weight:700; color:#dc2626; background:#fef2f2; border:1px solid #fecaca; border-radius:4px; cursor:pointer;"
+                            title="Xóa nhân viên khỏi danh sách cho phép">
+                            Xóa
+                        </button>
+                        ` : ''}
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+
+    tbody.innerHTML = html;
+}
+window.renderAdminUsersTable = renderAdminUsersTable;
+
+function filterAdminUsersTable() {
+    const q = (document.getElementById('searchUserMgmtInput')?.value || '').toLowerCase().trim();
+    const socFilter = document.getElementById('filterSocSelect')?.value || 'ALL';
+
+    const filtered = cachedAdminUsers.filter(u => {
+        const matchSoc = (socFilter === 'ALL') || (u.soc && u.soc.toUpperCase() === socFilter);
+        const matchText = !q || 
+            (u.name && u.name.toLowerCase().includes(q)) ||
+            (u.username && u.username.toLowerCase().includes(q)) ||
+            (u.email && u.email.toLowerCase().includes(q));
+        return matchSoc && matchText;
+    });
+
+    const cntText = document.getElementById('userMgmtCount');
+    if (cntText) cntText.innerText = filtered.length;
+
+    renderAdminUsersTable(filtered);
+}
+window.filterAdminUsersTable = filterAdminUsersTable;
+
+function openUserModal(userObj = null) {
+    const modal = document.getElementById('modalUserMgmt');
+    const title = document.getElementById('modalUserMgmtTitle');
+    const msg = document.getElementById('modalUserMgmtMsg');
+    if (msg) msg.style.display = 'none';
+
+    if (userObj) {
+        if (title) title.innerText = 'CHỈNH SỬA THÔNG TIN NHÂN VIÊN';
+        document.getElementById('inputUserSoc').value = userObj.soc || 'SOC2';
+        document.getElementById('inputUserName').value = userObj.name || '';
+        document.getElementById('inputUserUsername').value = userObj.username || '';
+        document.getElementById('inputUserEmail').value = userObj.email || '';
+        const roleSel = document.getElementById('inputUserRole');
+        if (roleSel) roleSel.value = userObj.role || (userObj.username === 'quangvu' ? 'admin' : 'ktv');
+        document.getElementById('inputUserOriginalKey').value = userObj.username || '';
+        document.getElementById('inputUserUsername').disabled = true;
+    } else {
+        if (title) title.innerText = 'THÊM NHÂN VIÊN MỚI';
+        document.getElementById('inputUserSoc').value = 'SOC2';
+        document.getElementById('inputUserName').value = '';
+        document.getElementById('inputUserUsername').value = '';
+        document.getElementById('inputUserEmail').value = '';
+        const roleSel = document.getElementById('inputUserRole');
+        if (roleSel) roleSel.value = 'ktv';
+        document.getElementById('inputUserOriginalKey').value = '';
+        document.getElementById('inputUserUsername').disabled = false;
+    }
+
+    if (modal) modal.style.display = 'flex';
+}
+window.openUserModal = openUserModal;
+
+function closeUserModal() {
+    const modal = document.getElementById('modalUserMgmt');
+    if (modal) modal.style.display = 'none';
+}
+window.closeUserModal = closeUserModal;
+
+async function handleUserModalSubmit(e) {
+    if (e && e.preventDefault) e.preventDefault();
+
+    const soc = document.getElementById('inputUserSoc')?.value || 'SOC2';
+    const name = document.getElementById('inputUserName')?.value.trim() || '';
+    const username = document.getElementById('inputUserUsername')?.value.trim() || '';
+    const email = document.getElementById('inputUserEmail')?.value.trim() || '';
+    const role = document.getElementById('inputUserRole')?.value || 'ktv';
+    const msgEl = document.getElementById('modalUserMgmtMsg');
+    const btnSubmit = document.getElementById('btnSubmitUserModal');
+
+    if (!username) {
+        alert('Vui lòng nhập tên đăng nhập (username)');
+        return;
+    }
+
+    if (btnSubmit) {
+        btnSubmit.disabled = true;
+        btnSubmit.innerText = 'Đang lưu...';
+    }
+
+    try {
+        const clientAuthTok = getTtsNewAuthToken() || (getTtsAuthSession() ? getTtsAuthSession().token : '');
+        const res = await fetch('/api/admin/users', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': clientAuthTok ? (clientAuthTok.startsWith('Bearer ') ? clientAuthTok : `Bearer ${clientAuthTok}`) : ''
+            },
+            body: JSON.stringify({
+                soc: soc,
+                name: name,
+                username: username,
+                email: email,
+                role: role
+            })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+            closeUserModal();
+            alert(data.message || 'Đã lưu thông tin nhân viên thành công!');
+            await loadAdminUsers();
+        } else {
+            if (msgEl) {
+                msgEl.style.display = 'block';
+                msgEl.style.background = '#fef2f2';
+                msgEl.style.color = '#dc2626';
+                msgEl.style.border = '1px solid #fecaca';
+                msgEl.innerText = data.message || data.detail || 'Lưu thất bại';
+            } else {
+                alert(data.message || 'Lưu thất bại');
+            }
+        }
+    } catch (err) {
+        alert('Lỗi kết nối khi lưu nhân viên: ' + err.message);
+    } finally {
+        if (btnSubmit) {
+            btnSubmit.disabled = false;
+            btnSubmit.innerText = 'Lưu Thông Tin';
+        }
+    }
+}
+window.handleUserModalSubmit = handleUserModalSubmit;
+
+async function deleteAdminUser(username, name) {
+    if (!username) return;
+    if (username.toLowerCase() === 'quangvu') {
+        alert('Không thể xóa tài khoản Quản trị viên hệ thống!');
+        return;
+    }
+
+    const confirmMsg = `XÁC NHẬN XÓA NHÂN VIÊN:\n\n` +
+        `• Họ và tên: ${name || username}\n` +
+        `• Tên đăng nhập: ${username}\n\n` +
+        `Sau khi xóa, tài khoản này sẽ KHÔNG THỂ đăng nhập hoặc truy cập WebApp nữa.\n` +
+        `Bạn có chắc chắn muốn xóa nhân viên này khỏi hệ thống?`;
+
+    if (!confirm(confirmMsg)) return;
+
+    try {
+        const clientAuthTok = getTtsNewAuthToken() || (getTtsAuthSession() ? getTtsAuthSession().token : '');
+        const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': clientAuthTok ? (clientAuthTok.startsWith('Bearer ') ? clientAuthTok : `Bearer ${clientAuthTok}`) : ''
+            }
+        });
+
+        const data = await res.json();
+        if (data.success) {
+            alert(data.message || `Đã xóa thành công nhân viên [${name}]!`);
+            await loadAdminUsers();
+        } else {
+            alert('Lỗi khi xóa: ' + (data.message || data.detail || 'Thất bại'));
+        }
+    } catch (err) {
+        alert('Lỗi kết nối khi xóa nhân viên: ' + err.message);
+    }
+}
+window.deleteAdminUser = deleteAdminUser;
+
+// Tự động cập nhật số lượng nhân viên phân vùng và đồng bộ quyền Quản trị viên khi mở trang
+setTimeout(() => {
+    try {
+        fetch('/api/admin/users')
+            .then(r => r.json())
+            .then(data => {
+                if (data && data.success && Array.isArray(data.users)) {
+                    cachedAdminUsers = data.users;
+                    const b1 = document.getElementById('badgeTotalUsers');
+                    if (b1) b1.innerText = data.users.length;
+                    const cnt = document.getElementById('userMgmtCount');
+                    if (cnt) cnt.innerText = data.users.length;
+                    if (data.is_admin) {
+                        isSystemAdmin = true;
+                        try { localStorage.setItem('pakh_is_admin', 'true'); } catch(e) {}
+                    }
+                }
+            })
+            .catch(() => {});
+    } catch(e) {}
+}, 500);
+
+
 

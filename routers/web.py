@@ -39,16 +39,23 @@ SPA_ROUTES = [
     "/ttsmoi/outbound-block",
     "/ttsmoi/tin-nhan",
     "/ttsmoi/sms",
+    "/ttsmoi/chuyen-vung-quoc-te",
+    "/ttsmoi/roaming",
+    "/ttsmoi/cvqt",
+    "/ttsmoi/sim-multisim",
+    "/ttsmoi/sim",
     "/ttsmoi/khac",
     "/ttsmoi/other",
     "/thong-ke",
     "/lich-su",
-    "/kiem-tra-luong"
+    "/kiem-tra-luong",
+    "/quan-tri-ktv",
+    "/admin-users"
 ]
 
 # Tự động bổ sung các Route phân vùng 3 Miền (mien-bac, mien-trung, mien-nam, mb, mt, mn)
 REGION_SLUGS = ["mien-bac", "mien-trung", "mien-nam", "mb", "mt", "mn"]
-SERVICE_SLUGS = ["data", "mobileinternet", "cuoc-goi", "call", "voice", "voice_sms", "chan-goi-ngoai-mang", "spam-call", "spam_call", "outbound-block", "tin-nhan", "sms", "khac", "other", "thong-ke", "lich-su"]
+SERVICE_SLUGS = ["data", "mobileinternet", "cuoc-goi", "call", "voice", "voice_sms", "chan-goi-ngoai-mang", "spam-call", "spam_call", "outbound-block", "tin-nhan", "sms", "chuyen-vung-quoc-te", "roaming", "cvqt", "sim-multisim", "sim", "khac", "other", "thong-ke", "lich-su"]
 
 for reg in REGION_SLUGS:
     SPA_ROUTES.append(f"/{reg}")

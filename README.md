@@ -111,7 +111,26 @@ Mỗi ngày, hệ thống tiếp nhận khối lượng lớn các phản ánh t
 | **`services/`** | Các worker nền: Điều phối chu kỳ quét đa luồng (`automation_worker.py`), xử lý tiền kiểm song song Data TTS Mới/Cũ (`tts_new_data.py`, `tts_old_api_data.py`), tiền kiểm Thoại/SMS (`tts_new_voice.py`, `tts_old_api_voice.py`, `voice_precheck.py`). |
 | **`templates/dashboard.html`** | Giao diện điều hành tập trung Single Page Application (SPA), tích hợp điều khiển và hiển thị thời gian thực. |
 | **`static/css/dashboard.css`** | Thiết kế phong cách VNPT hiện đại: Chuẩn nhận diện viễn thông chuyên nghiệp, tối ưu không gian hiển thị thông tin kỹ thuật. |
-| **`static/js/dashboard.js`** | Xử lý logic phía client: WebSocket realtime feed, bộ lọc động, bảng dữ liệu, sắp xếp 2 chiều, drawer chi tiết và modal xử lý. |
+| **`static/js/dashboard.js`** | Điểm khởi nhập (Entry Point) của Single Page App: Khởi tạo ứng dụng, WebSocket realtime, cron nạp dữ liệu định kỳ, SPA router. |
+
+### 3.1. Bản Đồ Chỉ Mục Frontend JavaScript (`static/js/modules/`)
+
+Hệ thống Single Page App phía client được module hóa thành các tầng chuyên biệt nhằm tránh phình to code, tăng tốc độ định vị lỗi và cô lập rủi ro:
+
+| File Module | Phạm vi & Nghiệp vụ phụ trách | Các hàm & biến hạt nhân chính |
+| :--- | :--- | :--- |
+| **`modules/core_state.js`** | Quản lý trạng thái ứng dụng toàn cục, Interceptor tự động gắn Bearer Token vào `window.fetch`, Chuyển đổi Theme Sáng/Tối, Thu phóng Sidebar danh mục, Kiểm tra quyền Quản trị. | `window.fetch` interceptor, `getAppTheme()`, `toggleAppTheme()`, `toggleSidebarCollapse()`, `checkIsUserAdmin()` |
+| **`modules/auth_session.js`** | Quản lý phiên làm việc KTV: Đăng nhập OneOSS TTS Mới/TTS Cũ, xác thực OTP, quản lý Session Storage và phân quyền Multi-user. | `openLoginModal()`, `handleLogin()`, `submitOtp()`, `logout()`, `checkAuthStatus()`, `loadUserSession()` |
+| **`modules/geo_cell.js`** | Định vị trạm phát sóng Cell BTS từ Service Port 1708, Reverse Geocoding tọa độ GPS sang Phường/Xã và 34 Tỉnh/TP mới, cập nhật địa bàn vào phiếu. | `fetchCellInfoClient()`, `quickApplyWardFromCell()`, `loadVnLocations()`, `ttsNewTicketBoundaryCache` |
+| **`modules/toolbar_scan.js`** | Thanh công cụ điều khiển tập trung (Idle Bar): Bộ lọc phạm vi 3 Miền (MB/MT/MN) và Tỉnh/TP, Cấu hình đóng tự động (Auto-Close Unified), Nút quét đồng bộ một chạm. | `toggleScopeDropdown()`, `saveAutoCloseUnifiedConfig()`, `startUnifiedScanning()`, `triggerBatchPrecheck()` |
+| **`modules/table_layout.js`** | Điều phối định dạng bảng phiếu: Khóa cứng cột STT chuẩn xác 36px, phân bổ tỷ lệ % mở rộng cho cột Nội dung & 2 cột Ý kiến/Phản hồi theo từng module dịch vụ. | `adjustTableColumnsLayout()`, `selectModule()`, `selectHistoryModule()`, `switchTableTab()`, `renderTicketsSkeleton()` |
+| **`modules/table_render.js`** | Render danh sách phiếu (`ticketsTable`): Tạo dòng rút gọn (compact row), khung chi tiết mở rộng (detail row), badge nhận định kỹ thuật, tinh chỉnh gói cước SAPC/BTools. | `renderTicketsTable()`, `toggleTicketRow()`, `renderDetailCard()`, `formatClosedTimeDisplay()`, `refineBtoolsWithSapc()` |
+| **`modules/ticket_actions.js`** | Xử lý thao tác trên phiếu: Tiền kiểm lại theo yêu cầu, Chuyển bước 2.3 -> 2.4, Đóng phiếu 2.6, Đóng phương án 5.1, Đóng phiếu TTS Cũ, Lưu ý kiến KTV & nội dung phản hồi. | `precheckSingleTicket()`, `handleMoveToStep24()`, `closeTtsNewTicketApi()`, `closeTtsOldApiTicket()`, `updateTicket()` |
+| **`modules/modal_popups.js`** | Quản lý các modal popup liên kết hệ thống ngoài: Kết nối Core SAPC (`10.155.42.218`), Xác thực CCOS GQKN, Đăng nhập phiên OneOSS TTS Mới. | `toggleSapcPopup()`, `toggleCcosPopup()`, `toggleTtsNewPopup()`, `submitCcosOtp()`, `checkSapcSession()` |
+| **`modules/smsc_cdr.js`** | Phân hệ tra cứu bản tin SMSC CDR: Tìm kiếm nhật ký tin nhắn gửi/nhận, mã phân phối kết quả (Delivery Status), đối soát lỗi tin nhắn. | `openSmscCdrModal()`, `closeSmscCdrModal()`, `fetchSmscCdrLogs()`, `renderSmscCdrTable()` |
+| **`modules/ai_teach.js`** | Phân hệ huấn luyện AI (Few-shot learning): Chỉnh sửa cấu trúc tóm tắt 6 mục chuẩn, lưu mẫu học tập cho AI Interpreter. | `openAiTeachModal()`, `closeAiTeachModal()`, `saveAiTrainingSample()`, `applyAiSampleToPrompt()` |
+| **`modules/live_log.js`** | Dropdown Live Log Terminal: Hiển thị dòng sự kiện quét ngầm realtime trên thanh Idle bar, lọc nhật ký lỗi và xóa vết. | `toggleLiveLogDropdown()`, `appendLiveLog()`, `clearLiveLogs()`, `filterLiveLogs()` |
+| **`modules/user_management.js`** | Quản trị phân vùng KTV: Cấu hình địa bàn quản lý cho từng tài khoản SOC, Flow Audit (truy vết dòng đời xử lý phiếu), Xuất báo cáo Excel. | `loadAdminUsers()`, `saveUserRegionMapping()`, `renderFlowAuditTable()`, `exportFlowAuditExcel()` |
 
 ---
 

@@ -1164,52 +1164,84 @@
             background-color: #f0f7ff !important;
             border-bottom: 1px solid #bae6fd !important;
         }
-        /* NÚT / PILL MỞ RỘNG HIỆN ĐẠI (EXPAND PILL / CHEVRON) */
+
+        /* KHÓA CỨNG CỘT STT - CỐ ĐỊNH CHUẨN XÁC 36PX TRÊN TOÀN BỘ CÁC MODULE */
+        #ticketsTable th:first-child,
+        #ticketsTable td:first-child,
+        #ticketsTable th.col-stt-header,
+        #ticketsTable td.col-stt-cell,
+        .col-stt-header,
+        .col-stt-cell {
+            width: 36px !important;
+            min-width: 36px !important;
+            max-width: 36px !important;
+            inline-size: 36px !important;
+            padding: 4px 0 !important;
+            text-align: center !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+            white-space: nowrap !important;
+        }
+
+        /* NÚT SỐ THỨ TỰ & MỞ RỘNG (STT COMPACT EXPAND BUTTON) */
         .stt-expand-pill {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 5px;
-            padding: 2px 8px;
-            height: 24px;
-            min-width: 44px;
-            border-radius: 20px;
-            background: #ffffff;
-            border: 1px solid #cbd5e1;
-            color: #334155;
+            gap: 2.5px;
+            padding: 0 4px;
+            height: 22px;
+            min-width: 24px;
+            border-radius: 4px;
+            background: transparent;
+            border: 1px solid transparent;
+            color: #475569;
             cursor: pointer;
-            font-size: 11px;
+            font-size: 11.5px;
             font-weight: 700;
             font-family: 'JetBrains Mono', monospace;
             line-height: 1;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: all 0.15s ease;
             user-select: none;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
         }
         .stt-expand-pill:hover {
-            background: #eff6ff;
+            background: #f1f5f9;
             color: #005baa;
-            border-color: #93c5fd;
-            transform: translateY(-1px);
-            box-shadow: 0 3px 6px rgba(0, 91, 170, 0.15);
+            border-color: #e2e8f0;
         }
         .stt-expand-pill .stt-chevron {
-            transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            color: #64748b;
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            color: #94a3b8;
             flex-shrink: 0;
+            opacity: 0.65;
         }
         .stt-expand-pill:hover .stt-chevron {
             color: #005baa;
+            opacity: 1;
         }
         .stt-expand-pill.is-expanded {
-            background: #005baa;
-            color: #ffffff;
-            border-color: #005baa;
-            box-shadow: 0 2px 6px rgba(0, 91, 170, 0.3);
+            background: #e0f2fe;
+            color: #005baa;
+            border-color: #bae6fd;
+            font-weight: 800;
         }
         .stt-expand-pill.is-expanded .stt-chevron {
             transform: rotate(180deg);
-            color: #ffffff;
+            color: #0284c7;
+            opacity: 1;
+        }
+
+        /* NỘI DUNG PHẢN ÁNH GỌN (CHO PHÉP HIỂN THỊ 2 DÒNG ĐẦY ĐỦ RÕ RÀNG) */
+        .compact-summary-text {
+            font-size: 11.5px;
+            color: #1e293b;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            word-break: break-word;
         }
 
         .btn-toggle-expand {
@@ -2890,19 +2922,31 @@
         }
 
         [data-theme="dark"] .stt-expand-pill {
-            background: #21262d;
-            border-color: #30363d;
-            color: #c9d1d9;
+            background: transparent;
+            border-color: transparent;
+            color: #94a3b8;
         }
         [data-theme="dark"] .stt-expand-pill:hover {
-            background: #30363d;
+            background: #21262d;
+            border-color: #30363d;
             color: #58a6ff;
-            border-color: #58a6ff;
+        }
+        [data-theme="dark"] .stt-expand-pill .stt-chevron {
+            color: #64748b;
+        }
+        [data-theme="dark"] .stt-expand-pill:hover .stt-chevron {
+            color: #58a6ff;
         }
         [data-theme="dark"] .stt-expand-pill.is-expanded {
-            background: #1f6feb;
-            color: #ffffff;
+            background: rgba(31, 111, 235, 0.2);
+            color: #58a6ff;
             border-color: #1f6feb;
+        }
+        [data-theme="dark"] .stt-expand-pill.is-expanded .stt-chevron {
+            color: #58a6ff;
+        }
+        [data-theme="dark"] .compact-summary-text {
+            color: #e2e8f0;
         }
         [data-theme="dark"] tr.ticket-main-row.is-row-expanded td {
             background-color: #1c2128 !important;

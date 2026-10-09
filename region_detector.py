@@ -10,6 +10,8 @@ Tuân thủ tuyệt đối bảng sáp nhập 34 Tỉnh/TP mới của Việt Na
 """
 
 import re
+import json
+from pathlib import Path
 from typing import Optional, Tuple, Dict
 
 # 34 Đơn vị hành chính cấp Tỉnh/TP mới và Miền tương ứng
@@ -531,21 +533,90 @@ def is_superadmin(user_info: dict) -> bool:
     if username in ("admin", "superadmin", "quantri", "root", "dev"):
         return True
 
+    # 5. Kiểm tra role admin được cấp trong file user_regions.json
+    try:
+        cfg = get_user_regions_config()
+        for u in cfg.get("users", []):
+            if str(u.get("role") or "").lower() == "admin":
+                u_name = str(u.get("username") or "").lower().strip()
+                u_mail = str(u.get("email") or "").lower().strip()
+                if (username and username == u_name) or (email and email == u_mail):
+                    return True
+    except Exception:
+        pass
+
     return False
+
+
+USER_REGIONS_FILE = Path(__file__).resolve().parent / "user_regions.json"
+
+
+def get_user_regions_config() -> dict:
+    """Đọc cấu hình phân vùng KTV từ user_regions.json."""
+    if USER_REGIONS_FILE.exists():
+        try:
+            with open(USER_REGIONS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
 
 
 def detect_user_region(user_info: dict) -> str:
     """
     Nhận diện vùng miền của User KTV khi đăng nhập TTS Mới (OneOSS).
+    Ưu tiên cao nhất tra cứu từ file cấu hình 'user_regions.json'.
     Nếu user thuộc Super Admin (quangvu, quangvu@vnpt.vn, admin localhost) -> Trả về 'ALL'
-    Nếu không -> Trả về 'MB', 'MN' hoặc 'MT' theo chuẩn Quy trình OneOSS (SOC1/SOC2/SOC3).
+    Nếu không -> Trả về 'MB', 'MN' hoặc 'MT' theo TT SOC (SOC1=MB, SOC2=MN, SOC3=MT).
     """
     if is_superadmin(user_info):
         return "ALL"
 
-    username = str(user_info.get("userName") or user_info.get("username") or user_info.get("ma_nd") or "").lower()
+    username = str(
+        user_info.get("userName") or 
+        user_info.get("username") or 
+        user_info.get("TaiKhoan") or 
+        user_info.get("taikhoan") or 
+        user_info.get("ma_nd") or 
+        ""
+    ).lower().strip()
 
-    # Nhận diện theo mã đơn vị / tên đơn vị / quy trình phụ trách trong OneOSS
+    email = str(
+        user_info.get("email") or 
+        user_info.get("mail") or 
+        ""
+    ).lower().strip()
+
+    display_name = str(
+        user_info.get("displayName") or 
+        user_info.get("name") or 
+        user_info.get("HoTen") or 
+        user_info.get("hoten") or 
+        ""
+    ).lower().strip()
+
+    # 1. Tra cứu trực tiếp từ file cấu hình user_regions.json (ưu tiên cao nhất)
+    cfg = get_user_regions_config()
+    users_list = cfg.get("users", [])
+    soc_map = cfg.get("soc_mapping", {"SOC1": "MB", "SOC2": "MN", "SOC3": "MT"})
+
+    for u in users_list:
+        cfg_user = str(u.get("username") or "").lower().strip()
+        cfg_email = str(u.get("email") or "").lower().strip()
+        cfg_name = str(u.get("name") or "").lower().strip()
+        cfg_reg = str(u.get("region") or soc_map.get(u.get("soc"), "")).upper()
+
+        # Khớp theo username
+        if username and (username == cfg_user or (cfg_email and username == cfg_email.split("@")[0])):
+            return cfg_reg
+        # Khớp theo email
+        if email and (email == cfg_email or (cfg_user and email.split("@")[0] == cfg_user)):
+            return cfg_reg
+        # Khớp theo tên hiển thị
+        if display_name and cfg_name and (display_name == cfg_name or cfg_name in display_name or display_name in cfg_name):
+            return cfg_reg
+
+    # 2. Fallback: Nhận diện theo mã đơn vị / tên đơn vị / quy trình phụ trách trong OneOSS
     full_text = " ".join([
         str(user_info.get("don_vi") or ""),
         str(user_info.get("ma_don_vi") or ""),
@@ -562,4 +633,175 @@ def detect_user_region(user_info: dict) -> str:
         return "MT"
 
     return user_info.get("region") or "MN"
+
+
+def is_user_permitted(user_info: dict) -> Tuple[bool, Optional[dict]]:
+    """
+    Kiểm tra xem user có được cấp quyền truy cập WebApp theo danh sách whitelist trong user_regions.json hay không.
+    Trả về: (is_permitted, user_record)
+    Superadmin luôn được cấp quyền (True, {...}).
+    """
+    if not user_info:
+        return False, None
+
+    if is_superadmin(user_info):
+        return True, {
+            "username": "quangvu",
+            "name": "Lê Quang Vũ (Quản trị viên)",
+            "email": "quangvu@vnpt.vn",
+            "soc": "SOC2",
+            "region": "ALL",
+            "role": "admin"
+        }
+
+    username = str(
+        user_info.get("userName") or 
+        user_info.get("username") or 
+        user_info.get("TaiKhoan") or 
+        user_info.get("taikhoan") or 
+        user_info.get("ma_nd") or 
+        ""
+    ).lower().strip()
+
+    email = str(
+        user_info.get("email") or 
+        user_info.get("mail") or 
+        ""
+    ).lower().strip()
+
+    display_name = str(
+        user_info.get("displayName") or 
+        user_info.get("name") or 
+        user_info.get("HoTen") or 
+        user_info.get("hoten") or 
+        ""
+    ).lower().strip()
+
+    cfg = get_user_regions_config()
+    users_list = cfg.get("users", [])
+    soc_map = cfg.get("soc_mapping", {"SOC1": "MB", "SOC2": "MN", "SOC3": "MT"})
+
+    for u in users_list:
+        cfg_user = str(u.get("username") or "").lower().strip()
+        cfg_email = str(u.get("email") or "").lower().strip()
+        cfg_name = str(u.get("name") or "").lower().strip()
+        cfg_soc = str(u.get("soc") or "").upper().strip()
+        cfg_reg = str(u.get("region") or soc_map.get(cfg_soc, "MN")).upper().strip()
+
+        matched = False
+        if username and (username == cfg_user or (cfg_email and username == cfg_email.split("@")[0])):
+            matched = True
+        elif email and (email == cfg_email or (cfg_user and email.split("@")[0] == cfg_user)):
+            matched = True
+        elif display_name and cfg_name and (display_name == cfg_name or cfg_name in display_name or display_name in cfg_name):
+            matched = True
+
+        if matched:
+            res_u = dict(u)
+            res_u["region"] = cfg_reg
+            res_u["soc"] = cfg_soc
+            res_u["role"] = str(u.get("role") or ("admin" if cfg_user == "quangvu" else "ktv")).lower()
+            return True, res_u
+
+    return False, None
+
+
+def save_user_to_config(user_data: dict) -> Tuple[bool, str]:
+    """
+    Thêm hoặc cập nhật một user vào file user_regions.json.
+    user_data gồm: username, name, email, soc (SOC1/SOC2/SOC3), role (admin/ktv).
+    """
+    cfg = get_user_regions_config()
+    if not cfg:
+        cfg = {
+            "_ghi_chu": "Cấu hình phân vùng KTV theo TT SOC (SOC1 = Miền Bắc MB, SOC2 = Miền Nam MN, SOC3 = Miền Trung MT). Thêm, sửa KTV tại danh sách 'users'.",
+            "soc_mapping": {"SOC1": "MB", "SOC2": "MN", "SOC3": "MT"},
+            "users": []
+        }
+    users_list = cfg.get("users", [])
+    soc_map = cfg.get("soc_mapping", {"SOC1": "MB", "SOC2": "MN", "SOC3": "MT"})
+
+    raw_user = str(user_data.get("username") or "").strip().lower()
+    raw_email = str(user_data.get("email") or "").strip().lower()
+    raw_name = str(user_data.get("name") or "").strip()
+    raw_soc = str(user_data.get("soc") or "SOC2").strip().upper()
+    raw_role = str(user_data.get("role") or ("admin" if raw_user == "quangvu" else "ktv")).strip().lower()
+    if raw_role not in ("admin", "ktv"):
+        raw_role = "ktv"
+
+    if not raw_user and raw_email:
+        raw_user = raw_email.split("@")[0]
+    if not raw_email and raw_user:
+        raw_email = f"{raw_user}@vnpt.vn"
+
+    if not raw_user:
+        return False, "Thiếu tên đăng nhập (username)"
+
+    if raw_soc not in ("SOC1", "SOC2", "SOC3"):
+        return False, f"TT SOC không hợp lệ ({raw_soc}). Vui lòng chọn SOC1, SOC2 hoặc SOC3"
+
+    reg = soc_map.get(raw_soc, "MN")
+
+    # Kiểm tra xem user đã tồn tại chưa để cập nhật hoặc thêm mới
+    found_idx = -1
+    for i, u in enumerate(users_list):
+        u_name = str(u.get("username") or "").lower().strip()
+        u_mail = str(u.get("email") or "").lower().strip()
+        if (raw_user and u_name == raw_user) or (raw_email and u_mail == raw_email):
+            found_idx = i
+            break
+
+    entry = {
+        "soc": raw_soc,
+        "region": reg,
+        "name": raw_name or raw_user,
+        "email": raw_email,
+        "username": raw_user,
+        "role": raw_role
+    }
+
+    if found_idx >= 0:
+        users_list[found_idx] = entry
+    else:
+        users_list.append(entry)
+
+    cfg["users"] = users_list
+    try:
+        with open(USER_REGIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        return True, f"Đã lưu thành công KTV [{raw_name or raw_user}] ({raw_soc} - {reg})"
+    except Exception as e:
+        return False, f"Lỗi ghi file user_regions.json: {e}"
+
+
+def delete_user_from_config(identifier: str) -> Tuple[bool, str]:
+    """
+    Xóa một user khỏi file user_regions.json theo username hoặc email.
+    """
+    cfg = get_user_regions_config()
+    users_list = cfg.get("users", [])
+    raw_id = str(identifier or "").strip().lower()
+
+    new_list = []
+    deleted_name = None
+    for u in users_list:
+        u_name = str(u.get("username") or "").lower().strip()
+        u_mail = str(u.get("email") or "").lower().strip()
+        if u_name == raw_id or u_mail == raw_id:
+            deleted_name = u.get("name") or u_name
+            continue
+        new_list.append(u)
+
+    if deleted_name is None:
+        return False, f"Không tìm thấy KTV với định danh [{raw_id}]"
+
+    cfg["users"] = new_list
+    try:
+        with open(USER_REGIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        return True, f"Đã xóa thành công KTV [{deleted_name}]"
+    except Exception as e:
+        return False, f"Lỗi khi xóa khỏi user_regions.json: {e}"
+
+
 

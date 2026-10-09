@@ -1,0 +1,123 @@
+{
+  "_ghi_chu": "Cấu hình phân vùng KTV theo TT SOC (SOC1 = Miền Bắc MB, SOC2 = Miền Nam MN, SOC3 = Miền Trung MT). Thêm, sửa KTV tại danh sách 'users'.",
+  "soc_mapping": {
+    "SOC1": "MB",
+    "SOC2": "MN",
+    "SOC3": "MT"
+  },
+  "users": [
+    {
+      "soc": "SOC1",
+      "region": "MB",
+      "name": "Nguyễn Thị Hồng Hạnh",
+      "email": "nguyenthihanh@vnpt.vn",
+      "username": "nguyenthihanh"
+    },
+    {
+      "soc": "SOC1",
+      "region": "MB",
+      "name": "Lương Thị Thủy",
+      "email": "luongthithuy@vnpt.vn",
+      "username": "luongthithuy"
+    },
+    {
+      "soc": "SOC1",
+      "region": "MB",
+      "name": "Trần Trung Tuấn",
+      "email": "trantrungtuan@vnpt.vn",
+      "username": "trantrungtuan"
+    },
+    {
+      "soc": "SOC1",
+      "region": "MB",
+      "name": "Nguyễn Thị Thu Hằng",
+      "email": "thuhang@vnpt.vn",
+      "username": "thuhang"
+    },
+    {
+      "soc": "SOC1",
+      "region": "MB",
+      "name": "Lê Minh Đức",
+      "email": "duclm@vnpt.vn",
+      "username": "duclm"
+    },
+    {
+      "soc": "SOC1",
+      "region": "MB",
+      "name": "Hệ thống TTS",
+      "email": "tts@vnpt.vn",
+      "username": "tts"
+    },
+    {
+      "soc": "SOC1",
+      "region": "MB",
+      "name": "Đỗ Việt Đức",
+      "email": "dvduc@vnpt.vn",
+      "username": "dvduc"
+    },
+    {
+      "soc": "SOC1",
+      "region": "MB",
+      "name": "Nguyễn Thị Thanh Tùng",
+      "email": "tungntt@vnpt.vn",
+      "username": "tungntt"
+    },
+    {
+      "soc": "SOC2",
+      "region": "MN",
+      "name": "Hoàng Thị Lan Phương",
+      "email": "lanphuong@vnpt.vn",
+      "username": "lanphuong"
+    },
+    {
+      "soc": "SOC2",
+      "region": "MN",
+      "name": "Nguyễn Thị Cẩm Tú",
+      "email": "tuntc@vnpt.vn",
+      "username": "tuntc"
+    },
+    {
+      "soc": "SOC2",
+      "region": "MN",
+      "name": "Lê Quang Vũ",
+      "email": "quangvu@vnpt.vn",
+      "username": "quangvu",
+      "role": "admin"
+    },
+    {
+      "soc": "SOC2",
+      "region": "MN",
+      "name": "Nguyễn Thị Hoa",
+      "email": "nguyenhoa@vnpt.vn",
+      "username": "nguyenhoa"
+    },
+    {
+      "soc": "SOC2",
+      "region": "MN",
+      "name": "Đặng Trần Phương",
+      "email": "tranphuong@vnpt.vn",
+      "username": "tranphuong"
+    },
+    {
+      "soc": "SOC3",
+      "region": "MT",
+      "name": "Hồ Văn Quang",
+      "email": "quanghv@vnpt.vn",
+      "username": "quanghv"
+    },
+    {
+      "soc": "SOC3",
+      "region": "MT",
+      "name": "Huỳnh Thái Dương",
+      "email": "huynhthaiduong@vnpt.vn",
+      "username": "huynhthaiduong"
+    },
+    {
+      "soc": "SOC3",
+      "region": "MT",
+      "name": "Đặng Quang Phương",
+      "email": "phuongdq@vnpt.vn",
+      "username": "phuongdq"
+    }
+  ]
+}

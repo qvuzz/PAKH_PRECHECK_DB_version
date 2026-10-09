@@ -24,6 +24,7 @@ files_to_update = {
     "routers/tickets.py": os.path.join(source_dir, "routers", "tickets.py"),
     "routers/auth.py": os.path.join(source_dir, "routers", "auth.py"),
     "static/js/dashboard.js": os.path.join(source_dir, "static", "js", "dashboard.js"),
+    "static/css/dashboard.css": os.path.join(source_dir, "static", "css", "dashboard.css"),
     "templates/dashboard.html": os.path.join(source_dir, "templates", "dashboard.html"),
     "routers/web.py": os.path.join(source_dir, "routers", "web.py"),
     "spam_call_analyzer.py": os.path.join(source_dir, "spam_call_analyzer.py"),
@@ -42,6 +43,7 @@ files_to_update = {
     ".env": os.path.join(source_dir, ".env"),
     "tickets.db": os.path.join(source_dir, "tickets.db"),
     "start.sh": os.path.join(source_dir, "start.sh"),
+    "user_regions.json": os.path.join(source_dir, "user_regions.json"),
     "DANH_MUC_KICH_BAN_DONG_PHIEU_MOBILE_INTERNET.xlsx": os.path.join(source_dir, "DANH_MUC_KICH_BAN_DONG_PHIEU_MOBILE_INTERNET.xlsx")
 }
 

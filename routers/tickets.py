@@ -60,7 +60,7 @@ def get_tickets_api(
         sess = ACTIVE_LAN_SESSIONS.get(client_ip) or {}
         uinfo = sess.get("ttsnew_user") or sess.get("user") or {}
 
-    from region_detector import is_superadmin, detect_user_region
+    from region_detector import is_superadmin, detect_user_region, is_user_permitted
 
     user_reg = detect_user_region(uinfo) if uinfo else None
     is_region_locked = False
@@ -71,14 +71,29 @@ def get_tickets_api(
         current_user_name = (uinfo.get("displayName") or uinfo.get("userName") or uinfo.get("HoTen") or "Quản trị viên") if uinfo else "Quản trị viên"
         is_region_locked = False
     elif uinfo:
+        # Kiểm soát phân quyền nghiêm ngặt: User phải có trong whitelist user_regions.json
+        permitted, matched_u = is_user_permitted(uinfo)
+        if not permitted:
+            return {
+                "tickets": [],
+                "total_count": 0,
+                "closed_count": 0,
+                "active_count": 0,
+                "system_counts": {},
+                "region": "ALL",
+                "user_role": "unauthorized",
+                "user_name": uinfo.get("displayName") or uinfo.get("userName") or "Chưa cấp quyền",
+                "message": "Tài khoản của bạn chưa được cấp quyền truy cập WebApp. Vui lòng liên hệ Quản trị viên để khai báo thông tin và phân vùng TT SOC."
+            }
+
         user_role = "ktv"
-        # Nếu KTV thuộc vùng cụ thể (VD: tài khoản VNPT HCM / Cần Thơ / ...), khóa chặt ở vùng đó
-        if user_reg:
+        # User khu vực nào thì chỉ thấy phiếu ở KV đó thôi:
+        if user_reg and user_reg in ("MB", "MT", "MN"):
             effective_region = user_reg
             is_region_locked = True
-        elif region and region != "ALL":
+        elif region:
             effective_region = region.upper()
-            is_region_locked = True
+            is_region_locked = False
         else:
             effective_region = "ALL"
             is_region_locked = False
@@ -86,8 +101,7 @@ def get_tickets_api(
     else:
         user_role = "guest"
         effective_region = (region or "ALL").upper()
-        # Nếu truy cập qua link cố định (/mien-nam, /mien-bac, /mien-trung), khóa cố định vùng
-        is_region_locked = bool(region and region.upper() in ("MB", "MN", "MT"))
+        is_region_locked = False
         current_user_name = ""
 
     tickets = get_all_tickets(
@@ -152,13 +166,67 @@ def get_tickets_api(
 
 @router.get("/tickets/closed_stats")
 def get_closed_stats_api(
+    request: Request,
     period: str = "all", 
     source: str = "all", 
-    service_type: str = "all"
+    service_type: str = "all",
+    region: Optional[str] = None
 ):
     src_f = None if source == "all" else source
     srv_f = None if service_type == "all" else service_type
-    stats = get_closed_tickets_analytics(time_filter=period, source_filter=src_f, service_filter=srv_f)
+
+    # 🎯 Nhận diện quyền truy cập và Phân vùng 3 Miền cho Thống kê phiếu đã đóng
+    client_ip = request.client.host if request and request.client else "127.0.0.1"
+    is_local = client_ip in ("127.0.0.1", "::1", "localhost", "testclient")
+    client_tok = request.headers.get("Authorization") or request.cookies.get("TOKEN") or ""
+
+    effective_region = "ALL"
+    is_region_locked = False
+    _, uinfo = resolve_ttsnew_token(client_ip, is_local=is_local, client_tok=client_tok)
+    if not uinfo and client_ip in ACTIVE_LAN_SESSIONS:
+        sess = ACTIVE_LAN_SESSIONS.get(client_ip) or {}
+        uinfo = sess.get("ttsnew_user") or sess.get("user") or {}
+
+    from region_detector import is_superadmin, detect_user_region, is_user_permitted
+
+    user_reg = detect_user_region(uinfo) if uinfo else None
+
+    if is_local or is_superadmin(uinfo):
+        effective_region = (region or "ALL").upper()
+        is_region_locked = False
+    elif uinfo:
+        permitted, _ = is_user_permitted(uinfo)
+        if not permitted:
+            return {
+                "total": 0, "auto_cnt": 0, "auto_percent": 0, "manual_cnt": 0, "manual_percent": 0,
+                "synced_cnt": 0, "synced_percent": 0, "tool_closed_cnt": 0,
+                "today_cnt": 0, "today_manual_cnt": 0, "today_synced_cnt": 0, "today_total_cnt": 0,
+                "tts_new_cnt": 0, "tts_old_cnt": 0, "data_cnt": 0, "call_cnt": 0, "sms_cnt": 0, "other_cnt": 0, "voice_cnt": 0,
+                "by_diagnosis": [], "daily_trend": [], "top_packages": [], "staff_list": [],
+                "effective_region": "ALL",
+                "user_role": "unauthorized",
+                "message": "Chưa được cấp quyền truy cập"
+            }
+        # KTV chỉ thấy phiếu ở khu vực của họ
+        if user_reg and user_reg in ("MB", "MT", "MN"):
+            effective_region = user_reg
+            is_region_locked = True
+        else:
+            effective_region = (region or "ALL").upper()
+            is_region_locked = False
+    else:
+        effective_region = (region or "ALL").upper()
+        is_region_locked = False
+
+    stats = get_closed_tickets_analytics(
+        time_filter=period, 
+        source_filter=src_f, 
+        service_filter=srv_f,
+        region=effective_region
+    )
+    stats["effective_region"] = effective_region
+    stats["user_region"] = user_reg
+    stats["is_region_locked"] = is_region_locked
     return stats
 
 
@@ -1059,6 +1127,7 @@ async def precheck_one_ticket(request: Request):
     body = await request.json()
     phone = body.get("phone")
     incident_time = body.get("incident_time")
+    req_service_type = str(body.get("service_type") or "").strip().lower()
     if not phone:
         return Response(content="Missing phone", status_code=400)
 
@@ -1093,7 +1162,10 @@ async def precheck_one_ticket(request: Request):
             reopen_cnt = row[2] if row and len(row) > 2 else 0
             t_code = row[3] if row and len(row) > 3 else ""
 
-        is_voice = is_voice_ticket(pkg_title)
+        if req_service_type in ("call", "sms", "spam_call", "voice", "voice_sms", "roaming", "cvqt", "sim", "sim_multisim"):
+            is_voice = True
+        else:
+            is_voice = is_voice_ticket(pkg_title)
         is_mobile_data = not is_voice
 
         # Khởi tạo Client
