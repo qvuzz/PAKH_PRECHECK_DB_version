@@ -1128,6 +1128,10 @@ async def precheck_one_ticket(request: Request):
     phone = body.get("phone")
     incident_time = body.get("incident_time")
     req_service_type = str(body.get("service_type") or "").strip().lower()
+    req_region = str(body.get("region") or "").strip().upper()
+    if req_region not in ("MB", "MN", "MT"):
+        req_region = None
+
     if not phone:
         return Response(content="Missing phone", status_code=400)
 
@@ -1161,6 +1165,14 @@ async def precheck_one_ticket(request: Request):
             t_content = row[1] if row else ""
             reopen_cnt = row[2] if row and len(row) > 2 else 0
             t_code = row[3] if row and len(row) > 3 else ""
+
+        from region_detector import detect_ticket_region
+        target_reg = req_region or detect_ticket_region({
+            "user_region": req_region,
+            "ticket_code": t_code,
+            "title": pkg_title,
+            "content": t_content
+        })
 
         if req_service_type in ("call", "sms", "spam_call", "voice", "voice_sms", "roaming", "cvqt", "sim", "sim_multisim"):
             is_voice = True
@@ -1305,6 +1317,7 @@ async def precheck_one_ticket(request: Request):
                             action_plan = ?,
                             ccos_attachments = COALESCE(NULLIF(?, ''), ccos_attachments),
                             prechecked_at = ?,
+                            region = CASE WHEN ? IN ('MB', 'MN', 'MT') THEN ? ELSE region END,
                             updated_at = CURRENT_TIMESTAMP 
                         WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?
                     """, (
@@ -1316,6 +1329,7 @@ async def precheck_one_ticket(request: Request):
                         v_res.get("action_plan", ""),
                         ccos_json_str,
                         now_precheck_str,
+                        target_reg, target_reg,
                         phone, phone_84, f"%{clean_digits[-9:]}%", incident_time
                     ))
                 else:
@@ -1329,6 +1343,7 @@ async def precheck_one_ticket(request: Request):
                             action_plan = ?,
                             ccos_attachments = COALESCE(NULLIF(?, ''), ccos_attachments),
                             prechecked_at = ?,
+                            region = CASE WHEN ? IN ('MB', 'MN', 'MT') THEN ? ELSE region END,
                             updated_at = CURRENT_TIMESTAMP 
                         WHERE rowid = (SELECT rowid FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1)
                     """, (
@@ -1340,6 +1355,7 @@ async def precheck_one_ticket(request: Request):
                         v_res.get("action_plan", ""),
                         ccos_json_str,
                         now_precheck_str,
+                        target_reg, target_reg,
                         phone, phone_84, f"%{clean_digits[-9:]}%"
                     ))
                 state.log("SUCCESS", f"✅ Đã tiền kiểm Thoại / SMS / Gói xong cho {phone_84}: {v_res.get('status')}")
@@ -1391,9 +1407,10 @@ async def precheck_one_ticket(request: Request):
                         action_plan = ?,
                         ai_summary = CASE WHEN ? != '' THEN ? ELSE ai_summary END,
                         prechecked_at = ?,
+                        region = CASE WHEN ? IN ('MB', 'MN', 'MT') THEN ? ELSE region END,
                         updated_at = CURRENT_TIMESTAMP 
                     WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?
-                """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, ai_sum_calc, ai_sum_calc, now_precheck_str, phone, phone_84, f"%{clean_digits[-9:]}%", incident_time))
+                """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, ai_sum_calc, ai_sum_calc, now_precheck_str, target_reg, target_reg, phone, phone_84, f"%{clean_digits[-9:]}%", incident_time))
             else:
                 conn.execute("""
                     UPDATE tickets 
@@ -1406,9 +1423,10 @@ async def precheck_one_ticket(request: Request):
                         action_plan = ?,
                         ai_summary = CASE WHEN ? != '' THEN ? ELSE ai_summary END,
                         prechecked_at = ?,
+                        region = CASE WHEN ? IN ('MB', 'MN', 'MT') THEN ? ELSE region END,
                         updated_at = CURRENT_TIMESTAMP 
                     WHERE rowid = (SELECT rowid FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1)
-                """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, ai_sum_calc, ai_sum_calc, now_precheck_str, phone, phone_84, f"%{clean_digits[-9:]}%"))
+                """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, ai_sum_calc, ai_sum_calc, now_precheck_str, target_reg, target_reg, phone, phone_84, f"%{clean_digits[-9:]}%"))
         conn.close()
 
         state.log("SUCCESS", f"✅ Đã tiền kiểm Core xong cho {phone_84}: Radio={info_res.get('Radio')}, HSS={info_res.get('HSS Profile')}, IP={info_res.get('IPv4')}, NAM={info_res.get('NAM')}")

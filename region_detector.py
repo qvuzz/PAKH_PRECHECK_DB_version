@@ -457,14 +457,16 @@ def normalize_to_new_province(raw_input: Optional[str]) -> Tuple[Optional[str], 
 
 def detect_ticket_region(ticket_data: dict, default_region: str = "MN") -> str:
     """
-    Tự động nhận diện Miền (MB, MN, MT) của một phiếu phản ánh theo chuẩn QUY TRÌNH ONEOSS (BPMN / Step / Unit).
-    TUÂN THỦ TUYỆT ĐỐI YÊU CẦU:
-    - Bóc tách trực tiếp từ Quy trình OneOSS (Tên bước / Tên quy trình / Đơn vị tiếp nhận):
-      * SOC 1 / NET 1 / Miền Bắc -> MB (Miền Bắc)
-      * SOC 2 / NET 2 / Miền Nam -> MN (Miền Nam)
-      * SOC 3 / NET 3 / Miền Trung -> MT (Miền Trung)
-    - TUYỆT ĐỐI KHÔNG SUY ĐOÁN THEO MÃ TỈNH / ĐỊA CHỈ KHÁCH BÁO / CELL ID.
+    Tự động nhận diện Miền (MB, MN, MT) của một phiếu phản ánh:
+    1. ƯU TIÊN SỐ 1: Gán theo User KTV load phiếu về (user_region).
+    2. ƯU TIÊN SỐ 2: Bóc tách trực tiếp từ Quy trình OneOSS (SOC 1/2/3, NET 1/2/3, VHKT MB/MN/MT).
+    3. ƯU TIÊN SỐ 3: Nhận diện theo địa bàn Tỉnh/TP (theo chuẩn 34 Tỉnh/TP mới & 3 Miền).
     """
+    # 1. Gán thẳng theo User KTV load phiếu về (nếu user có phân vùng cố định)
+    u_reg = str(ticket_data.get("user_region") or "").strip().upper()
+    if u_reg in ("MB", "MN", "MT"):
+        return u_reg
+
     search_text = " ".join([
         str(ticket_data.get("ticket_code") or ""),
         str(ticket_data.get("step_name") or ""),
@@ -475,13 +477,27 @@ def detect_ticket_region(ticket_data: dict, default_region: str = "MN") -> str:
         str(ticket_data.get("assignedUnitName") or "")
     ]).upper()
 
-    # Bóc tách trực tiếp từ Quy trình OneOSS (Tên bước / Tên quy trình / Đơn vị tiếp nhận BPMN)
+    # 2. Bóc tách trực tiếp từ Quy trình OneOSS (Tên bước / Tên quy trình / Đơn vị tiếp nhận BPMN)
     if any(k in search_text for k in ("SOC1", "SOC 1", "NET1", "NET 1", "MIỀN BẮC", "MIEN BAC", "VHKT MB", "VHKTM-B", "KHU VỰC 1", "KHU VUC 1", "KV1", "KV 1")):
         return "MB"
     if any(k in search_text for k in ("SOC2", "SOC 2", "NET2", "NET 2", "MIỀN NAM", "MIEN NAM", "VHKT MN", "VHKTM-N", "KHU VỰC 2", "KHU VUC 2", "KV2", "KV 2")):
         return "MN"
     if any(k in search_text for k in ("SOC3", "SOC 3", "NET3", "NET 3", "MIỀN TRUNG", "MIEN TRUNG", "VHKT MT", "VHKTM-T", "KHU VỰC 3", "KHU VUC 3", "KV3", "KV 3")):
         return "MT"
+
+    # 3. Phân vùng theo Tỉnh/TP từ nội dung phản ánh / tiêu đề / địa chỉ / đơn vị tiếp nhận
+    comb_content = " ".join([
+        str(ticket_data.get("title") or ""),
+        str(ticket_data.get("content") or ""),
+        str(ticket_data.get("ward") or ""),
+        str(ticket_data.get("province") or ""),
+        str(ticket_data.get("province_name") or ""),
+        str(ticket_data.get("assigned_unit") or ""),
+        str(ticket_data.get("assignedUnitName") or "")
+    ])
+    _, detected_reg = detect_location_from_text(comb_content)
+    if detected_reg in ("MB", "MN", "MT"):
+        return detected_reg
 
     return default_region
 

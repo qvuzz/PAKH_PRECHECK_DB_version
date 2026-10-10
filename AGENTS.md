@@ -91,6 +91,13 @@ Tài liệu này là chỉ dẫn bắt buộc cho mọi trợ lý AI (Antigravit
      `node -c "static/js/dashboard.js"`
    * **ĐIỀU KIỆN CHẶN BẮT BUỘC (STRICT GATE)**: Chỉ khi lệnh trên trả về **Exit code 0** (không có lỗi) thì mới được phép đồng bộ sang thư mục Docker và đóng gói ZIP. Tuyệt đối không bàn giao code JS chưa qua kiểm tra cú pháp `node -c`.
 
+9. **Quy chuẩn chẩn đoán trước khi hành động (Root Cause & User Confirmation First — BẮT BUỘC)**:
+   * **BẮT BUỘC**: Trước khi thực hiện bất kỳ sửa đổi code hay can thiệp hệ thống nào, AI phải:
+     1. **Điều tra và làm rõ nguyên nhân gốc rễ (Root Cause Analysis)** một cách tường minh, dẫn chứng bằng logic, luồng dữ liệu hoặc mã nguồn thực tế.
+     2. **Đưa ra khuyến nghị & phương án giải quyết cụ thể** (nêu rõ các file sẽ sửa và tác động).
+     3. **CHỜ NGƯỜI DÙNG XÁC NHẬN / ĐỒNG Ý MỚI ĐƯỢC THỰC HIỆN SỬA CODE (ACTION).**
+   * **CẤM TUYỆT ĐỐI**: Tự ý sửa code khi chưa phân tích nguyên nhân và chưa có sự đồng ý của người dùng.
+
 ---
 
 ## 🗺️ 2. BẢN ĐỒ CHỈ MỤC CÁC FILE LÕI (CORE REPOSITORY MAP)

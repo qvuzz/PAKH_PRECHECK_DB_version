@@ -471,6 +471,17 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
     Gọi API get-customer-by-ticketflowid để lấy SĐT, tên khách hàng và hạng hội viên.
     Tạm đưa chung 2 trường Tên quy trình và Tên bước vào ticket_code.
     """
+    u_reg = None
+    try:
+        from region_detector import detect_user_region
+        uinfo = decode_jwt_user(token) if token else {}
+        if uinfo:
+            det = detect_user_region(uinfo)
+            if det in ("MB", "MN", "MT"):
+                u_reg = det
+    except Exception:
+        pass
+
     flow_id = it.get("id")
     proc_name = str(it.get("processDefinitionName") or it.get("processInstanceName") or "").strip()
     step_name = str(it.get("stepName") or it.get("processNodeName") or "").strip()
@@ -544,6 +555,7 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "last_reopened_date": last_reopened_date,
             "processing_content": processing_content,
             "region": detect_ticket_region({
+                "user_region": u_reg,
                 "ticket_code": combined_code,
                 "step_name": step_name,
                 "process_name": proc_name,
@@ -579,6 +591,7 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "last_reopened_date": last_reopened_date,
             "processing_content": "",
             "region": detect_ticket_region({
+                "user_region": u_reg,
                 "ticket_code": combined_code,
                 "step_name": step_name,
                 "process_name": proc_name,

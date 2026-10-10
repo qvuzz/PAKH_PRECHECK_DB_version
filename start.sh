@@ -41,7 +41,7 @@ if [ -f tickets.db ] && command -v sqlite3 >/dev/null 2>&1; then
         UPDATE tickets SET region = 'MN' WHERE instr(ticket_code, 'SOC2') > 0 OR instr(ticket_code, 'SOC 2') > 0;
         UPDATE tickets SET region = 'MT' WHERE instr(ticket_code, 'SOC3') > 0 OR instr(ticket_code, 'SOC 3') > 0;
         UPDATE tickets SET region = 'MB' WHERE instr(ticket_code, 'SOC1') > 0 OR instr(ticket_code, 'SOC 1') > 0;
-        UPDATE tickets SET region = 'MN' WHERE (region IS NULL OR region = '' OR region = 'MB' OR region = 'MT') AND instr(ticket_code, 'SOC1') = 0 AND instr(ticket_code, 'SOC 1') = 0 AND instr(ticket_code, 'SOC3') = 0 AND instr(ticket_code, 'SOC 3') = 0;
+        UPDATE tickets SET region = 'MN' WHERE (region IS NULL OR region = '');
         UPDATE tickets SET ticket_status = 'Chưa đóng' WHERE region = 'MN' AND (ticket_status = 'Đã đóng' OR ticket_status = 'Da dong') AND (closed_by IS NULL OR closed_by = '' OR closed_by = 'Kỹ thuật viên') AND updated_at LIKE '%$(date +%Y-%m-%d)%';
     " 2>/dev/null || true
 fi

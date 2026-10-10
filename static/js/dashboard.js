@@ -670,6 +670,7 @@ function applyRegionUI(locked = false) {
 function onRegionChange(val) {
     if (isRegionLocked && !isSystemAdmin) return;
     currentRegion = val || 'ALL';
+    urlRouteRegion = currentRegion;
     localStorage.setItem('pakh_region', currentRegion);
 
     // Cập nhật URL động tương ứng với miền được chọn
@@ -1459,7 +1460,7 @@ async function startTtsNewScan() {
         let checkAttempts = 0;
         const interval = setInterval(async () => {
             checkAttempts++;
-            const stRes = await fetch('/api/status');
+            const stRes = await fetch('/api/status?region=' + encodeURIComponent(currentRegion || 'ALL'));
             const stData = await stRes.json();
             await fetchStatus();
             await loadTickets(true);
@@ -1522,7 +1523,7 @@ async function startNewVoiceScan(srvType = null) {
         let checkAttempts = 0;
         const interval = setInterval(async () => {
             checkAttempts++;
-            const stRes = await fetch('/api/status');
+            const stRes = await fetch('/api/status?region=' + encodeURIComponent(currentRegion || 'ALL'));
             const stData = await stRes.json();
             if (stData.status !== 'PROCESSING' || checkAttempts > 35) {
                 clearInterval(interval);
@@ -1693,7 +1694,7 @@ async function precheckSingleTicket(phone, incidentTime, btnElem) {
         const res = await fetch('/api/tickets/precheck_one', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone, incident_time: incidentTime, service_type: currentService })
+            body: JSON.stringify({ phone, incident_time: incidentTime, service_type: currentService, region: currentRegion })
         });
         const data = await res.json();
         if (data.success) {
@@ -1777,7 +1778,7 @@ function applyTicketsData(data, force = false) {
             if (regSelect.value !== currentRegion) {
                 regSelect.value = currentRegion;
             }
-        } else if (urlRouteRegion) {
+        } else if (urlRouteRegion && (!currentRegion || currentRegion === 'ALL')) {
             isRegionLocked = true;
             currentRegion = urlRouteRegion;
             applyRegionUI(true);
@@ -4008,7 +4009,7 @@ async function startTtsOldApiDataScan() {
         let checkAttempts = 0;
         const interval = setInterval(async () => {
             checkAttempts++;
-            const stRes = await fetch('/api/status');
+            const stRes = await fetch('/api/status?region=' + encodeURIComponent(currentRegion || 'ALL'));
             const stData = await stRes.json();
             await fetchStatus();
             await loadTickets(true);
@@ -4058,7 +4059,7 @@ async function startTtsOldApiVoiceScan() {
         let checkAttempts = 0;
         const interval = setInterval(async () => {
             checkAttempts++;
-            const stRes = await fetch('/api/status');
+            const stRes = await fetch('/api/status?region=' + encodeURIComponent(currentRegion || 'ALL'));
             const stData = await stRes.json();
             if (stData.status !== 'PROCESSING' || checkAttempts > 35) {
                 clearInterval(interval);
