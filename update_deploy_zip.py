@@ -23,6 +23,7 @@ files_to_update = {
     "docker-compose.yml": os.path.join(source_dir, "docker-compose.yml"),
     "routers/tickets.py": os.path.join(source_dir, "routers", "tickets.py"),
     "routers/auth.py": os.path.join(source_dir, "routers", "auth.py"),
+    "routers/automation.py": os.path.join(source_dir, "routers", "automation.py"),
     "static/js/dashboard.js": os.path.join(source_dir, "static", "js", "dashboard.js"),
     "static/js/modules/live_log.js": os.path.join(source_dir, "static", "js", "modules", "live_log.js"),
     "static/js/modules/smsc_cdr.js": os.path.join(source_dir, "static", "js", "modules", "smsc_cdr.js"),

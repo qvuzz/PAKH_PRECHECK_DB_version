@@ -1358,7 +1358,7 @@ async def precheck_one_ticket(request: Request):
                         target_reg, target_reg,
                         phone, phone_84, f"%{clean_digits[-9:]}%"
                     ))
-                state.log("SUCCESS", f"✅ Đã tiền kiểm Thoại / SMS / Gói xong cho {phone_84}: {v_res.get('status')}")
+                state.log("SUCCESS", f"✅ Đã tiền kiểm Thoại / SMS / Gói xong cho {phone_84}: {v_res.get('status')}", region=target_reg)
                 return {"success": True, "formatted_pkg": v_res.get("formatted_pkg", ""), "info": info_res}
 
             # Xử lý Mobile Data
@@ -1429,10 +1429,10 @@ async def precheck_one_ticket(request: Request):
                 """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, ai_sum_calc, ai_sum_calc, now_precheck_str, target_reg, target_reg, phone, phone_84, f"%{clean_digits[-9:]}%"))
         conn.close()
 
-        state.log("SUCCESS", f"✅ Đã tiền kiểm Core xong cho {phone_84}: Radio={info_res.get('Radio')}, HSS={info_res.get('HSS Profile')}, IP={info_res.get('IPv4')}, NAM={info_res.get('NAM')}")
+        state.log("SUCCESS", f"✅ Đã tiền kiểm Core xong cho {phone_84}: Radio={info_res.get('Radio')}, HSS={info_res.get('HSS Profile')}, IP={info_res.get('IPv4')}, NAM={info_res.get('NAM')}", region=target_reg)
         return {"success": True, "formatted_pkg": formatted_pkg, "info": info_res}
     except Exception as ex_pre:
-        state.log("WARN", f"⚠️ Lỗi tiền kiểm tra cho {phone}: {ex_pre}")
+        state.log("WARN", f"⚠️ Lỗi tiền kiểm tra cho {phone}: {ex_pre}", region=target_reg if 'target_reg' in locals() else None)
         return {"success": False, "error": str(ex_pre)}
 
 

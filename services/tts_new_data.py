@@ -511,10 +511,10 @@ def _process_single_ticket(
         state.current_step = f"Đã hoàn thành {progress_tracker['done']}/{total_tickets} thuê bao TTS Mới"
 
 
-def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False):
+def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False, target_region: str = None, user_token: str = None):
     """
     Quy trình tiền kiểm tra phiếu sự cố từ hệ thống TTS Mới (FastAPI Multi-Threaded Engine):
-    1. Lấy danh sách phiếu đang xử lý từ TTS Mới.
+    1. Lấy danh sách phiếu đang xử lý từ TTS Mới (theo target_region nếu có).
     2. Lọc riêng các phiếu Mobile Internet (Data).
     3. Bóc tách thông tin khách hàng và SĐT song song.
     4. Tra cứu Core ĐA LUỒNG:
@@ -523,9 +523,13 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False):
        - DB Cache: Nếu phiếu đã có kết quả hợp lệ trong SQLite, trả về ngay lập tức (1ms), trừ khi force_recheck=True.
     5. Đồng bộ an toàn cơ sở dữ liệu và xuất báo cáo Excel.
     """
-    state.status = "PROCESSING"
-    state.status_message = "Đang chạy tiền kiểm TTS Mới (Đa luồng)..."
-    state.current_step = "Kết nối TTS Mới"
+    t_reg = str(target_region).strip().upper() if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT") else None
+    if t_reg:
+        state.set_region_status(t_reg, "PROCESSING", f"Đang chạy tiền kiểm Mobile Internet {t_reg}...")
+    else:
+        state.status = "PROCESSING"
+        state.status_message = "Đang chạy tiền kiểm TTS Mới (Đa luồng)..."
+    state.current_step = f"Kết nối TTS Mới{f' [{t_reg}]' if t_reg else ''}"
 
     try:
         from crawler_btools import get_btools_cookie
@@ -537,19 +541,20 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False):
             sys.path.insert(0, SAPCCHECK_DIR)
         from sapc_client import SAPCClient
 
-        state.log("STEP", "Đang kết nối hệ thống TTS Mới...")
+        state.log("STEP", f"Đang kết nối hệ thống TTS Mới{f' [{t_reg}]' if t_reg else ''}...", region=t_reg)
 
         from auth_extractor import get_chrome_debug_driver
         driver = get_chrome_debug_driver()
 
-        token = extract_token_from_browser(driver=driver)
-        enriched_tickets, total_scanned = get_ttsnew_tickets_for_precheck(driver=driver)
+        enriched_tickets, total_scanned = get_ttsnew_tickets_for_precheck(
+            driver=driver, token=user_token, target_region=t_reg
+        )
         if not enriched_tickets:
-            state.log("WARN", f"Đã quét {total_scanned} phiếu trên TTS Mới nhưng không tìm thấy phiếu Mobile Internet nào đang xử lý.")
+            state.log("WARN", f"Đã quét {total_scanned} phiếu trên TTS Mới nhưng không tìm thấy phiếu Mobile Internet nào đang xử lý{f' tại {t_reg}' if t_reg else ''}.", region=t_reg)
             return
 
         total_tickets = len(enriched_tickets)
-        state.log("SUCCESS", f"Thu được {total_tickets} thuê bao Mobile Internet từ TTS Mới (Tổng {total_scanned} phiếu). Khởi chạy Core Engine đa luồng...")
+        state.log("SUCCESS", f"Thu được {total_tickets} thuê bao Mobile Internet từ TTS Mới{f' [{t_reg}]' if t_reg else ''} (Tổng {total_scanned} phiếu). Khởi chạy Core Engine đa luồng...", region=t_reg)
 
         # Đồng bộ danh sách phiếu hiện hữu với thực tế trên TTS Mới (theo từng phân vùng)
         active_codes = {str(t.get("ticket_code", "")).strip() for t in enriched_tickets if t.get("ticket_code")}
@@ -644,17 +649,19 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False):
         #     state.log("SUCCESS", f"Báo cáo Excel TTS Mới đã lưu: {saved_excel_file}")
 
         mode_str = "Tự động đóng 2 vòng" if state.should_auto_close("tts_new") else "Chỉ hiển thị, đóng thủ công"
-        state.log("SUCCESS", f"⚡ Hoàn tất tiền kiểm siêu tốc (Đa luồng) {len(excel_summary_list)} phiếu TTS Mới (Chế độ: {mode_str}).")
+        state.log("SUCCESS", f"⚡ Hoàn tất tiền kiểm siêu tốc (Đa luồng) {len(excel_summary_list)} phiếu TTS Mới{f' [{t_reg}]' if t_reg else ''} (Chế độ: {mode_str}).", region=t_reg)
 
     except Exception as e:
         err_str = str(e)
         if "401" in err_str or "Unauthorized" in err_str:
-            state.log("WARN", "⚠️ Token TTS Mới đã hết hạn hoặc chưa kết nối (401). Vui lòng bấm 'TTS (mới)' ở góc trên để đăng nhập lại.")
+            state.log("WARN", f"⚠️ Token TTS Mới đã hết hạn hoặc chưa kết nối (401){f' [{t_reg}]' if t_reg else ''}. Vui lòng bấm 'TTS (mới)' ở góc trên để đăng nhập lại.", region=t_reg)
         else:
-            state.log("ERROR", f"Lỗi trong chu kỳ tiền kiểm TTS Mới: {e}")
+            state.log("ERROR", f"Lỗi trong chu kỳ tiền kiểm TTS Mới{f' [{t_reg}]' if t_reg else ''}: {e}", region=t_reg)
     finally:
-        state.current_step = "Hoàn tất tiền kiểm TTS Mới"
-        if not state.is_running:
+        state.current_step = f"Hoàn tất tiền kiểm TTS Mới{f' [{t_reg}]' if t_reg else ''}"
+        if t_reg:
+            state.set_region_status(t_reg, "IDLE", f"Sẵn sàng ({t_reg})")
+        elif not state.is_running:
             state.status = "IDLE"
             state.status_message = "Đã dừng. Sẵn sàng nhận lệnh."
 

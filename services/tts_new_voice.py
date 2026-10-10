@@ -18,7 +18,7 @@ from db_manager import (
 )
 import ttsnew_api
 
-def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: bool = False):
+def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: bool = False, target_region: str = None, user_token: str = None):
     type_labels = {
         "call": "Cuộc gọi",
         "sms": "Tin nhắn",
@@ -26,10 +26,15 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
         "voice_sms": "Thoại / SMS / Gói"
     }
     lbl = type_labels.get(service_type, "Thoại / SMS")
-    state.status = "PROCESSING"
-    state.status_message = f"Đang quét phiếu {lbl} TTS Mới..."
-    state.current_step = f"Đang lấy danh sách phiếu {lbl} TTS Mới"
-    state.log("STEP", f"⚡ Bắt đầu quét danh sách phiếu {lbl} từ TTS Mới...")
+    t_reg = str(target_region).strip().upper() if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT") else None
+
+    if t_reg:
+        state.set_region_status(t_reg, "PROCESSING", f"Đang quét phiếu {lbl} {t_reg}...")
+    else:
+        state.status = "PROCESSING"
+        state.status_message = f"Đang quét phiếu {lbl} TTS Mới..."
+    state.current_step = f"Đang lấy danh sách phiếu {lbl} TTS Mới{f' [{t_reg}]' if t_reg else ''}"
+    state.log("STEP", f"⚡ Bắt đầu quét danh sách phiếu {lbl} từ TTS Mới{f' [{t_reg}]' if t_reg else ''}...", region=t_reg)
 
     try:
         from ttsnew_api import get_ttsnew_tickets_for_precheck
@@ -38,12 +43,14 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
         from auth_extractor import get_chrome_debug_driver
         driver = get_chrome_debug_driver()
 
-        voice_tickets, total_scanned = get_ttsnew_tickets_for_precheck(driver=driver, service_type=service_type)
+        voice_tickets, total_scanned = get_ttsnew_tickets_for_precheck(
+            driver=driver, service_type=service_type, token=user_token, target_region=t_reg
+        )
         if not voice_tickets:
-            state.log("WARN", f"ℹ️ Đã quét {total_scanned} phiếu trên TTS Mới nhưng không có phiếu {lbl} nào đang xử lý.")
+            state.log("WARN", f"ℹ️ Đã quét {total_scanned} phiếu trên TTS Mới nhưng không có phiếu {lbl} nào đang xử lý{f' tại {t_reg}' if t_reg else ''}.", region=t_reg)
             return 0
 
-        state.log("SUCCESS", f"Thu được {len(voice_tickets)} phiếu {lbl} từ TTS Mới (Tổng quét: {total_scanned}). Đang nạp vào bảng...")
+        state.log("SUCCESS", f"Thu được {len(voice_tickets)} phiếu {lbl} từ TTS Mới{f' [{t_reg}]' if t_reg else ''} (Tổng quét: {total_scanned}). Đang nạp vào bảng...", region=t_reg)
 
         # Bước 1: Nạp nhanh toàn bộ phiếu vào Database trước với status CHỜ TIỀN KIỂM
         active_codes = set()
@@ -247,33 +254,36 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
                     state.log("WARN", "Nhận được yêu cầu dừng.")
                     break
 
-        state.log("SUCCESS", f"🎉 Hoàn tất chu kỳ tiền kiểm {lbl} TTS Mới cho {len(voice_tickets)} phiếu.")
+        state.log("SUCCESS", f"🎉 Hoàn tất chu kỳ tiền kiểm {lbl} TTS Mới{f' [{t_reg}]' if t_reg else ''} cho {len(voice_tickets)} phiếu.", region=t_reg)
         return len(voice_tickets)
 
     except Exception as e:
         err_str = str(e)
         if "401" in err_str or "Unauthorized" in err_str:
-            state.log("WARN", f"⚠️ Token TTS Mới đã hết hạn (401). Tạm dừng quét {lbl}, vui lòng bấm 'TTS (mới)' để đăng nhập lại.")
+            state.log("WARN", f"⚠️ Token TTS Mới đã hết hạn (401){f' [{t_reg}]' if t_reg else ''}. Tạm dừng quét {lbl}, vui lòng bấm 'TTS (mới)' để đăng nhập lại.", region=t_reg)
         else:
-            state.log("ERROR", f"Lỗi quét phiếu {lbl} TTS Mới: {e}")
+            state.log("ERROR", f"Lỗi quét phiếu {lbl} TTS Mới{f' [{t_reg}]' if t_reg else ''}: {e}", region=t_reg)
         return 0
     finally:
-        state.status = "IDLE"
-        state.status_message = "Đã dừng. Sẵn sàng nhận lệnh."
-        state.current_step = "Sẵn sàng"
+        if t_reg:
+            state.set_region_status(t_reg, "IDLE", f"Sẵn sàng ({t_reg})")
+        else:
+            state.status = "IDLE"
+            state.status_message = "Đã dừng. Sẵn sàng nhận lệnh."
+        state.current_step = f"Sẵn sàng{f' [{t_reg}]' if t_reg else ''}"
 
 
 # Alias & Helper cycles cho từng module
 execute_tts_new_voice_cycle = execute_ttsnew_voice_cycle
 
-def execute_tts_new_call_cycle(force_recheck: bool = False):
-    return execute_ttsnew_voice_cycle(service_type="call", force_recheck=force_recheck)
+def execute_tts_new_call_cycle(force_recheck: bool = False, target_region: str = None, user_token: str = None):
+    return execute_ttsnew_voice_cycle(service_type="call", force_recheck=force_recheck, target_region=target_region, user_token=user_token)
 
-def execute_tts_new_sms_cycle(force_recheck: bool = False):
-    return execute_ttsnew_voice_cycle(service_type="sms", force_recheck=force_recheck)
+def execute_tts_new_sms_cycle(force_recheck: bool = False, target_region: str = None, user_token: str = None):
+    return execute_ttsnew_voice_cycle(service_type="sms", force_recheck=force_recheck, target_region=target_region, user_token=user_token)
 
-def execute_tts_new_other_cycle(force_recheck: bool = False):
-    return execute_ttsnew_voice_cycle(service_type="other", force_recheck=force_recheck)
+def execute_tts_new_other_cycle(force_recheck: bool = False, target_region: str = None, user_token: str = None):
+    return execute_ttsnew_voice_cycle(service_type="other", force_recheck=force_recheck, target_region=target_region, user_token=user_token)
 
 
 

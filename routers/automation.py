@@ -13,8 +13,8 @@ router = APIRouter(prefix="/api", tags=["Điều khiển Quét & Tự động h�
 
 @router.get("/status")
 def get_system_status(region: str = None):
-    snap = state.get_snapshot()
     reg_val = (region or "ALL").strip().upper() if region else "ALL"
+    snap = state.get_snapshot(region=reg_val if reg_val in ("MB", "MN", "MT") else None)
     snap["system_counts"] = get_system_counts(region=reg_val)
     return snap
 
@@ -147,12 +147,18 @@ async def trigger_run_now(request: Request):
     body = await request.json()
     auth_hdr = request.headers.get("Authorization") or (body.get("token") or "")
     from services.session_manager import decode_jwt
-    from region_detector import is_superadmin
+    from region_detector import is_superadmin, detect_user_region
     uinfo = decode_jwt(auth_hdr) if auth_hdr else {}
     is_admin = is_superadmin(uinfo)
+    target_region = body.get("region") or detect_user_region(uinfo) or ""
+    target_region = target_region.strip().upper() if target_region in ("MB", "MN", "MT") else None
 
-    if state.status == "PROCESSING":
-        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
+    if target_region:
+        if state.region_status.get(target_region) == "PROCESSING":
+            return {"success": False, "message": f"Hệ thống đang bận thực hiện chu kỳ cho {target_region}."}
+    else:
+        if state.status == "PROCESSING":
+            return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
 
     scopes = body.get("scan_scopes") or getattr(state, "scan_scopes", ["tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"])
     if not scopes:
@@ -167,39 +173,45 @@ async def trigger_run_now(request: Request):
     elif "auto_close" in body:
         state.set_auto_close_mode("all" if body["auto_close"] else "none")
 
-    if state.is_running:
+    if state.is_running and not target_region:
         state.trigger_now_requested = True
         state.log("INFO", f"⚡ KÍCH HOẠT QUÉT NGAY LẬP TỨC! (Phạm vi: {', '.join(scopes)})")
         return {"success": True}
     else:
-        def _run_scopes_manual(sc_list):
-            state.status = "PROCESSING"
-            state.status_message = "Đang quét các phạm vi theo yêu cầu..."
+        def _run_scopes_manual(sc_list, t_reg, u_tok):
+            if t_reg:
+                state.set_region_status(t_reg, "PROCESSING", f"Đang quét các phạm vi cho {t_reg}...")
+            else:
+                state.status = "PROCESSING"
+                state.status_message = "Đang quét các phạm vi theo yêu cầu..."
             try:
                 for sc in sc_list:
                     if state.stop_requested:
                         break
                     if sc == "tts_new_data":
-                        execute_tts_new_data_cycle()
+                        execute_tts_new_data_cycle(target_region=t_reg, user_token=u_tok)
                     elif sc in ("tts_new_call", "tts_new_voice_call"):
                         from services.tts_new_voice import execute_tts_new_call_cycle
-                        execute_tts_new_call_cycle()
+                        execute_tts_new_call_cycle(target_region=t_reg, user_token=u_tok)
                     elif sc == "tts_new_sms":
                         from services.tts_new_voice import execute_tts_new_sms_cycle
-                        execute_tts_new_sms_cycle()
+                        execute_tts_new_sms_cycle(target_region=t_reg, user_token=u_tok)
                     elif sc == "tts_new_other":
                         from services.tts_new_voice import execute_tts_new_other_cycle
-                        execute_tts_new_other_cycle()
+                        execute_tts_new_other_cycle(target_region=t_reg, user_token=u_tok)
                     elif sc == "tts_new_voice":
-                        execute_tts_new_voice_cycle()
+                        execute_tts_new_voice_cycle(target_region=t_reg, user_token=u_tok)
             except Exception as ex_m:
-                state.log("ERROR", f"Lỗi thực thi quét theo yêu cầu: {ex_m}")
+                state.log("ERROR", f"Lỗi thực thi quét theo yêu cầu: {ex_m}", region=t_reg)
             finally:
-                state.status = "IDLE"
-                state.status_message = "Hoàn tất quét theo yêu cầu."
+                if t_reg:
+                    state.set_region_status(t_reg, "IDLE", f"Hoàn tất quét theo yêu cầu cho {t_reg}.")
+                else:
+                    state.status = "IDLE"
+                    state.status_message = "Hoàn tất quét theo yêu cầu."
 
-        threading.Thread(target=_run_scopes_manual, args=(scopes,), daemon=True).start()
-        return {"success": True, "message": "Đã kích hoạt quét ngay các phạm vi đã chọn."}
+        threading.Thread(target=_run_scopes_manual, args=(scopes, target_region, auth_hdr), daemon=True).start()
+        return {"success": True, "message": f"Đã kích hoạt quét ngay các phạm vi đã chọn{f' cho {target_region}' if target_region else ''}."}
 
 
 @router.post("/tts_old/scan_voice")
@@ -216,80 +228,165 @@ async def run_now_tts_old_api(request: Request = None):
 @router.post("/ttsnew/run-now")
 async def run_now_tts_new(request: Request):
     force_recheck = False
+    target_region = None
+    auth_hdr = request.headers.get("Authorization") or ""
     try:
         body = await request.json()
         if isinstance(body, dict):
             force_recheck = bool(body.get("force") or body.get("force_recheck"))
+            target_region = body.get("region")
+            if not auth_hdr:
+                auth_hdr = body.get("token") or ""
     except Exception:
         pass
+    if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT"):
+        target_region = str(target_region).strip().upper()
+    else:
+        target_region = None
+
+    if target_region and state.region_status.get(target_region) == "PROCESSING":
+        return {"success": False, "message": f"Khu vực {target_region} đang bận tiền kiểm."}
+
     state.engine = "tts_new"
     from services.tts_new_data import execute_tts_new_data_cycle
-    threading.Thread(target=execute_tts_new_data_cycle, kwargs={"force_recheck": force_recheck}, daemon=True).start()
-    return {"success": True, "message": "Đã kích hoạt quét tiền kiểm TTS Mới..."}
+    threading.Thread(
+        target=execute_tts_new_data_cycle,
+        kwargs={"force_recheck": force_recheck, "target_region": target_region, "user_token": auth_hdr},
+        daemon=True
+    ).start()
+    return {"success": True, "message": f"Đã kích hoạt quét tiền kiểm TTS Mới{f' [{target_region}]' if target_region else ''}..."}
 
 
 @router.post("/ttsnew/scan_call")
 async def scan_tts_new_call(request: Request):
-    if state.status == "PROCESSING":
-        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
     force_recheck = False
+    target_region = None
+    auth_hdr = request.headers.get("Authorization") or ""
     try:
         body = await request.json()
         if isinstance(body, dict):
             force_recheck = bool(body.get("force") or body.get("force_recheck"))
+            target_region = body.get("region")
+            if not auth_hdr:
+                auth_hdr = body.get("token") or ""
     except Exception:
         pass
+    if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT"):
+        target_region = str(target_region).strip().upper()
+    else:
+        target_region = None
+
+    if target_region and state.region_status.get(target_region) == "PROCESSING":
+        return {"success": False, "message": f"Khu vực {target_region} đang bận."}
+    elif not target_region and state.status == "PROCESSING":
+        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
+
     from services.tts_new_voice import execute_tts_new_call_cycle
-    threading.Thread(target=execute_tts_new_call_cycle, kwargs={"force_recheck": force_recheck}, daemon=True).start()
-    return {"success": True, "message": "Đang tiến hành quét phiếu Cuộc gọi từ TTS Mới..."}
+    threading.Thread(
+        target=execute_tts_new_call_cycle,
+        kwargs={"force_recheck": force_recheck, "target_region": target_region, "user_token": auth_hdr},
+        daemon=True
+    ).start()
+    return {"success": True, "message": f"Đang tiến hành quét phiếu Cuộc gọi từ TTS Mới{f' [{target_region}]' if target_region else ''}..."}
 
 
 @router.post("/ttsnew/scan_sms")
 async def scan_tts_new_sms(request: Request):
-    if state.status == "PROCESSING":
-        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
     force_recheck = False
+    target_region = None
+    auth_hdr = request.headers.get("Authorization") or ""
     try:
         body = await request.json()
         if isinstance(body, dict):
             force_recheck = bool(body.get("force") or body.get("force_recheck"))
+            target_region = body.get("region")
+            if not auth_hdr:
+                auth_hdr = body.get("token") or ""
     except Exception:
         pass
+    if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT"):
+        target_region = str(target_region).strip().upper()
+    else:
+        target_region = None
+
+    if target_region and state.region_status.get(target_region) == "PROCESSING":
+        return {"success": False, "message": f"Khu vực {target_region} đang bận."}
+    elif not target_region and state.status == "PROCESSING":
+        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
+
     from services.tts_new_voice import execute_tts_new_sms_cycle
-    threading.Thread(target=execute_tts_new_sms_cycle, kwargs={"force_recheck": force_recheck}, daemon=True).start()
-    return {"success": True, "message": "Đang tiến hành quét phiếu Tin nhắn từ TTS Mới..."}
+    threading.Thread(
+        target=execute_tts_new_sms_cycle,
+        kwargs={"force_recheck": force_recheck, "target_region": target_region, "user_token": auth_hdr},
+        daemon=True
+    ).start()
+    return {"success": True, "message": f"Đang tiến hành quét phiếu Tin nhắn từ TTS Mới{f' [{target_region}]' if target_region else ''}..."}
 
 
 @router.post("/ttsnew/scan_other")
 async def scan_tts_new_other(request: Request):
-    if state.status == "PROCESSING":
-        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
     force_recheck = False
+    target_region = None
+    auth_hdr = request.headers.get("Authorization") or ""
     try:
         body = await request.json()
         if isinstance(body, dict):
             force_recheck = bool(body.get("force") or body.get("force_recheck"))
+            target_region = body.get("region")
+            if not auth_hdr:
+                auth_hdr = body.get("token") or ""
     except Exception:
         pass
+    if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT"):
+        target_region = str(target_region).strip().upper()
+    else:
+        target_region = None
+
+    if target_region and state.region_status.get(target_region) == "PROCESSING":
+        return {"success": False, "message": f"Khu vực {target_region} đang bận."}
+    elif not target_region and state.status == "PROCESSING":
+        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
+
     from services.tts_new_voice import execute_tts_new_other_cycle
-    threading.Thread(target=execute_tts_new_other_cycle, kwargs={"force_recheck": force_recheck}, daemon=True).start()
-    return {"success": True, "message": "Đang tiến hành quét phiếu Gói cước & PA Khác từ TTS Mới..."}
+    threading.Thread(
+        target=execute_tts_new_other_cycle,
+        kwargs={"force_recheck": force_recheck, "target_region": target_region, "user_token": auth_hdr},
+        daemon=True
+    ).start()
+    return {"success": True, "message": f"Đang tiến hành quét phiếu Gói cước & PA Khác từ TTS Mới{f' [{target_region}]' if target_region else ''}..."}
 
 
 @router.post("/ttsnew/scan_voice")
 async def scan_tts_new_voice(request: Request):
-    if state.status == "PROCESSING":
-        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
     force_recheck = False
+    target_region = None
+    auth_hdr = request.headers.get("Authorization") or ""
     try:
         body = await request.json()
         if isinstance(body, dict):
             force_recheck = bool(body.get("force") or body.get("force_recheck"))
+            target_region = body.get("region")
+            if not auth_hdr:
+                auth_hdr = body.get("token") or ""
     except Exception:
         pass
+    if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT"):
+        target_region = str(target_region).strip().upper()
+    else:
+        target_region = None
+
+    if target_region and state.region_status.get(target_region) == "PROCESSING":
+        return {"success": False, "message": f"Khu vực {target_region} đang bận."}
+    elif not target_region and state.status == "PROCESSING":
+        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
+
     from services.tts_new_voice import execute_tts_new_voice_cycle
-    threading.Thread(target=execute_tts_new_voice_cycle, kwargs={"force_recheck": force_recheck}, daemon=True).start()
-    return {"success": True, "message": "Đang tiến hành quét phiếu Thoại / SMS từ TTS Mới..."}
+    threading.Thread(
+        target=execute_tts_new_voice_cycle,
+        kwargs={"force_recheck": force_recheck, "target_region": target_region, "user_token": auth_hdr},
+        daemon=True
+    ).start()
+    return {"success": True, "message": f"Đang tiến hành quét phiếu Thoại / SMS từ TTS Mới{f' [{target_region}]' if target_region else ''}..."}
 
 
 @router.get("/logs/clear")

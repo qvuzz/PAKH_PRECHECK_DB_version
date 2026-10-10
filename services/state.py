@@ -32,6 +32,8 @@ class AutomationState:
         self.is_running = False
         self.status = "IDLE"  # IDLE, PROCESSING, WAITING, STOPPING
         self.status_message = "Hệ thống tự động tiền kiểm đang hoạt động"
+        self.region_status = {"MB": "IDLE", "MN": "IDLE", "MT": "IDLE"}
+        self.region_status_message = {"MB": "", "MN": "", "MT": ""}
         self.interval_minutes = 2.5  # Chu kỳ quét chuyên sâu nền tự động (BTools + SAPC)
         self.auto_close = False  # Mặc định KHÔNG tự đóng để đảm bảo an toàn, KTV phải chủ động bật & xác nhận 2 lần
         self.auto_close_tts_old = False  # TTS Cũ đã bỏ
@@ -61,19 +63,23 @@ class AutomationState:
         self.stop_requested = False
         self.trigger_now_requested = False
 
-    def log(self, level, message):
+    def log(self, level, message, region=None):
         timestamp = datetime.now().strftime("%H:%M:%S")
+        reg_val = (str(region).strip().upper() if region else "")
+        if reg_val not in ("MB", "MN", "MT"):
+            reg_val = ""
         entry = {
             "time": timestamp,
             "level": level.upper(),  # INFO, SUCCESS, WARN, ERROR, STEP
-            "message": str(message)
+            "message": str(message),
+            "region": reg_val
         }
         with self.lock:
             self.logs.append(entry)
             if len(self.logs) > self.max_logs:
                 self.logs.pop(0)
         # In ra terminal an toàn trên mọi hệ điều hành (tránh lỗi font cp1252 trên Windows)
-        prefix = f"[{timestamp}] [{level.upper()}]"
+        prefix = f"[{timestamp}] [{level.upper()}]{f' [{reg_val}]' if reg_val else ''}"
         try:
             print(f"{prefix} {message}", flush=True)
         except Exception:
@@ -81,6 +87,20 @@ class AutomationState:
                 print(f"{prefix} {str(message).encode('ascii', errors='replace').decode('ascii')}", flush=True)
             except Exception:
                 pass
+
+    def set_region_status(self, region: str, status: str, message: str = ""):
+        reg = str(region or "").strip().upper()
+        with self.lock:
+            if reg in ("MB", "MN", "MT"):
+                self.region_status[reg] = status
+                if message:
+                    self.region_status_message[reg] = message
+            if any(v == "PROCESSING" for v in self.region_status.values()):
+                self.status = "PROCESSING"
+            else:
+                self.status = "IDLE"
+            if message:
+                self.status_message = message
 
     def clear_logs(self):
         with self.lock:
@@ -145,12 +165,23 @@ class AutomationState:
                 self.auto_close_tts_new = False
                 self.auto_close = False
 
-    def get_snapshot(self):
+    def get_snapshot(self, region: str = None):
         with self.lock:
+            reg = (str(region).strip().upper() if region else "")
+            if reg in ("MB", "MN", "MT"):
+                filtered_logs = [l for l in self.logs if not l.get("region") or l.get("region") == reg]
+                reg_st = self.region_status.get(reg, self.status)
+                reg_msg = self.region_status_message.get(reg, "") or self.status_message
+            else:
+                filtered_logs = list(self.logs)
+                reg_st = self.status
+                reg_msg = self.status_message
+
             return {
                 "is_running": self.is_running,
-                "status": self.status,
-                "status_message": self.status_message,
+                "status": reg_st,
+                "status_message": reg_msg,
+                "region_status": dict(self.region_status),
                 "interval_minutes": self.interval_minutes,
                 "auto_close": self.auto_close,
                 "auto_close_mode": getattr(self, "auto_close_mode", "none"),
@@ -168,7 +199,7 @@ class AutomationState:
                 "last_run_time": self.last_run_time,
                 "countdown_seconds": self.countdown_seconds,
                 "current_step": self.current_step,
-                "logs": list(self.logs)
+                "logs": filtered_logs
             }
 
 

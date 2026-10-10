@@ -620,36 +620,48 @@ def normalize_phone_number(phone_str: str) -> str:
     return digits
 
 
-def get_ttsnew_tickets_for_precheck(driver=None, max_workers: int = 8, service_type: str = "data") -> tuple:
+def get_ttsnew_tickets_for_precheck(driver=None, max_workers: int = 8, service_type: str = "data", token: str = None, target_region: str = None) -> tuple:
     """
     Hàm tổng hợp dành cho quy trình tiền kiểm:
-    1. Lấy token hợp lệ.
+    1. Lấy token hợp lệ (ưu tiên token được truyền vào hoặc token của target_region).
     2. Kéo danh sách phiếu đang xử lý từ TTS Mới.
     3. Lọc theo nhóm dịch vụ (data: Mobile Internet, voice_sms: Thoại/SMS/Gói, all: Tất cả).
     4. Bóc tách song song SĐT khách hàng.
-    5. Trả về: (danh_sách_phiếu_hợp_lệ, tổng_số_phiếu_quét)
+    5. Lọc theo target_region nếu có.
+    6. Trả về: (danh_sách_phiếu_hợp_lệ, tổng_số_phiếu_quét)
     """
-    token = extract_token_from_browser(driver)
-    if not token:
+    tok = (token or "").strip()
+    if not tok:
+        if target_region:
+            reg_tokens = get_cached_tokens_by_region()
+            tok = reg_tokens.get(target_region.strip().upper())
+        if not tok:
+            tok = extract_token_from_browser(driver)
+
+    if tok and not tok.startswith("Bearer "):
+        tok = "Bearer " + tok
+
+    if not tok:
         from services.state import state
-        state.log("WARN", "ℹ️ Chưa có tài khoản nào đăng nhập TTS Mới (Admin hoặc KTV LAN). Tạm dừng quét TTS Mới.")
+        reg_lbl = f" [{target_region}]" if target_region else ""
+        state.log("WARN", f"ℹ️ Chưa có tài khoản nào đăng nhập TTS Mới{reg_lbl}. Tạm dừng quét TTS Mới.", region=target_region)
         return ([], 0)
 
     try:
-        raw_tickets = fetch_active_tickets(token, limit=1000)
+        raw_tickets = fetch_active_tickets(tok, limit=1000)
     except urllib.error.HTTPError as he:
         if he.code == 401:
-            token = extract_token_from_browser(driver, force_refresh=True)
-            if not token:
+            tok = extract_token_from_browser(driver, force_refresh=True)
+            if not tok:
                 from services.state import state
-                state.log("WARN", "⚠️ Token TTS Mới đã hết hạn (401). Vui lòng bấm 'TTS (mới)' ở thanh trên cùng để đăng nhập lại.")
+                state.log("WARN", "⚠️ Token TTS Mới đã hết hạn (401). Vui lòng bấm 'TTS (mới)' ở thanh trên cùng để đăng nhập lại.", region=target_region)
                 return ([], 0)
             try:
-                raw_tickets = fetch_active_tickets(token, limit=1000)
+                raw_tickets = fetch_active_tickets(tok, limit=1000)
             except urllib.error.HTTPError as he2:
                 if he2.code == 401:
                     from services.state import state
-                    state.log("WARN", "⚠️ Token TTS Mới không hợp lệ trên cổng OneOSS (401). Vui lòng bấm 'TTS (mới)' ở thanh trên cùng để đăng nhập lại.")
+                    state.log("WARN", "⚠️ Token TTS Mới không hợp lệ trên cổng OneOSS (401). Vui lòng bấm 'TTS (mới)' ở thanh trên cùng để đăng nhập lại.", region=target_region)
                     return ([], 0)
                 raise
         else:
@@ -673,7 +685,7 @@ def get_ttsnew_tickets_for_precheck(driver=None, max_workers: int = 8, service_t
     # Lấy thông tin khách hàng & SĐT song song
     enriched = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(enrich_ticket_customer, it, token) for it in target_tickets]
+        futures = [executor.submit(enrich_ticket_customer, it, tok) for it in target_tickets]
         for f in futures:
             try:
                 res = f.result()
@@ -681,6 +693,10 @@ def get_ttsnew_tickets_for_precheck(driver=None, max_workers: int = 8, service_t
                     enriched.append(res)
             except Exception:
                 pass
+
+    if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT"):
+        target_reg_clean = str(target_region).strip().upper()
+        enriched = [t for t in enriched if t.get("region") == target_reg_clean]
 
     return enriched, len(raw_tickets)
 

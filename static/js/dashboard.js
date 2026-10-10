@@ -4765,7 +4765,8 @@ async function triggerManualScan() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                scan_scopes: scopes
+                scan_scopes: scopes,
+                region: currentRegion
             })
         });
         const data = await res.json();
@@ -4827,7 +4828,7 @@ async function recheckCurrentModule(btn) {
         const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ force: true, force_recheck: true })
+            body: JSON.stringify({ force: true, force_recheck: true, region: currentRegion })
         });
         const data = await res.json();
         console.log(`[Tiền kiểm lại ${moduleLabel}]:`, data);
