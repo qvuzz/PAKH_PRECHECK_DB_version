@@ -495,7 +495,7 @@ def detect_ticket_region(ticket_data: dict, default_region: str = "MN") -> str:
         str(ticket_data.get("assigned_unit") or ""),
         str(ticket_data.get("assignedUnitName") or "")
     ])
-    _, detected_reg = detect_location_from_text(comb_content)
+    _, detected_reg = normalize_to_new_province(comb_content)
     if detected_reg in ("MB", "MN", "MT"):
         return detected_reg
 

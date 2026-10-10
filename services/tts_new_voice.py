@@ -77,7 +77,8 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
                 "last_reopened_date": str(t.get("last_reopened_date") or "").strip(),
                 "processing_content": t.get("processing_content", ""),
                 "region": t.get("region"),
-                "ward": t.get("ward", "")
+                "ward": t.get("ward", ""),
+                "loaded_by": t.get("loaded_by", "")
             }
             save_or_update_ticket(rec)
 

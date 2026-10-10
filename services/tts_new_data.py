@@ -358,7 +358,8 @@ def _process_single_ticket(
         "reopen_count": reopen_count,
         "last_reopened_date": last_reopened_date,
         "processing_content": ticket.get("processing_content", ""),
-        "region": ticket.get("region") or "MN"
+        "region": ticket.get("region") or "MN",
+        "loaded_by": ticket.get("loaded_by", "")
     }
 
     with list_lock:

@@ -220,16 +220,38 @@ def _run_init_schema(conn):
         except Exception:
             pass
         try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN loaded_by TEXT DEFAULT '';")
+        except Exception:
+            pass
+        try:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_region ON tickets(region);")
         except Exception:
             pass
         try:
-            from region_detector import detect_ticket_region
-            # Cập nhật miền cho các phiếu chưa có region
-            rows_reg = conn.execute("SELECT phone, incident_time, ward, ticket_content FROM tickets WHERE region IS NULL OR region = '';").fetchall()
+            from region_detector import normalize_to_new_province
+            # Tự động rà soát & nắn chỉnh lại các phiếu Miền Trung/Miền Bắc bị gán nhầm thành MN:
+            rows_reg = conn.execute("""
+                SELECT rowid, ticket_code, title, package_title, ticket_content, ward, province_name 
+                FROM tickets 
+                WHERE (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%')
+                   OR region IS NULL OR region = ''
+                   OR instr(ticket_code, 'SOC3') > 0 OR instr(ticket_code, 'SOC 3') > 0
+                   OR instr(ticket_code, 'SOC1') > 0 OR instr(ticket_code, 'SOC 1') > 0;
+            """).fetchall()
             for r in rows_reg:
-                rg = detect_ticket_region({"province": r["ward"], "ticket_content": r["ticket_content"]}, default_region="MN")
-                conn.execute("UPDATE tickets SET region = ? WHERE phone = ? AND incident_time = ?", (rg, r["phone"], r["incident_time"]))
+                comb = f"{r['ticket_code'] or ''} {r['title'] or ''} {r['package_title'] or ''} {r['ticket_content'] or ''} {r['ward'] or ''} {r['province_name'] or ''}"
+                comb_u = comb.upper()
+                target_reg = None
+                if any(k in comb_u for k in ("SOC3", "SOC 3", "NET3", "NET 3", "MIỀN TRUNG", "MIEN TRUNG", "VHKT MT")):
+                    target_reg = "MT"
+                elif any(k in comb_u for k in ("SOC1", "SOC 1", "NET1", "NET 1", "MIỀN BẮC", "MIEN BAC", "VHKT MB")):
+                    target_reg = "MB"
+                else:
+                    _, det_reg = normalize_to_new_province(comb)
+                    if det_reg in ("MT", "MB"):
+                        target_reg = det_reg
+                if target_reg:
+                    conn.execute("UPDATE tickets SET region = ? WHERE rowid = ?", (target_reg, r["rowid"]))
         except Exception:
             pass
 
@@ -620,14 +642,18 @@ def _save_or_update_ticket_internal(t):
                         "ticket_content": t.get("ticket_content", "")
                     }, default_region="MN")
 
+                loaded_by = str(t.get("loaded_by") or "").strip()
+                if not loaded_by and existing and "loaded_by" in existing.keys() and existing["loaded_by"]:
+                    loaded_by = str(existing["loaded_by"]).strip()
+
                 conn.execute("""
                     INSERT INTO tickets (
                         phone, incident_time, package_title, real_packages, rat_types,
                         cem_data, app_usage, ticket_content, status, comment,
                         action_plan, color, ticket_status, created_time, ai_summary,
                         source, ticket_code, ticket_id, flow_id, reopen_count, last_reopened_date,
-                        phan_hoi_he_thong, id_he_thong, ccos_attachments, processing_content, prechecked_at, ward, region, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? NOT IN ('', 'CHƯA PHÂN LOẠI') THEN datetime('now', '+7 hours') ELSE NULL END, ?, ?, CURRENT_TIMESTAMP)
+                        phan_hoi_he_thong, id_he_thong, ccos_attachments, processing_content, prechecked_at, ward, region, loaded_by, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? NOT IN ('', 'CHƯA PHÂN LOẠI') THEN datetime('now', '+7 hours') ELSE NULL END, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(phone, incident_time) DO UPDATE SET
                         package_title = excluded.package_title,
                         real_packages = excluded.real_packages,
@@ -658,6 +684,7 @@ def _save_or_update_ticket_internal(t):
                         prechecked_at = CASE WHEN excluded.status NOT IN ('', 'CHƯA PHÂN LOẠI') THEN datetime('now', '+7 hours') ELSE COALESCE(tickets.prechecked_at, datetime('now', '+7 hours')) END,
                         ward = COALESCE(NULLIF(excluded.ward, ''), tickets.ward),
                         region = COALESCE(NULLIF(excluded.region, ''), tickets.region),
+                        loaded_by = COALESCE(NULLIF(excluded.loaded_by, ''), tickets.loaded_by),
                         updated_at = CURRENT_TIMESTAMP;
                 """, (
                     phone,
@@ -688,6 +715,7 @@ def _save_or_update_ticket_internal(t):
                     t.get("status", "CHƯA PHÂN LOẠI"),
                     ward or "",
                     region or "MN",
+                    loaded_by or "",
                 ))
             conn.close()
             conn = None

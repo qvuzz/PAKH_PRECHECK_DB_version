@@ -472,10 +472,12 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
     Tạm đưa chung 2 trường Tên quy trình và Tên bước vào ticket_code.
     """
     u_reg = None
+    u_name = ""
     try:
         from region_detector import detect_user_region
         uinfo = decode_jwt_user(token) if token else {}
         if uinfo:
+            u_name = str(uinfo.get("userName") or uinfo.get("username") or "").strip()
             det = detect_user_region(uinfo)
             if det in ("MB", "MN", "MT"):
                 u_reg = det
@@ -551,6 +553,7 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "created_time": it.get("requestDate", ""),
             "assigned_unit": it.get("assignedUnitName", ""),
             "source": "tts_new",
+            "loaded_by": u_name,
             "reopen_count": reopen_count,
             "last_reopened_date": last_reopened_date,
             "processing_content": processing_content,
@@ -587,6 +590,7 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "created_time": it.get("requestDate", ""),
             "assigned_unit": it.get("assignedUnitName", ""),
             "source": "tts_new",
+            "loaded_by": u_name,
             "reopen_count": reopen_count,
             "last_reopened_date": last_reopened_date,
             "processing_content": "",
