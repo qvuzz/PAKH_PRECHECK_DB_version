@@ -47,13 +47,13 @@ KNOWN_DEVICES = [
 ]
 
 
-def parse_sms_entities(ticket_content: str, incident_time_fallback: str = "", package_title: str = "") -> dict:
+def parse_sms_entities(ticket_content: str, incident_time_fallback: str = "", package_title: str = "", created_time: str = "") -> dict:
     """
     Bóc tách toàn diện các thực thể (Entities) phục vụ hiển thị tóm tắt và Automation.
     Được module hóa độc lập tại ai_sms_interpreter.py.
     """
     from ai_sms_interpreter import interpret_sms_ticket
-    return interpret_sms_ticket(ticket_content, package_title=package_title, incident_time_fallback=incident_time_fallback)
+    return interpret_sms_ticket(ticket_content, package_title=package_title, incident_time_fallback=incident_time_fallback, created_time=created_time)
 
 def _legacy_parse_sms_entities(ticket_content: str, incident_time_fallback: str = "") -> dict:
     raw = str(ticket_content or "").strip()
@@ -429,11 +429,12 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
     title = str(ticket.get("title") or ticket.get("package_title") or "Tin nhắn (SMS)").strip()
     content = str(ticket.get("content") or ticket.get("ticket_content") or "").strip()
     incident_time = str(ticket.get("incident_time") or ticket.get("created_time") or "").strip()
+    created_time = str(ticket.get("created_time") or "").strip()
     step_name = str(ticket.get("step_name") or "")
     code = str(ticket.get("ticket_code") or "")
 
     # 1. Bóc tách thực thể
-    entities = parse_sms_entities(content, incident_time, package_title=title)
+    entities = parse_sms_entities(content, incident_time, package_title=title, created_time=created_time)
     try:
         from services.state import state
         state.log("INFO", f"   📩 [ai_sms_interpreter] Phân tích: {entities.get('problem_title')} | Thiết bị: {entities.get('device_type')}")
@@ -456,7 +457,7 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
                 direction="both", 
                 from_time_str=from_date, 
                 to_time_str=to_date, 
-                limit=200
+                limit=1000
             )
             if cdr_res and cdr_res.get("success"):
                 cdr_records = cdr_res.get("records", [])
@@ -475,10 +476,10 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
     if not cdr_records:
         try:
             from db_manager import get_sms_cdr_records
-            cached_db = get_sms_cdr_records(phone_84, ticket_code=code, limit=200)
+            cached_db = get_sms_cdr_records(phone_84, ticket_code=code, limit=1000)
             if not cached_db:
                 # Tìm dự phòng theo riêng số điện thoại nếu ticket_code khác hoặc chưa gán
-                cached_db = get_sms_cdr_records(phone_84, limit=200)
+                cached_db = get_sms_cdr_records(phone_84, limit=1000)
             if cached_db:
                 cdr_records = cached_db
                 cdr_error = None

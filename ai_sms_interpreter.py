@@ -162,13 +162,14 @@ def extract_sms_prior_actions(text: str) -> list:
     return actions
 
 
-def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_time_fallback: str = "") -> dict:
+def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_time_fallback: str = "", created_time: str = "") -> dict:
     """
     Phân tích toàn diện nội dung phản ánh Tin nhắn (SMS):
     - Chuẩn hóa loại sự cố (mo_fail, otp, cost_issue, mt_fail, spam, other)
     - Tách đúng ngân hàng, đầu số, thiết bị, thao tác KTV
     - Đưa ra cảnh báo anomaly chính xác (không gán nhầm cảnh báo chối cước cho phiếu hỏng gửi đi)
     - Sinh summary 6 mục chuyên nghiệp chuẩn viễn thông
+    - Dải ngày tra cứu CDR: từ ngày sự cố (-1 ngày) đến ngày tiếp nhận + 3 ngày
     """
     raw = str(ticket_content or "").strip()
     low = raw.lower()
@@ -187,6 +188,16 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
         y_match = re.search(r'\b(20\d{2})\b', str(incident_time_fallback))
         if y_match:
             fallback_year = int(y_match.group(1))
+
+    # Parse ngày tiếp nhận phiếu (created_time) nếu có
+    receipt_dt = None
+    if created_time:
+        for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d/%m/%Y", "%Y-%m-%d"):
+            try:
+                receipt_dt = datetime.strptime(str(created_time).strip(), fmt)
+                break
+            except Exception:
+                pass
 
     # Quét giờ xảy ra nếu có (vd: 09:15, 9h30, lúc 14:00)
     time_str = ""
@@ -252,8 +263,16 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
                 target_dt = datetime(y_val, m_val, d_val)
                 prev_dt = target_dt - timedelta(days=1)
                 from_date = prev_dt.strftime("%Y-%m-%d 00:00:00")
-                to_date = now.strftime("%Y-%m-%d 23:59:59")
-                time_range_desc = f"{base_date_str} → Hiện tại"
+                # Quy chuẩn: từ ngày sự cố đến ngày tiếp nhận + 3 ngày
+                base_receipt = receipt_dt if receipt_dt else target_dt
+                if receipt_dt and target_dt and (receipt_dt - target_dt).days > 5:
+                    end_dt = target_dt + timedelta(days=5)
+                else:
+                    end_dt = base_receipt + timedelta(days=3)
+                if end_dt > now:
+                    end_dt = now
+                to_date = end_dt.strftime("%Y-%m-%d 23:59:59")
+                time_range_desc = f"{prev_dt.strftime('%d/%m/%Y')} → {end_dt.strftime('%d/%m/%Y')}"
             except Exception:
                 from_date = f"{y_val}-{pad(m_val)}-{pad(d_val)} 00:00:00"
                 to_date = now.strftime("%Y-%m-%d 23:59:59")
@@ -286,18 +305,47 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
                 target_dt = datetime(y_val, m_val, d_val)
                 prev_dt = target_dt - timedelta(days=1)
                 from_date = prev_dt.strftime("%Y-%m-%d 00:00:00")
-                to_date = now.strftime("%Y-%m-%d 23:59:59")
-                time_range_desc = f"{base_date_str} → Hiện tại"
+                # Quy chuẩn: từ ngày sự cố đến ngày tiếp nhận + 3 ngày
+                base_receipt = receipt_dt if receipt_dt else target_dt
+                if receipt_dt and target_dt and (receipt_dt - target_dt).days > 5:
+                    end_dt = target_dt + timedelta(days=5)
+                else:
+                    end_dt = base_receipt + timedelta(days=3)
+                if end_dt > now:
+                    end_dt = now
+                to_date = end_dt.strftime("%Y-%m-%d 23:59:59")
+                time_range_desc = f"{prev_dt.strftime('%d/%m/%Y')} → {end_dt.strftime('%d/%m/%Y')}"
             except Exception:
                 from_date = f"{y_val}-{pad(m_val)}-{pad(d_val)} 00:00:00"
                 to_date = now.strftime("%Y-%m-%d 23:59:59")
                 time_range_desc = f"{base_date_str} → Hiện tại"
 
     if not from_date:
-        p3 = now - timedelta(days=3)
-        from_date = p3.strftime("%Y-%m-%d 00:00:00")
-        to_date = now.strftime("%Y-%m-%d 23:59:59")
-        time_range_desc = "3 ngày gần nhất"
+        base_target = None
+        if incident_time_fallback:
+            for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+                try:
+                    base_target = datetime.strptime(str(incident_time_fallback).strip(), fmt)
+                    break
+                except Exception:
+                    pass
+        if base_target:
+            prev_dt = base_target - timedelta(days=1)
+            base_receipt = receipt_dt if receipt_dt else base_target
+            if receipt_dt and (receipt_dt - base_target).days > 5:
+                end_dt = base_target + timedelta(days=5)
+            else:
+                end_dt = base_receipt + timedelta(days=3)
+            if end_dt > now:
+                end_dt = now
+            from_date = prev_dt.strftime("%Y-%m-%d 00:00:00")
+            to_date = end_dt.strftime("%Y-%m-%d 23:59:59")
+            time_range_desc = f"{prev_dt.strftime('%d/%m/%Y')} → {end_dt.strftime('%d/%m/%Y')}"
+        else:
+            p3 = now - timedelta(days=3)
+            from_date = p3.strftime("%Y-%m-%d 00:00:00")
+            to_date = now.strftime("%Y-%m-%d 23:59:59")
+            time_range_desc = "3 ngày gần nhất"
 
     # 2. Bóc tách Ứng dụng / Ngân hàng / Đầu số
     app_brand = ""
