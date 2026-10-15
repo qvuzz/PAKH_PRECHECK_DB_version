@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY . .
 
 # Tạo các thư mục phục vụ lưu trữ file và kết quả
-RUN mkdir -p /app/result /app/scratch /app/output /app/sapccheck /app/data /app/models
+RUN mkdir -p /app/result /app/scratch /app/output /app/sapccheck /app/data /app/models /app/cdr_queue/input /app/cdr_queue/output
 
 # Mở cổng 1234 cho Web Dashboard
 EXPOSE 1234

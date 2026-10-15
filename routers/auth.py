@@ -389,10 +389,68 @@ async def get_admin_users_api(request: Request):
     from region_detector import get_user_regions_config
     cfg = get_user_regions_config()
     is_admin = _check_is_admin(request)
+    users = cfg.get("users", [])
+
+    # Thu thập danh sách user đang online (token TTS Mới hợp lệ & còn hạn)
+    online_keys = set()
+    try:
+        from ttsnew_api import _is_jwt_valid, TOKEN_CACHE_FILE
+        from services.session_manager import ACTIVE_LAN_SESSIONS, LAN_SESSIONS_FILE, decode_jwt
+        import json
+
+        sess_data = {}
+        if LAN_SESSIONS_FILE.exists():
+            try:
+                with open(LAN_SESSIONS_FILE, "r", encoding="utf-8") as f:
+                    sess_data.update(json.load(f))
+            except Exception:
+                pass
+        sess_data.update(ACTIVE_LAN_SESSIONS)
+
+        # 1. Quét từ LAN sessions
+        for ip, sess in sess_data.items():
+            if not isinstance(sess, dict):
+                continue
+            tok = (sess.get("ttsnew_token") or "").strip()
+            if tok and _is_jwt_valid(tok):
+                u_info = sess.get("ttsnew_user") or decode_jwt(tok)
+                if isinstance(u_info, dict):
+                    uname = str(u_info.get("userName") or u_info.get("username") or "").lower().strip()
+                    uemail = str(u_info.get("email") or "").lower().strip()
+                    if uname:
+                        online_keys.add(uname)
+                    if uemail:
+                        online_keys.add(uemail)
+
+        # 2. Quét từ file cache máy chủ (TOKEN_CACHE_FILE)
+        if TOKEN_CACHE_FILE.exists():
+            try:
+                with open(TOKEN_CACHE_FILE, "r", encoding="utf-8") as f:
+                    t_data = json.load(f)
+                    c_tok = (t_data.get("token") or "").strip()
+                    if c_tok and _is_jwt_valid(c_tok):
+                        u_info = decode_jwt(c_tok)
+                        uname = str(u_info.get("userName") or u_info.get("username") or "").lower().strip()
+                        uemail = str(u_info.get("email") or "").lower().strip()
+                        if uname:
+                            online_keys.add(uname)
+                        if uemail:
+                            online_keys.add(uemail)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"⚠️ [Admin Users] Lỗi kiểm tra session online: {e}")
+
+    for u in users:
+        uname = str(u.get("username") or "").lower().strip()
+        uemail = str(u.get("email") or "").lower().strip()
+        is_on = bool((uname and uname in online_keys) or (uemail and uemail in online_keys))
+        u["is_online"] = is_on
+
     return {
         "success": True,
         "is_admin": is_admin,
-        "users": cfg.get("users", []),
+        "users": users,
         "soc_mapping": cfg.get("soc_mapping", {"SOC1": "MB", "SOC2": "MN", "SOC3": "MT"})
     }
 
@@ -421,4 +479,21 @@ async def delete_admin_user_api(identifier: str, request: Request):
     from region_detector import delete_user_from_config
     ok, msg = delete_user_from_config(identifier)
     return {"success": ok, "message": msg}
+
+
+@router.post("/admin/users/toggle_auto_close")
+async def toggle_admin_user_auto_close_api(request: Request):
+    body = await request.json()
+    tok = body.get("token") or ""
+    if not _check_is_admin(request, body_token=tok):
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ Quản trị viên (SuperAdmin) mới có quyền phân quyền Tự động đóng phiếu."
+        )
+    identifier = body.get("username") or body.get("identifier") or ""
+    can_auto_close = body.get("can_auto_close")
+    from region_detector import toggle_user_auto_close
+    ok, msg, new_val = toggle_user_auto_close(identifier, can_auto_close=can_auto_close)
+    return {"success": ok, "message": msg, "can_auto_close": new_val}
+
 

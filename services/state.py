@@ -38,6 +38,7 @@ class AutomationState:
         self.auto_close = False  # Mặc định KHÔNG tự đóng để đảm bảo an toàn, KTV phải chủ động bật & xác nhận 2 lần
         self.auto_close_tts_old = False  # TTS Cũ đã bỏ
         self.auto_close_tts_new = False  # Trạng thái tự đóng TTS Mới
+        self.auto_close_regions = {"MB": False, "MN": False, "MT": False}  # Tự đóng theo từng phân vùng riêng biệt
         self.scan_scopes = ["tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"]  # Quét tự động toàn bộ phân hệ TTS Mới
         self.auto_close_mode = "none"  # 'tts_new', 'none'
         self.ai_summary_engine = "regex"  # Mặc định 'regex' (Regex thuần), hỗ trợ 'qwen' khi bật
@@ -106,16 +107,28 @@ class AutomationState:
         with self.lock:
             self.logs = []
 
-    def should_auto_close(self, source: str) -> bool:
+    def should_auto_close(self, source: str = "tts_new", region: str = None) -> bool:
         """
-        Kiểm tra xem nguồn phiếu (source: 'tts_old' hoặc 'tts_new') có được phép tự động đóng hay không.
+        Kiểm tra xem nguồn phiếu và phân vùng có được phép tự động đóng hay không.
+        Nếu truyền region ('MB', 'MN', 'MT'): kiểm tra đúng cờ của vùng đó.
         """
         norm_source = "tts_old" if "old" in str(source).lower() else "tts_new"
         if norm_source == "tts_old":
             return bool(getattr(self, "auto_close_tts_old", False))
-        elif norm_source == "tts_new":
-            return bool(getattr(self, "auto_close_tts_new", False))
-        return False
+        if region:
+            reg = str(region).strip().upper()
+            if reg in ("MB", "MN", "MT"):
+                return bool(self.auto_close_regions.get(reg, False))
+        return bool(getattr(self, "auto_close_tts_new", False) or any(self.auto_close_regions.values()))
+
+    def set_auto_close_for_region(self, region: str, enabled: bool):
+        reg = str(region or "").strip().upper()
+        with self.lock:
+            if reg in ("MB", "MN", "MT"):
+                self.auto_close_regions[reg] = bool(enabled)
+            self.auto_close = any(self.auto_close_regions.values())
+            self.auto_close_tts_new = self.auto_close
+            self.auto_close_mode = "tts_new" if self.auto_close else "none"
 
     def set_auto_close_for_system(self, system: str, enabled: bool):
         """
@@ -172,10 +185,12 @@ class AutomationState:
                 filtered_logs = [l for l in self.logs if not l.get("region") or l.get("region") == reg]
                 reg_st = self.region_status.get(reg, self.status)
                 reg_msg = self.region_status_message.get(reg, "") or self.status_message
+                is_reg_auto_close = bool(self.auto_close_regions.get(reg, False))
             else:
                 filtered_logs = list(self.logs)
                 reg_st = self.status
                 reg_msg = self.status_message
+                is_reg_auto_close = any(self.auto_close_regions.values())
 
             return {
                 "is_running": self.is_running,
@@ -183,11 +198,12 @@ class AutomationState:
                 "status_message": reg_msg,
                 "region_status": dict(self.region_status),
                 "interval_minutes": self.interval_minutes,
-                "auto_close": self.auto_close,
-                "auto_close_mode": getattr(self, "auto_close_mode", "none"),
+                "auto_close": is_reg_auto_close,
+                "auto_close_mode": "tts_new" if is_reg_auto_close else "none",
                 "auto_close_tts_old": False,
-                "auto_close_tts_new": self.should_auto_close("tts_new"),
-                "ai_summary_engine": getattr(self, "ai_summary_engine", "qwen"),
+                "auto_close_tts_new": is_reg_auto_close,
+                "auto_close_regions": dict(self.auto_close_regions),
+                "ai_summary_engine": getattr(self, "ai_summary_engine", "regex"),
                 "scan_scopes": list(getattr(self, "scan_scopes", ["tts_new_data", "tts_new_call", "tts_new_sms", "tts_new_other"])),
                 "engine": getattr(self, "engine", "tts_new"),
                 "dry_run": self.dry_run,

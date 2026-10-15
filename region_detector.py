@@ -767,13 +767,18 @@ def save_user_to_config(user_data: dict) -> Tuple[bool, str]:
             found_idx = i
             break
 
+    can_close_val = bool(user_data.get("can_auto_close", False))
+    if found_idx >= 0 and "can_auto_close" not in user_data:
+        can_close_val = bool(users_list[found_idx].get("can_auto_close", False))
+
     entry = {
         "soc": raw_soc,
         "region": reg,
         "name": raw_name or raw_user,
         "email": raw_email,
         "username": raw_user,
-        "role": raw_role
+        "role": raw_role,
+        "can_auto_close": can_close_val
     }
 
     if found_idx >= 0:
@@ -818,6 +823,69 @@ def delete_user_from_config(identifier: str) -> Tuple[bool, str]:
         return True, f"Đã xóa thành công KTV [{deleted_name}]"
     except Exception as e:
         return False, f"Lỗi khi xóa khỏi user_regions.json: {e}"
+
+
+def toggle_user_auto_close(identifier: str, can_auto_close: bool = None) -> Tuple[bool, str, bool]:
+    """
+    SuperAdmin tick cấp/thu hồi quyền tự đóng phiếu cho KTV theo 1 click.
+    """
+    cfg = get_user_regions_config()
+    users_list = cfg.get("users", [])
+    raw_id = str(identifier or "").strip().lower()
+
+    found_idx = -1
+    for i, u in enumerate(users_list):
+        u_name = str(u.get("username") or "").lower().strip()
+        u_mail = str(u.get("email") or "").lower().strip()
+        if u_name == raw_id or u_mail == raw_id:
+            found_idx = i
+            break
+
+    if found_idx < 0:
+        return False, f"Không tìm thấy nhân viên [{raw_id}]", False
+
+    current_val = bool(users_list[found_idx].get("can_auto_close", False))
+    new_val = (not current_val) if can_auto_close is None else bool(can_auto_close)
+    users_list[found_idx]["can_auto_close"] = new_val
+    cfg["users"] = users_list
+
+    try:
+        with open(USER_REGIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        u_name_display = users_list[found_idx].get("name") or raw_id
+        action_msg = "Đã cấp quyền Tự Đóng Phiếu cho" if new_val else "Đã thu hồi quyền Tự Đóng Phiếu của"
+        return True, f"{action_msg} [{u_name_display}]", new_val
+    except Exception as e:
+        return False, f"Lỗi ghi cấu hình: {e}", current_val
+
+
+def check_user_can_auto_close(user_info: dict, target_region: str = None) -> bool:
+    """
+    Kiểm tra xem user có quyền kích hoạt Tự Động Đóng Phiếu hay không.
+    - SuperAdmin luôn có quyền trên mọi miền.
+    - KTV có can_auto_close=True có quyền trên miền mà họ được phân công.
+    """
+    if is_superadmin(user_info):
+        return True
+    permitted, matched_u = is_user_permitted(user_info)
+    if not permitted or not matched_u:
+        return False
+    if not matched_u.get("can_auto_close"):
+        return False
+    if target_region:
+        u_reg = str(matched_u.get("region") or "").strip().upper()
+        t_reg = str(target_region or "").strip().upper()
+        if u_reg and t_reg and u_reg != t_reg:
+            return False
+    return True
+
+
+def parse_tts_jwt_user(token_str: str) -> dict:
+    try:
+        from services.session_manager import decode_jwt
+        return decode_jwt(token_str)
+    except Exception:
+        return {}
 
 
 

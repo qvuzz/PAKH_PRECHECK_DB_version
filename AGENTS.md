@@ -78,12 +78,14 @@ Tài liệu này là chỉ dẫn bắt buộc cho mọi trợ lý AI (Antigravit
        `http://127.0.0.1:1708/api/reverse-geocode?lat=...&long=...` kết hợp tọa độ GPS (lat/long) từ CEM.
      * Hàm chuẩn hóa lõi: [`normalize_vn_commune_and_province()`](routers/tickets.py) tự động trích xuất đúng `Phường/Xã` và `Tỉnh/TP`.
 
-7. **Quy chuẩn đồng bộ 3 lớp bắt buộc (Code gốc ➔ Thư mục Docker ➔ File nén ZIP)**:
-   * **BẮT BUỘC**: Mỗi khi tạo mới hoặc sửa đổi bất kỳ file code, cấu hình, template, static hay tài liệu triển khai nào:
+7. **Quy chuẩn đồng bộ 3 lớp & Xác nhận trước khi Build/Nén ZIP (BẮT BUỘC)**:
+   * **Quy trình 3 Lớp**:
      1. **Lớp 1 (Code gốc)**: Sửa tại thư mục gốc workspace (`PAKH_PRECHECK/`).
-     2. **Lớp 2 (Thư mục Docker)**: Đồng bộ ngay lập tức sang thư mục triển khai docker `VNPT TTS PRECHECK/` (giữ nguyên cấu trúc thư mục).
+     2. **Lớp 2 (Thư mục Docker)**: Đồng bộ sang thư mục triển khai docker `VNPT TTS PRECHECK/`.
      3. **Lớp 3 (Gói ZIP triển khai)**: Chạy `python update_deploy_zip.py` để đóng gói cập nhật đè vào file `VNPT_TTS_PRECHECK_DEPLOY.zip`.
-   * **Mục tiêu**: Đảm bảo code chạy trên máy trạm dev, thư mục docker server và file nén bàn giao cho KTV luôn đồng bộ 100%, không bị lệch phiên bản.
+   * **BẮT BUỘC HỎI Ý KIẾN TRƯỚC KHI BUILD DOCKER & NÉN FILE ZIP**:
+     * **CẤM** tự ý chạy build Docker hoặc nén lại file ZIP (`update_deploy_zip.py`) sau mỗi lần sửa code nhỏ.
+     * **BẮT BUỘC**: Trước khi thực hiện đồng bộ sang Docker / build lại container / nén file ZIP, AI phải hỏi ý kiến người dùng với lựa chọn rõ ràng **Yes/No**. Chỉ khi người dùng chọn **Yes (Đồng ý)** thì mới tiến hành đồng bộ và đóng gói ZIP.
 
 8. **Quy chuẩn đặc biệt bảo vệ JavaScript Client (`static/js/dashboard.js`) - BẮT BUỘC TUÂN THỦ**:
    * File `static/js/dashboard.js` điều khiển toàn bộ Single Page App với gần 9.000 dòng code. Bất kỳ một lỗi cú pháp nhỏ (như thiếu dấu đóng ngoặc `});`, sai template string `${...}`) sẽ khiến trình duyệt crash toàn bộ runtime JS, làm đơ toàn bộ Dashboard (treo ở trạng thái "Đang tải dữ liệu phiếu...").
@@ -98,6 +100,22 @@ Tài liệu này là chỉ dẫn bắt buộc cho mọi trợ lý AI (Antigravit
      3. **CHỜ NGƯỜI DÙNG XÁC NHẬN / ĐỒNG Ý MỚI ĐƯỢC THỰC HIỆN SỬA CODE (ACTION).**
    * **CẤM TUYỆT ĐỐI**: Tự ý sửa code khi chưa phân tích nguyên nhân và chưa có sự đồng ý của người dùng.
 
+10. **Quy chuẩn lập luận kỹ thuật & Cấm suy đoán vô căn cứ (Evidence-Based Engineering — BẮT BUỘC)**:
+    * **Nguyên tắc tôn trọng sự thật và dữ liệu**: Mọi phân tích, lập luận kỹ thuật, chẩn đoán nguyên nhân sự cố (trên Core SAPC, BTools, SMSC, CEM, OneOSS...) **BẮT BUỘC phải dựa 100% trên tài liệu kỹ thuật chính thống, mã lỗi chuẩn hóa, mã nguồn dự án hoặc log hệ thống thực tế**.
+    * **CẤM TUYỆT ĐỐI**:
+      * Tự ý suy đoán chủ quan, phỏng đoán cơ chế hoạt động của hệ thống khi không có tài liệu/log kiểm chứng (ví dụ: tự suy diễn *"hệ thống phát hiện bất thường nên chủ động kích hoạt chặn"*, *"do nhà mạng nghẽn mạng"*, *"do khách bị hack sim"*... mà không có log sự kiện hoặc tài liệu đối chiếu).
+      * Bịa đặt chức năng hoặc khẳng định nguyên nhân lỗi theo cảm tính của AI.
+    * **Quy chuẩn phân định dữ liệu và giả thuyết**:
+      * **Dữ liệu thực tế (Facts)**: Trích dẫn rõ trường dữ liệu, mã lỗi (`status_code`, `terminationcause`, `service_id`...), mốc thời gian, IP, nguồn trích xuất cụ thể từ log.
+      * **Giả thuyết kỹ thuật (Hypothesis)**: Khi chưa có tài liệu xác định chắc chắn ý nghĩa mã lỗi hoặc cơ chế, AI **bắt buộc** phải nêu rõ là *"Theo dữ liệu log ghi nhận mã lỗi X... Hiện tại chưa có tài liệu/quy định chính thức khẳng định cơ chế này, cần đối soát thêm với KTV/tài liệu hệ thống"* chứ không được kết luận khẳng định như một chân lý hiển nhiên.
+
+11. **Quy chuẩn module hóa độc lập (Modular Separation over Monolith — BẮT BUỘC)**:
+    * Khi phát triển các module, tính năng hoặc nghiệp vụ phân tích mới (ví dụ: bóc tách SMS, phân tích Thoại/Spam Call, kịch bản nghiệp vụ mới...), **ƯU TIÊN TUYỆT ĐỐI tạo file code riêng biệt** (ví dụ: `ai_sms_interpreter.py`, `spam_call_analyzer.py`) thay vì tiếp tục dồn nhét vào các module lớn hiện có (như `ai_interpreter.py`, `report_bot.py`).
+    * Việc này nhằm đảm bảo:
+      1. **Tránh phình to file (God Object)**: Giúp kiểm soát lỗi cục bộ và tiết kiệm token khi đọc/sửa code.
+      2. **Độc lập nghiệp vụ**: Tránh xung đột logic giữa các phân hệ (ví dụ: logic bóc tách Data không thể áp đặt nhầm sang SMS hay Thoại).
+      3. **Dễ bảo trì & nâng cấp**: Dễ dàng chỉnh sửa, test riêng từng nghiệp vụ mà không làm ảnh hưởng luồng core đang chạy ổn định.
+
 ---
 
 ## 🗺️ 2. BẢN ĐỒ CHỈ MỤC CÁC FILE LÕI (CORE REPOSITORY MAP)
@@ -110,7 +128,8 @@ Dự án đã được phân tầng rõ ràng, mọi nghiệp vụ chỉ nằm t
 | **Logic kịch bản tiền kiểm** | [`scenarios_engine.py`](scenarios_engine.py) | Thuật toán phân loại BTools: Bóp băng thông, rớt 2G/3G, treo phiên quản trị `300`/`2042`. |
 | **Cấu hình kịch bản chẩn đoán** | [`diagnostic_scenarios.json`](diagnostic_scenarios.json) | Định nghĩa các bước logic chẩn đoán tuần tự. |
 | **Mẫu câu kết luận & Đóng phiếu** | [`report_bot.py`](report_bot.py) | Tổng hợp chứng cứ (BTools + SAPC + CEM), sinh kết luận kỹ thuật, chọn mã lỗi đóng phiếu OneOSS. |
-| **Xử lý ý định phản ánh** | [`ai_interpreter.py`](ai_interpreter.py) | Regex & NLP bóc tách nội dung khách báo (chậm, mất mạng, lỗi app, thoại). |
+| **Xử lý ý định phản ánh Data** | [`ai_interpreter.py`](ai_interpreter.py) | Regex & NLP bóc tách nội dung khách báo Data (gói cước, dung lượng, chậm, mất mạng, lỗi app). |
+| **Xử lý ý định phản ánh SMS** | [`ai_sms_interpreter.py`](ai_sms_interpreter.py) | Regex & NLP chuyên biệt cho tin nhắn SMS (OTP, MO/MT fail, cước SMS, TTNT, SMO). |
 | **API Phiếu & Điều phối Web** | [`routers/tickets.py`](routers/tickets.py) | Danh sách phiếu, phân loại tab Data/Cuộc gọi/SMS, kích hoạt quét và tiền kiểm, lưu cấu hình Auto-Close. |
 | **Đăng nhập & Phiên KTV** | [`routers/auth.py`](routers/auth.py) | Đăng nhập TTS cũ, TTS mới, xử lý OTP và session token. |
 | **FastAPI Server & WebSocket** | [`main.py`](main.py) | Server cổng 1234, kết nối WebSocket realtime, cron background auto-scan. |

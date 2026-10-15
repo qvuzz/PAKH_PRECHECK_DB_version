@@ -32,6 +32,7 @@ function selectUserManagementModule(updateUrl = true) {
 
     const flowAuditContainer = document.getElementById('flowAuditContainer');
     if (flowAuditContainer) flowAuditContainer.style.display = 'none';
+    document.querySelectorAll('.flow-audit-container, #flowAuditContainer').forEach(el => el.style.display = 'none');
 
     // 3. Hiển thị container Quản lý phân vùng KTV & Mô hình AI
     const container = document.getElementById('userManagementContainer');
@@ -126,7 +127,10 @@ function renderAdminUsersTable(users) {
                     ${escapeHtml(u.name || u.username || '--')}
                 </td>
                 <td style="padding:10px 14px; font-family:\'JetBrains Mono\', monospace; color:#005baa; font-weight:600;">
-                    ${escapeHtml(u.username || '--')}
+                    <span style="display:inline-flex; align-items:center; gap:6px;">
+                        <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${u.is_online ? '#16a34a' : '#dc2626'}; box-shadow:0 0 0 2px ${u.is_online ? '#bbf7d0' : '#fecaca'};" title="${u.is_online ? 'Token TTS Mới còn hạn (Online)' : 'Chưa có phiên hoặc Token hết hạn (Offline)'}"></span>
+                        ${escapeHtml(u.username || '--')}
+                    </span>
                 </td>
                 <td style="padding:10px 14px; color:#334155;">
                     ${escapeHtml(u.email || '--')}
@@ -143,9 +147,27 @@ function renderAdminUsersTable(users) {
                     `}
                 </td>
                 <td style="padding:10px 12px; text-align:center;">
-                    <span style="background:#f0fdf4; color:#16a34a; font-size:11px; font-weight:700; padding:3px 8px; border-radius:4px; border:1px solid #bbf7d0; display:inline-block;">
-                        Được phép
+                    <label style="display:inline-flex; align-items:center; gap:5px; cursor:pointer; user-select:none;" title="Click 1 phát để cấp hoặc thu hồi quyền tự đóng phiếu">
+                        <input type="checkbox" ${u.can_auto_close || isAdminRole ? 'checked' : ''} ${isAdminRole ? 'disabled' : ''}
+                            onchange="toggleUserAutoClosePerm('${escapeHtml(u.username)}', this.checked)"
+                            style="width:15px; height:15px; cursor:pointer; accent-color:#005baa;">
+                        <span style="font-size:11px; font-weight:700; color:${u.can_auto_close || isAdminRole ? '#16a34a' : '#64748b'};">
+                            ${u.can_auto_close || isAdminRole ? 'Cho phép' : 'Khóa'}
+                        </span>
+                    </label>
+                </td>
+                <td style="padding:10px 12px; text-align:center;">
+                    ${u.is_online ? `
+                    <span style="display:inline-flex; align-items:center; gap:5px; background:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; font-size:11px; font-weight:700; padding:3px 9px; border-radius:4px;" title="Token TTS Mới còn hiệu lực">
+                        <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#16a34a;"></span>
+                        Online
                     </span>
+                    ` : `
+                    <span style="display:inline-flex; align-items:center; gap:5px; background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; font-size:11px; font-weight:600; padding:3px 9px; border-radius:4px;" title="Chưa có phiên làm việc hoặc Token đã hết hạn">
+                        <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#dc2626;"></span>
+                        Offline
+                    </span>
+                    `}
                 </td>
                 <td style="padding:10px 14px; text-align:center;">
                     <div style="display:inline-flex; align-items:center; gap:6px;">
@@ -170,6 +192,33 @@ function renderAdminUsersTable(users) {
     tbody.innerHTML = html;
 }
 window.renderAdminUsersTable = renderAdminUsersTable;
+
+async function toggleUserAutoClosePerm(username, isChecked) {
+    try {
+        const clientAuthTok = getTtsNewAuthToken() || (getTtsAuthSession() ? getTtsAuthSession().token : '');
+        const res = await fetch('/api/admin/users/toggle_auto_close', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': clientAuthTok ? (clientAuthTok.startsWith('Bearer ') ? clientAuthTok : `Bearer ${clientAuthTok}`) : ''
+            },
+            body: JSON.stringify({ username, can_auto_close: isChecked })
+        });
+        const data = await res.json();
+        if (data.success) {
+            const u = cachedAdminUsers.find(x => x.username === username);
+            if (u) u.can_auto_close = data.can_auto_close;
+            renderAdminUsersTable(cachedAdminUsers);
+        } else {
+            alert(data.detail || data.message || 'Lỗi khi cập nhật quyền tự đóng phiếu');
+            loadAdminUsers();
+        }
+    } catch (e) {
+        alert('Lỗi kết nối: ' + e.message);
+        loadAdminUsers();
+    }
+}
+window.toggleUserAutoClosePerm = toggleUserAutoClosePerm;
 
 function filterAdminUsersTable() {
     const q = (document.getElementById('searchUserMgmtInput')?.value || '').toLowerCase().trim();
@@ -205,6 +254,8 @@ function openUserModal(userObj = null) {
         document.getElementById('inputUserEmail').value = userObj.email || '';
         const roleSel = document.getElementById('inputUserRole');
         if (roleSel) roleSel.value = userObj.role || (userObj.username === 'quangvu' ? 'admin' : 'ktv');
+        const autoCloseChk = document.getElementById('inputUserCanAutoClose');
+        if (autoCloseChk) autoCloseChk.checked = !!userObj.can_auto_close;
         document.getElementById('inputUserOriginalKey').value = userObj.username || '';
         document.getElementById('inputUserUsername').disabled = true;
     } else {
@@ -215,6 +266,8 @@ function openUserModal(userObj = null) {
         document.getElementById('inputUserEmail').value = '';
         const roleSel = document.getElementById('inputUserRole');
         if (roleSel) roleSel.value = 'ktv';
+        const autoCloseChk = document.getElementById('inputUserCanAutoClose');
+        if (autoCloseChk) autoCloseChk.checked = false;
         document.getElementById('inputUserOriginalKey').value = '';
         document.getElementById('inputUserUsername').disabled = false;
     }
@@ -237,6 +290,7 @@ async function handleUserModalSubmit(e) {
     const username = document.getElementById('inputUserUsername')?.value.trim() || '';
     const email = document.getElementById('inputUserEmail')?.value.trim() || '';
     const role = document.getElementById('inputUserRole')?.value || 'ktv';
+    const canAutoClose = document.getElementById('inputUserCanAutoClose')?.checked || false;
     const msgEl = document.getElementById('modalUserMgmtMsg');
     const btnSubmit = document.getElementById('btnSubmitUserModal');
 
@@ -263,7 +317,8 @@ async function handleUserModalSubmit(e) {
                 name: name,
                 username: username,
                 email: email,
-                role: role
+                role: role,
+                can_auto_close: canAutoClose
             })
         });
 

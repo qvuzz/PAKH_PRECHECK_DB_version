@@ -2,6 +2,7 @@
 # Module tích hợp REST API cho hệ thống TTS Mới (tts.vnptnet.vn / gw-oneoss.vnpt.vn)
 
 import os
+import re
 import json
 import time
 import requests
@@ -319,6 +320,8 @@ except Exception:
         "CHƯA ĐĂNG KÝ GÓI": "Lỗi do gói cước",
         "CHỈ CÓ GÓI PAYGO": "Lỗi do gói cước",
         "CHỈ CÓ GÓI TIỆN ÍCH - THIẾU DATA INTERNET": "Lỗi do gói cước",
+        "LỖI GÓI CƯỚC (THIẾU ODA_BIG_OCS)": "Lỗi do gói cước",
+        "CHƯA ĐĂNG KÝ GÓI KHÁCH BÁO": "Lỗi do gói cước",
         "LỖI GÓI VD2 - THIẾU PAYGO": "Lỗi do gói cước",
         "LỖI GÓI THẢ GA - THIẾU PAYGO": "Lỗi do gói cước",
         "TRỪ CƯỚC NGOÀI GÓI PAYGO": "Lỗi do gói cước",
@@ -404,8 +407,20 @@ EXCLUDED_DATA_TITLES = [
     "cvqt - dv mobile internet (data)"
 ]
 
+def is_roaming_ticket(it: dict) -> bool:
+    title = str(it.get("title") or it.get("package_title") or "").strip().lower()
+    return "cvqt" in title or "chuyển vùng quốc tế" in title or "roaming" in title or "idd 1714" in title
+
+def is_sim_ticket(it: dict) -> bool:
+    title = str(it.get("title") or it.get("package_title") or "").strip().lower()
+    if is_roaming_ticket(it):
+        return False
+    return "sim_" in title or "multisim" in title or "esim" in title or title.startswith("sim ") or "sim khai báo" in title
+
 def is_mobile_internet_data_ticket(it: dict) -> bool:
-    title = str(it.get("title") or "").strip().lower()
+    title = str(it.get("title") or it.get("package_title") or "").strip().lower()
+    if not title or is_roaming_ticket(it):
+        return False
     if "mobile internet" not in title:
         return False
     for ex in EXCLUDED_DATA_TITLES:
@@ -413,57 +428,126 @@ def is_mobile_internet_data_ticket(it: dict) -> bool:
             return False
     return True
 
-
-def filter_data_tickets(raw_tickets: list) -> list:
-    """
-    Scan tất cả các phiếu có 'Tiêu đề' là Mobile Internet, trừ:
-    - Mobile Internet (M0/Gói Data)
-    - Gói cước Mobile Internet
-    - CVQT - DV Mobile Internet (Data)
-    Bỏ tất cả các điều kiện lọc còn lại như Tên Quy trình và Tên Bước.
-    """
-    return [it for it in raw_tickets if is_mobile_internet_data_ticket(it)]
-
+def is_spam_call_ticket(it: dict) -> bool:
+    title = str(it.get("title") or it.get("package_title") or "").strip().lower()
+    content = str(it.get("content") or it.get("ticket_content") or "").strip()
+    if "spam cuộc gọi" in title or "cuộc gọi rác" in title:
+        return True
+    if any(k in title for k in [
+        "gọi đi", "gọi đến", "cuộc gọi", "giữ cuộc gọi", "gọi quốc tế", 
+        "vowifi", "volte", "thoại", "rớt cuộc", "nghe xen"
+    ]) and content:
+        from spam_call_analyzer import classify_call_ticket_with_qwen
+        if classify_call_ticket_with_qwen(title, content, phone=str(it.get("phone") or "")):
+            return True
+    return False
 
 def is_call_ticket(it: dict) -> bool:
-    title = str(it.get("title") or "").strip().lower()
+    title = str(it.get("title") or it.get("package_title") or "").strip().lower()
+    if is_roaming_ticket(it) or is_sim_ticket(it):
+        return False
+    if is_spam_call_ticket(it):
+        return False
     return any(k in title for k in [
-        "gọi đi trong nước", "nhận cuộc gọi đến trong nước", "nhận cuộc gọi dến trong nước",
-        "cuộc gọi đi và đến", "bị khóa spam cuộc gọi", "giữ cuộc gọi", "gọi quốc tế", "vowifi"
+        "gọi đi", "gọi đến", "cuộc gọi", "giữ cuộc gọi", "gọi quốc tế", 
+        "vowifi", "volte", "thoại", "rớt cuộc", "nghe xen"
     ])
 
+def is_sms_ticket(it: dict) -> bool:
+    title = str(it.get("title") or it.get("package_title") or "").strip().lower()
+    if is_roaming_ticket(it) or is_sim_ticket(it):
+        return False
+    return "tin nhắn" in title or "sms" in title
+
+def is_other_ticket(it: dict) -> bool:
+    return (
+        not is_mobile_internet_data_ticket(it)
+        and not is_call_ticket(it)
+        and not is_spam_call_ticket(it)
+        and not is_sms_ticket(it)
+        and not is_roaming_ticket(it)
+        and not is_sim_ticket(it)
+    )
+
+def filter_data_tickets(raw_tickets: list) -> list:
+    """Lọc tất cả các phiếu có Tiêu đề là Mobile Internet."""
+    return [it for it in raw_tickets if is_mobile_internet_data_ticket(it)]
 
 def filter_call_tickets(raw_tickets: list) -> list:
     """Lọc danh sách phiếu thuộc module Cuộc gọi."""
     return [it for it in raw_tickets if is_call_ticket(it)]
 
-
-def is_sms_ticket(it: dict) -> bool:
-    title = str(it.get("title") or "").strip().lower()
-    return any(k in title for k in [
-        "nhận tin nhắn", "khóa spam tin nhắn", "tin nhắn (sms)", "gửi tin nhắn", "tin nhắn rác"
-    ]) or ("tin nhắn" in title and "cvqt" not in title)
-
+def filter_spam_call_tickets(raw_tickets: list) -> list:
+    """Lọc danh sách phiếu thuộc module Chặn gọi ngoại mạng / Spam cuộc gọi."""
+    return [it for it in raw_tickets if is_spam_call_ticket(it)]
 
 def filter_sms_tickets(raw_tickets: list) -> list:
     """Lọc danh sách phiếu thuộc module Tin nhắn."""
     return [it for it in raw_tickets if is_sms_ticket(it)]
 
+def filter_roaming_tickets(raw_tickets: list) -> list:
+    """Lọc danh sách phiếu thuộc module Chuyển vùng quốc tế."""
+    return [it for it in raw_tickets if is_roaming_ticket(it)]
 
-def is_other_ticket(it: dict) -> bool:
-    return not is_mobile_internet_data_ticket(it) and not is_call_ticket(it) and not is_sms_ticket(it)
-
+def filter_sim_tickets(raw_tickets: list) -> list:
+    """Lọc danh sách phiếu thuộc module Sim / MultiSIM."""
+    return [it for it in raw_tickets if is_sim_ticket(it)]
 
 def filter_other_tickets(raw_tickets: list) -> list:
     """Lọc danh sách phiếu thuộc module Gói cước / PA Khác."""
     return [it for it in raw_tickets if is_other_ticket(it)]
 
-
 def filter_non_data_tickets(raw_tickets: list) -> list:
-    """
-    Lọc danh sách các phiếu NGOÀI Mobile Internet (Thoại, SMS, Gói cước, CVQT, MNP...).
-    """
+    """Lọc danh sách các phiếu NGOÀI Mobile Internet (Thoại, SMS, Gói cước, CVQT, MNP...)."""
     return [it for it in raw_tickets if not is_mobile_internet_data_ticket(it)]
+
+
+
+def normalize_oneoss_date(raw_date: str, ticket_code: str = "") -> str:
+    """
+    Chuẩn hóa trường ngày giờ lấy từ OneOSS API (incidentDate, requestDate)
+    về định dạng chuẩn Việt Nam: DD/MM/YYYY HH:mm:ss (hoặc DD/MM/YYYY HH:mm).
+    
+    Xử lý triệt để: OneOSS API mặc định trả về định dạng US (MM/DD/YYYY HH:mm:ss).
+    Ví dụ: '10/08/2026 16:35:10' -> '08/10/2026 16:35:10' (Ngày 08 tháng 10).
+    """
+    if not raw_date:
+        return ""
+    raw = str(raw_date).strip()
+    if not raw or raw in ("--", "null", "None"):
+        return ""
+
+    # 1. Trường hợp ISO: YYYY-MM-DD[T/ ]HH:mm[:ss]
+    m_iso = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s]+(\d{1,2}:\d{1,2}(?::\d{1,2})?))?", raw)
+    if m_iso:
+        y, m, d, t = m_iso.group(1), int(m_iso.group(2)), int(m_iso.group(3)), m_iso.group(4) or ""
+        t_str = f" {t}" if t else ""
+        return f"{d:02d}/{m:02d}/{y}{t_str}".strip()
+
+    # 2. Trường hợp dạng A/B/YYYY hoặc A-B-YYYY [HH:mm[:ss]]
+    m_slash = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:[T\s]+(\d{1,2}:\d{1,2}(?::\d{1,2})?))?", raw)
+    if m_slash:
+        p1, p2, y, t = int(m_slash.group(1)), int(m_slash.group(2)), m_slash.group(3), m_slash.group(4) or ""
+        t_str = f" {t}" if t else ""
+
+        tc_m = re.search(r'HT/(\d{4})/(\d{2})/(\d{2})', str(ticket_code))
+        tc_month = int(tc_m.group(2)) if tc_m else 0
+
+        if p1 > 12:
+            day, month = p1, p2
+        elif p2 > 12:
+            day, month = p2, p1
+        else:
+            if tc_month and p1 == tc_month and p2 != tc_month:
+                day, month = p2, p1
+            elif tc_month and p2 == tc_month and p1 != tc_month:
+                day, month = p1, p2
+            else:
+                day, month = p2, p1
+
+        return f"{day:02d}/{month:02d}/{y}{t_str}".strip()
+
+    return raw
 
 
 def enrich_ticket_customer(it: dict, token: str) -> dict:
@@ -536,6 +620,9 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             if "mở lại" in comb_text or "phiếu mở lại" in comb_text:
                 reopen_count = 1
 
+        raw_inc_date = it.get("incidentDate", "") or it.get("requestDate", "")
+        raw_req_date = it.get("requestDate", "")
+
         return {
             "flow_id": flow_id,
             "ticket_id": it.get("ticketId"),
@@ -549,8 +636,8 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "customer_level": cust.get("clMemberLevelName", ""),
             "title": it.get("title", ""),
             "content": it.get("content", ""),
-            "incident_time": it.get("incidentDate", "") or it.get("requestDate", ""),
-            "created_time": it.get("requestDate", ""),
+            "incident_time": normalize_oneoss_date(raw_inc_date, raw_code),
+            "created_time": normalize_oneoss_date(raw_req_date, raw_code),
             "assigned_unit": it.get("assignedUnitName", ""),
             "source": "tts_new",
             "loaded_by": u_name,
@@ -573,6 +660,8 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
     except Exception as e:
         raw_fb = str(it.get("subscriberNumber") or it.get("customerPhone") or "").strip()
         from region_detector import detect_ticket_region
+        raw_inc_date = it.get("incidentDate", "") or it.get("requestDate", "")
+        raw_req_date = it.get("requestDate", "")
         return {
             "flow_id": flow_id,
             "ticket_id": it.get("ticketId"),
@@ -586,8 +675,8 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "customer_level": "",
             "title": it.get("title", ""),
             "content": it.get("content", ""),
-            "incident_time": it.get("incidentDate", "") or it.get("requestDate", ""),
-            "created_time": it.get("requestDate", ""),
+            "incident_time": normalize_oneoss_date(raw_inc_date, raw_code),
+            "created_time": normalize_oneoss_date(raw_req_date, raw_code),
             "assigned_unit": it.get("assignedUnitName", ""),
             "source": "tts_new",
             "loaded_by": u_name,
@@ -670,8 +759,14 @@ def get_ttsnew_tickets_for_precheck(driver=None, max_workers: int = 8, service_t
         target_tickets = filter_data_tickets(raw_tickets)
     elif service_type in ("call", "voice", "cuoc_goi"):
         target_tickets = filter_call_tickets(raw_tickets)
+    elif service_type in ("spam_call", "outbound_block", "chan_goi_ngoai_mang"):
+        target_tickets = filter_spam_call_tickets(raw_tickets)
     elif service_type in ("sms", "tin_nhan"):
         target_tickets = filter_sms_tickets(raw_tickets)
+    elif service_type in ("roaming", "cvqt", "chuyen_vung_quoc_te"):
+        target_tickets = filter_roaming_tickets(raw_tickets)
+    elif service_type in ("sim", "sim_multisim"):
+        target_tickets = filter_sim_tickets(raw_tickets)
     elif service_type in ("other", "khac"):
         target_tickets = filter_other_tickets(raw_tickets)
     elif service_type == "voice_sms":
@@ -1627,9 +1722,13 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
             else:
                 # 🎯 PHIẾU ĐÃ BỊ ĐÓNG TRỰC TIẾP TRÊN ONEOSS (Không còn trong active_list)
                 # CHỈ ĐÓNG KHI:
-                # 1. Xác định được vùng miền cụ thể (sync_reg là 'MN', 'MT' hoặc 'MB')
-                # 2. Phiếu trong DB thuộc đúng vùng miền này (row['region'] == sync_reg)
-                if sync_reg in ("MN", "MT", "MB") and row.get("region") == sync_reg and row.get("ticket_id"):
+                # 1. Token là của SuperAdmin toàn quyền (quangvu) có tầm nhìn bao quát toàn bộ Miền
+                # 2. Xác định được vùng miền cụ thể (sync_reg là 'MN', 'MT' hoặc 'MB')
+                # 3. Phiếu trong DB thuộc đúng vùng miền này (row['region'] == sync_reg)
+                # TUYỆT ĐỐI KHÔNG cho phép KTV lẻ tự ý đóng phiếu của đồng nghiệp trong cùng miền!
+                user_info_sync = decode_jwt_user(token)
+                from region_detector import is_superadmin
+                if is_superadmin(user_info_sync) and sync_reg in ("MN", "MT", "MB") and row.get("region") == sync_reg and row.get("ticket_id"):
                     pending_closes.append(row["ticket_id"])
 
         # Thực thi cập nhật DB thần tốc (< 5ms)
@@ -1649,8 +1748,8 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
                         for t_id in pending_closes:
                             conn_w.execute("""
                                 UPDATE tickets 
-                                SET ticket_status = 'Đã đóng', 
-                                    closed_at = CURRENT_TIMESTAMP, 
+                                SET ticket_status = 'Đã đóng 2.6', 
+                                    closed_at = datetime('now', '+7 hours'), 
                                     closed_by = 'Đóng trên OneOSS', 
                                     updated_at = CURRENT_TIMESTAMP 
                                 WHERE ticket_id = ? AND source = 'tts_new' AND region = ?

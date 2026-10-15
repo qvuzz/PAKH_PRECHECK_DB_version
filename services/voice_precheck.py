@@ -26,9 +26,9 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
     3. Phân tích kịch bản cuộc gọi và đưa ra nhận định chuẩn.
     4. Ở bước 2.3: Tự động nhập sẵn Ý kiến phân tích & Nội dung phản hồi là "Chuyển 2.4".
     """
-    code = ticket.get("ticket_code", "")
-    title = ticket.get("title", "")
-    ticket_content = ticket.get("content", "")
+    code = ticket.get("ticket_code") or ticket.get("code") or ""
+    title = ticket.get("title") or ticket.get("package_title") or ""
+    ticket_content = ticket.get("content") or ticket.get("ticket_content") or ""
     step_name = str(ticket.get("step_name") or "")
     reopen_count = int(ticket.get("reopen_count") or 0)
     last_reopened_date = str(ticket.get("last_reopened_date") or "").strip()
@@ -55,9 +55,9 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
             color = "orange"
 
         raw_step_check = f"{step_name} {code}".lower()
-        is_step_23 = ("2.3" in raw_step_check) or ("xử lý pakh" in raw_step_check)
-        comment = "Chuyển 2.4" if is_step_23 else summary_text
-        action_plan = "Chuyển 2.4" if is_step_23 else summary_text
+        is_step_23 = ("2.3" in raw_step_check) and ("2.4" not in raw_step_check) and ("2.6" not in raw_step_check)
+        comment = summary_text if summary_text else ("Chuyển 2.4" if is_step_23 else "Kiểm tra danh sách chặn spam/cam kết")
+        action_plan = summary_text if summary_text else ("Chuyển 2.4" if is_step_23 else "Hướng dẫn khách hàng ký cam kết theo quy định")
 
         return {
             "status": status,
@@ -81,6 +81,26 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
             "commitment_files": s_res.get("commitment_files", []),
             "spam_summary": summary_text
         }
+
+    # =========================================================================
+    # 0.1 CHUYÊN BIỆT: NHÓM SỰ CỐ TIN NHẮN (SMS / OTP / CƯỚC SMS / SPAM SMS)
+    # (Tự động bóc tách thực thể bằng ai_sms_interpreter + tra cứu SMSC CDR)
+    # =========================================================================
+    from db_manager import is_sms_ticket as db_is_sms_ticket
+    from services.sms_analyzer import is_sms_ticket, analyze_sms_ticket_with_cdr
+
+    srv_type = str(ticket.get("service_type") or "").strip().lower()
+    is_sms = (
+        srv_type in ("sms", "tin_nhan")
+        or is_sms_ticket(title, ticket_content)
+        or db_is_sms_ticket(title)
+        or any(k in title.lower() for k in ["tin nhắn", "sms"])
+        or any(k in ticket_content.lower() for k in ["nhắn tin", "gửi tin", "nhận tin", "ttnt", "smo", "smt"])
+    )
+    if is_sms:
+        from services.state import state
+        state.log("INFO", f"   📩 [ai_sms_interpreter] Nhận diện sự cố SMS: {phone_84} - Đang bóc tách thực thể & tra cứu CDR...")
+        return analyze_sms_ticket_with_cdr(phone_84, ticket, force_cdr=True)
 
     # Nhận diện nếu caller truyền driver vào vị trí tham số thứ 3
     if sapc_client is not None and hasattr(sapc_client, "session") is False and hasattr(sapc_client, "execute_cdp_cmd"):
@@ -187,17 +207,24 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
         color = "green"
 
     # =========================================================================
-    # 3. ĐIỀN SẴN NỘI DUNG CHO BƯỚC 2.3: "Chuyển 2.4"
+    # 3. SINH NHẬN ĐỊNH KỸ THUẬT THỰC TẾ & GỢI Ý ĐIỀU PHỐI BƯỚC
     # =========================================================================
     raw_step_check = f"{step_name} {code}".lower()
-    is_step_23 = ("2.3" in raw_step_check) or ("xử lý pakh" in raw_step_check)
+    is_step_23 = ("2.3" in raw_step_check) and ("2.4" not in raw_step_check) and ("2.6" not in raw_step_check)
 
-    if is_step_23:
-        comment = "Chuyển 2.4"
-        action_plan = "Chuyển 2.4"
+    if is_strange_hss:
+        comment = "HSS Profile bất thường, nghi ngờ ảnh hưởng dịch vụ VoLTE/Cuộc gọi."
+        action_plan = "Kiểm tra và đồng bộ lại cấu hình Profile thuê bao trên Core HSS."
+    elif is_lock:
+        comment = "Hồ sơ thuê bao bị khóa cước / khóa dịch vụ trên Core HSS (Cờ NAM: 1)."
+        action_plan = "Hướng dẫn khách hàng thanh toán cước hoặc nạp tiền để mở khóa chiều dịch vụ."
+    elif is_station_err:
+        comment = f"Trạm phát sóng phục vụ ({sapc_cell or 'khu vực'}) đang có cảnh báo sự cố kỹ thuật."
+        action_plan = "Chuyển đơn vị quản lý trạm viễn thông địa bàn kiểm tra xử lý sự cố phát sóng."
     else:
-        comment = ""
-        action_plan = ""
+        pkg_note = f" Gói cước: {formatted_packages}." if formatted_packages and formatted_packages != "--" else ""
+        comment = f"Trạng thái Core HSS bình thường, dịch vụ mở 2 chiều, trạm phát sóng đảm bảo.{pkg_note}"
+        action_plan = "Hướng dẫn khách hàng khởi động lại thiết bị, kiểm tra cài đặt chế độ mạng trên máy."
 
     # Tổng hợp trường hiển thị tóm tắt nội dung
     ai_summary_val = ticket_content

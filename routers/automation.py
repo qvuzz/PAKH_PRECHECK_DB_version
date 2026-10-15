@@ -12,10 +12,32 @@ router = APIRouter(prefix="/api", tags=["Điều khiển Quét & Tự động h�
 
 
 @router.get("/status")
-def get_system_status(region: str = None):
+def get_system_status(request: Request, region: str = None):
     reg_val = (region or "ALL").strip().upper() if region else "ALL"
     snap = state.get_snapshot(region=reg_val if reg_val in ("MB", "MN", "MT") else None)
     snap["system_counts"] = get_system_counts(region=reg_val)
+
+    # Kiểm tra quyền can_auto_close của caller
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.replace("Bearer ", "").strip() if auth_header else ""
+    can_close = False
+    if token:
+        user_info = {}
+        try:
+            from services.session_manager import decode_jwt
+            user_info = decode_jwt(token)
+        except Exception:
+            try:
+                from region_detector import parse_tts_jwt_user
+                user_info = parse_tts_jwt_user(token)
+            except Exception:
+                user_info = {}
+        try:
+            from region_detector import check_user_can_auto_close
+            can_close = check_user_can_auto_close(user_info, target_region=reg_val)
+        except Exception:
+            can_close = False
+    snap["can_auto_close"] = can_close
     return snap
 
 
@@ -86,29 +108,46 @@ async def update_automation_config(request: Request):
 
     is_admin = is_superadmin(user_info)
 
+    target_region = body.get("region")
+    if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT"):
+        target_region = str(target_region).strip().upper()
+    else:
+        target_region = None
+
+    from region_detector import check_user_can_auto_close
+    can_manage_auto_close = is_admin or check_user_can_auto_close(user_info, target_region=target_region)
+
     if "scan_scopes" in body:
         state.scan_scopes = list(body["scan_scopes"])
         state.log("INFO", f"⚙️ Đã cập nhật phạm vi quét: {state.scan_scopes}")
-    if not is_admin:
-        state.auto_close = False
-        state.auto_close_mode = "none"
-        if body.get("auto_close") or (body.get("auto_close_mode") and body.get("auto_close_mode") != "none") or body.get("auto_close_tts_old") or body.get("auto_close_tts_new") or body.get("system"):
-            state.log("WARNING", f"⛔ Đã chặn yêu cầu Tự đóng từ IP máy trạm {client_ip} (Chỉ Admin mới được phép)")
-    elif "system" in body and "auto_close" in body:
-        sys_target = str(body["system"]).strip()
-        state.set_auto_close_for_system(sys_target, bool(body["auto_close"]))
-        state.log("INFO", f"⚙️ Đã cập nhật tự đóng [{sys_target}]: {body['auto_close']} -> Chế độ hiện tại: [{state.auto_close_mode}]")
-    elif "auto_close_tts_old" in body or "auto_close_tts_new" in body:
-        if "auto_close_tts_old" in body:
-            state.set_auto_close_for_system("tts_old", bool(body["auto_close_tts_old"]))
-        if "auto_close_tts_new" in body:
-            state.set_auto_close_for_system("tts_new", bool(body["auto_close_tts_new"]))
-        state.log("INFO", f"⚙️ Đã chuyển chế độ đóng phiếu: [{state.auto_close_mode}]")
-    elif "auto_close_mode" in body:
-        state.set_auto_close_mode(str(body["auto_close_mode"]).strip())
-        state.log("INFO", f"⚙️ Đã chuyển chế độ đóng phiếu: [{state.auto_close_mode}]")
-    elif "auto_close" in body:
-        state.set_auto_close_mode("all" if body["auto_close"] else "none")
+
+    if not can_manage_auto_close:
+        if body.get("auto_close") is not None or body.get("auto_close_mode") or body.get("system"):
+            state.log("WARNING", f"⛔ Đã chặn yêu cầu Tự đóng từ IP máy trạm {client_ip} (KTV chưa được SuperAdmin cấp quyền)")
+            return {
+                "success": False,
+                "message": "Tài khoản của bạn chưa được Quản trị viên cấp quyền bật Tự động đóng phiếu."
+            }
+    else:
+        if target_region and "auto_close" in body:
+            state.set_auto_close_for_region(target_region, bool(body["auto_close"]))
+            state.log("INFO", f"⚙️ Đã cập nhật Tự động đóng phân vùng [{target_region}]: {body['auto_close']}", region=target_region)
+        elif "system" in body and "auto_close" in body:
+            sys_target = str(body["system"]).strip()
+            state.set_auto_close_for_system(sys_target, bool(body["auto_close"]))
+            state.log("INFO", f"⚙️ Đã cập nhật tự đóng [{sys_target}]: {body['auto_close']} -> Chế độ hiện tại: [{state.auto_close_mode}]")
+        elif "auto_close_tts_old" in body or "auto_close_tts_new" in body:
+            if "auto_close_tts_old" in body:
+                state.set_auto_close_for_system("tts_old", bool(body["auto_close_tts_old"]))
+            if "auto_close_tts_new" in body:
+                state.set_auto_close_for_system("tts_new", bool(body["auto_close_tts_new"]))
+            state.log("INFO", f"⚙️ Đã chuyển chế độ đóng phiếu: [{state.auto_close_mode}]")
+        elif "auto_close_mode" in body:
+            state.set_auto_close_mode(str(body["auto_close_mode"]).strip())
+            state.log("INFO", f"⚙️ Đã chuyển chế độ đóng phiếu: [{state.auto_close_mode}]")
+        elif "auto_close" in body:
+            state.set_auto_close_mode("all" if body["auto_close"] else "none")
+
     if "dry_run" in body:
         state.dry_run = bool(body["dry_run"])
     if "interval_minutes" in body:
@@ -123,13 +162,16 @@ async def update_automation_config(request: Request):
                 state.ai_summary_engine = engine_val
                 state.log("INFO", f"⚙️ Đã chuyển mô hình Tóm tắt nội dung sang: [{state.ai_summary_engine.upper()}]")
 
+    is_reg_close = bool(state.auto_close_regions.get(target_region, False)) if target_region else state.auto_close
+
     return {
         "success": True, 
         "scan_scopes": getattr(state, "scan_scopes", []), 
         "auto_close_mode": getattr(state, "auto_close_mode", "none"), 
-        "auto_close": state.auto_close,
+        "auto_close": is_reg_close,
         "auto_close_tts_old": state.should_auto_close("tts_old"),
-        "auto_close_tts_new": state.should_auto_close("tts_new"),
+        "auto_close_tts_new": is_reg_close,
+        "auto_close_regions": dict(state.auto_close_regions),
         "ai_summary_engine": getattr(state, "ai_summary_engine", "qwen")
     }
 
@@ -323,7 +365,107 @@ async def scan_tts_new_sms(request: Request):
     return {"success": True, "message": f"Đang tiến hành quét phiếu Tin nhắn từ TTS Mới{f' [{target_region}]' if target_region else ''}..."}
 
 
+@router.post("/ttsnew/scan_spam_call")
+async def scan_tts_new_spam_call(request: Request):
+    force_recheck = False
+    target_region = None
+    auth_hdr = request.headers.get("Authorization") or ""
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            force_recheck = bool(body.get("force") or body.get("force_recheck"))
+            target_region = body.get("region")
+            if not auth_hdr:
+                auth_hdr = body.get("token") or ""
+    except Exception:
+        pass
+    if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT"):
+        target_region = str(target_region).strip().upper()
+    else:
+        target_region = None
+
+    if target_region and state.region_status.get(target_region) == "PROCESSING":
+        return {"success": False, "message": f"Khu vực {target_region} đang bận."}
+    elif not target_region and state.status == "PROCESSING":
+        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
+
+    from services.tts_new_voice import execute_tts_new_spam_call_cycle
+    threading.Thread(
+        target=execute_tts_new_spam_call_cycle,
+        kwargs={"force_recheck": force_recheck, "target_region": target_region, "user_token": auth_hdr},
+        daemon=True
+    ).start()
+    return {"success": True, "message": f"Đang tiến hành quét phiếu Chặn gọi ngoại mạng từ TTS Mới{f' [{target_region}]' if target_region else ''}..."}
+
+
+@router.post("/ttsnew/scan_roaming")
+async def scan_tts_new_roaming(request: Request):
+    force_recheck = False
+    target_region = None
+    auth_hdr = request.headers.get("Authorization") or ""
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            force_recheck = bool(body.get("force") or body.get("force_recheck"))
+            target_region = body.get("region")
+            if not auth_hdr:
+                auth_hdr = body.get("token") or ""
+    except Exception:
+        pass
+    if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT"):
+        target_region = str(target_region).strip().upper()
+    else:
+        target_region = None
+
+    if target_region and state.region_status.get(target_region) == "PROCESSING":
+        return {"success": False, "message": f"Khu vực {target_region} đang bận."}
+    elif not target_region and state.status == "PROCESSING":
+        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
+
+    from services.tts_new_voice import execute_tts_new_roaming_cycle
+    threading.Thread(
+        target=execute_tts_new_roaming_cycle,
+        kwargs={"force_recheck": force_recheck, "target_region": target_region, "user_token": auth_hdr},
+        daemon=True
+    ).start()
+    return {"success": True, "message": f"Đang tiến hành quét phiếu Chuyển vùng quốc tế từ TTS Mới{f' [{target_region}]' if target_region else ''}..."}
+
+
+@router.post("/ttsnew/scan_sim")
+async def scan_tts_new_sim(request: Request):
+    force_recheck = False
+    target_region = None
+    auth_hdr = request.headers.get("Authorization") or ""
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            force_recheck = bool(body.get("force") or body.get("force_recheck"))
+            target_region = body.get("region")
+            if not auth_hdr:
+                auth_hdr = body.get("token") or ""
+    except Exception:
+        pass
+    if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT"):
+        target_region = str(target_region).strip().upper()
+    else:
+        target_region = None
+
+    if target_region and state.region_status.get(target_region) == "PROCESSING":
+        return {"success": False, "message": f"Khu vực {target_region} đang bận."}
+    elif not target_region and state.status == "PROCESSING":
+        return {"success": False, "message": "Hệ thống đang bận thực hiện chu kỳ khác."}
+
+    from services.tts_new_voice import execute_tts_new_sim_cycle
+    threading.Thread(
+        target=execute_tts_new_sim_cycle,
+        kwargs={"force_recheck": force_recheck, "target_region": target_region, "user_token": auth_hdr},
+        daemon=True
+    ).start()
+    return {"success": True, "message": f"Đang tiến hành quét phiếu Sim / MultiSIM từ TTS Mới{f' [{target_region}]' if target_region else ''}..."}
+
+
 @router.post("/ttsnew/scan_other")
+
 async def scan_tts_new_other(request: Request):
     force_recheck = False
     target_region = None

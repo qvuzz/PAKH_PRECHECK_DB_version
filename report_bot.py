@@ -13,6 +13,16 @@ from scenarios_engine import match_diagnostic_scenarios, is_throttled_service_co
 # ⚠️ Đổi lại đúng tên thư mục thật nếu khác - đây là giá trị mặc định đang giả định.
 HSS_PROFILE_DIR = "output"
 
+# Danh sách các gói cước đã cắt chuyển sang hệ thống OCS (SAPC hiển thị: ODA_BIG_OCS)
+OCS_MIGRATED_PACKAGES = {
+    "VD120N", "DN101", "BIG60", "SPE7", "D159SC", "D159V",
+    "D2", "DT120", "GENAI155", "POP10", "VD120M", "VD130", "VD89",
+    "YOLO90", "YOLO100M", "YOLO125V", "YOLO125G", "SME99", "BIG70", "BIG80", "D199G",
+    "THAGA70N", "U1500", "D60G", "MAX100", "DT70", "VD149", "D30G",
+    "D49P", "D79P", "DT90", "SBUM", "SODA125", "SPOTV80", "5G150"
+}
+
+
 
 def get_has_4g_profile(phone_84):
     """
@@ -391,7 +401,8 @@ def get_sapc_package_validity(phone_84, incident_time_str=None):
             is_paygo = "paygo" in pkg_name.lower() or pkg_name.lower() == "m0"
 
             addon_keywords = ("DE-FREE", "DE_FREE", "ZALO", "BAOMOI", "ZINGMP3", "KM5GZONE", "NHOM3DICHVU", "TIKTOK", "YOUTUBE", "MYTV")
-            is_addon_app = any(k in pkg_name_upper for k in addon_keywords) or pkg_name_upper.startswith("ODA_") or "GAME" in pkg_name_upper
+            is_oda_addon = pkg_name_upper.startswith("ODA_") and "BIG_OCS" not in pkg_name_upper and "ODA_BIG" not in pkg_name_upper
+            is_addon_app = any(k in pkg_name_upper for k in addon_keywords) or is_oda_addon or "GAME" in pkg_name_upper
 
             # Trường hợp đặc biệt: Gói PAYGO hoặc gói hoàn toàn không có ngày tháng
             if is_paygo:
@@ -628,6 +639,96 @@ def parse_dt_safe(val):
     return None
 
 
+# ==============================================================================
+# BẢNG ÁNH XẠ GÓI CƯỚC THƯƠNG MẠI (KINH DOANH) <-> TÊN KHAI BÁO SAPC CORE (POLICY CHARGING)
+# ==============================================================================
+COMMERCIAL_TO_SAPC_MAP = {
+    # Nhóm VD / D Tích hợp
+    "VD149": ["ODA_BIG_OCS", "MI_BIGKM_6GBN", "MI_BIGKM_6GBN7N", "MI_BIG_6GBN", "VD149"],
+    "VD149S": ["ODA_BIG_OCS", "MI_BIGKM_6GBN", "MI_BIGKM_6GBN7N", "VD149S"],
+    "VD120": ["MI_BIGKM_5GBN", "VD120"],
+    "VD120M": ["ODA_BIG_OCS", "MI_BIGKM_VD120M", "MI_BIGKM_VD120M_3M", "VD120M"],
+    "VD120N": ["ODA_BIG_OCS", "MI_BIGKM_VD120N", "VD120N"],
+    "VD130": ["ODA_BIG_OCS", "VD130"],
+    "VD89": ["ODA_BIG_OCS", "MI_BIG_4GBN", "MI_BIGKM_4GBN", "VD89"],
+    "VD89P": ["ODA_BIG_OCS", "MI_BIG_4GBN", "MI_BIGKM_4GBN", "VD89P"],
+    "VD90": ["MI_BIGKM_1GBN", "VD90"],
+    "VD150": ["MI_BIGKM_2GBN", "VD150"],
+    "D159V": ["ODA_BIG_OCS", "MI_BIGKM_D159V_4GBN", "D159V"],
+    "D159SC": ["ODA_BIG_OCS", "MI_BIGKM_D159SC", "D159SC"],
+    "D169G": ["MI_BIGKM_7GBN", "D169G"],
+    "D199G": ["ODA_BIG_OCS", "D199G"],
+    "D60G": ["MI_D60G_KMCB", "D60G"],
+    "FCLUB": ["MI_BIGFD_3GBN", "FCLUB"],
+    "TG249": ["MI_BIGKM_10GBN", "TG249"],
+    "TH": ["MI_BIGKM_10GBN"],
+    "SODA155": ["MI_BIGKMCB_8GBN", "SODA155"],
+    "SVIP160": ["MI_BIGKMCB_6GBN", "SVIP160"],
+
+    # Nhóm YOLO, SODA, Gaming & OTT
+    "SODA125": ["MI_SODA125", "MI_SODA125_0K", "MI_SODA125_6M", "MI_SODA125_12M", "SODA125"],
+    "YOLO90": ["ODA_BIG_OCS", "MI_YOLO90", "YOLO90"],
+    "YOLO100M": ["MI_YOLO100M", "YOLO100M"],
+    "YOLO125V": ["MI_YOLO125V", "MI_YOLO125V_6M", "YOLO125V"],
+    "YOLO125G": ["ODA_LQMOBILE", "ODA_FIFA4ONLINE", "ODA_FREEFIRE", "YOLO125G"],
+    "YOLO125Z": ["MI_YOLO125Z", "YOLO125Z"],
+
+    # Nhóm SIM Data Chu kỳ dài / EzCom / iTel / Khác
+    "U1500": ["MB_U1500", "EZ_U1500", "MI_U1500_0K", "EZ_U1500_0K", "U1500"],
+    "U150": ["MB_U150", "U150"],
+    "TD49": ["MI_TD49_12M", "TD49"],
+    "TD49_12M": ["MI_TD49_12M"],
+    "MAY79": ["ITEL_MAY_OCS", "MAY79"],
+    "MAY99": ["ITEL_MAY_OCS", "MAY99"],
+    "BUM120": ["MI_ZONE_BUM120", "BUM120"],
+    "BUM155": ["MI_BIGKM_BUM155", "BUM155"],
+    "SPOTV10": ["MI_MAXKM_VC_5GBN", "SPOTV10"],
+    "VIP199": ["ZALO", "HVC_OCS", "VIP199"],
+    "VIP249": ["ZALO", "HVC_OCS", "VIP249"],
+    "DT30": ["KM_DT30", "DT30"],
+    "DT90": ["MI_DT90", "DT90"],
+    "BIG120": ["MI_BIG120", "BIG120"],
+    "BIG90": ["MI_BIG90", "BIG90"],
+    "BIG200": ["MI_BIG200", "BIG200"],
+    "BIG70": ["ODA_BIG_OCS", "BIG70"],
+}
+
+
+def is_package_match(reported_pkg: str, sapc_pkg_name: str) -> bool:
+    """
+    Kiểm tra xem tên gói cước khách phản ánh (hoặc AI bóc tách) có trùng hoặc
+    tương đương với tên gói khai báo trong hồ sơ SAPC hay không (dựa trên bảng ánh xạ thương mại <-> kỹ thuật).
+    """
+    if not reported_pkg or not sapc_pkg_name:
+        return False
+    r_u = re.sub(r'[^A-Z0-9]', '', str(reported_pkg).strip().upper())
+    s_u = re.sub(r'[^A-Z0-9]', '', str(sapc_pkg_name).strip().upper())
+
+    # 1. Khớp chuỗi trực tiếp
+    if r_u == s_u or r_u in s_u or s_u in r_u:
+        return True
+
+    # 2. Khớp qua bảng ánh xạ từ điển
+    raw_r = str(reported_pkg).strip().upper()
+    aliases = COMMERCIAL_TO_SAPC_MAP.get(raw_r, [])
+    for a in aliases:
+        a_clean = re.sub(r'[^A-Z0-9]', '', a.upper())
+        if a_clean == s_u or a_clean in s_u or s_u in a_clean:
+            return True
+
+    # 3. Tra ngược lại nếu sapc_pkg_name có tiền tố/hậu tố trong alias
+    raw_s = str(sapc_pkg_name).strip().upper()
+    for comm_name, s_list in COMMERCIAL_TO_SAPC_MAP.items():
+        comm_clean = re.sub(r'[^A-Z0-9]', '', comm_name)
+        if comm_clean == r_u or comm_clean in r_u:
+            for a in s_list:
+                a_clean = re.sub(r'[^A-Z0-9]', '', a.upper())
+                if a_clean == s_u or a_clean in s_u or s_u in a_clean:
+                    return True
+
+    return False
+
+
 def extract_packages_from_text(text):
     """
     Bóc tách danh sách tất cả các gói cước từ nội dung text (AI summary, ticket_content, package_title).
@@ -685,8 +786,8 @@ def get_expected_service_codes_for_pkg(pkg_name, group_name=None):
         else:
             codes.update({"3000", "0000003000", "3601", "0000003601", "3602", "0000003602"})
 
-    # Nhóm BIG (BIG, BIG70, BIG90, BIG120, ODA_BIG_OCS...)
-    if "BIG" in p_clean:
+    # Nhóm BIG (BIG, BIG70, BIG90, BIG120, ODA_BIG_OCS...) và các gói cắt chuyển OCS
+    if "BIG" in p_clean or "ODA_BIG_OCS" in p_clean or any(p in p_clean for p in OCS_MIGRATED_PACKAGES):
         codes.update({"3000", "0000003000", "3601", "0000003601", "3602", "0000003602", "3603", "0000003603", "6000", "0000006000"})
 
     # Nhóm YOLO / D159 / D159V
@@ -1381,11 +1482,16 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
 
             # 2. Gói cước khác (YOLO, VD, D159...): Có cờ OCSE chưa chắc đã là gói HOME và không thay thế cho gói data chính độc lập
             def _pkg_match(t_pkg, s_pkg_name):
+                if is_package_match(t_pkg, s_pkg_name):
+                    return True
                 t_c = re.sub(r'[^A-Za-z0-9]', '', t_pkg).upper()
                 s_c = re.sub(r'[^A-Za-z0-9]', '', s_pkg_name).upper()
                 if not t_c or not s_c:
                     return False
                 if t_c in s_c or s_c in t_c:
+                    return True
+                # Hỗ trợ gói cắt chuyển OCS: Khách báo gói cắt chuyển (VD120N, YOLO90, BIG60...) và SAPC có ODA_BIG_OCS -> Khớp hợp lệ
+                if ("ODABIGOCS" in s_c or "BIGOCS" in s_c) and any(re.sub(r'[^A-Za-z0-9]', '', p).upper() in t_c or t_c in re.sub(r'[^A-Za-z0-9]', '', p).upper() for p in OCS_MIGRATED_PACKAGES):
                     return True
                 t_b = re.sub(r'[A-Z]+$', '', t_c)
                 s_b = re.sub(r'[A-Z]+$', '', s_c)
@@ -1408,15 +1514,24 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 )
 
             if not matched_in_act and not matched_in_exp:
-                oda_pkgs = [p["name"] for p in act_pkgs_all if p["name"].upper().startswith("ODA_") or "GAME" in p["name"].upper()]
-                main_pkgs = [p["name"] for p in act_pkgs_all if not p.get("is_paygo") and not p["name"].upper().startswith("ODA_") and "GAME" not in p["name"].upper()]
+                oda_pkgs = [p["name"] for p in act_pkgs_all if (p["name"].upper().startswith("ODA_") and "BIG_OCS" not in p["name"].upper() and "ODA_BIG" not in p["name"].upper()) or "GAME" in p["name"].upper()]
+                main_pkgs = [p["name"] for p in act_pkgs_all if not p.get("is_paygo") and not ((p["name"].upper().startswith("ODA_") and "BIG_OCS" not in p["name"].upper() and "ODA_BIG" not in p["name"].upper()) or "GAME" in p["name"].upper())]
                 if not main_pkgs:
                     vol_str = f" (dung lượng báo còn: {vol_reported})" if vol_reported else ""
-                    oda_str = f" (SAPC chỉ có các gói tiện ích ODA: {', '.join(oda_pkgs)}, không có gói data Internet chính)" if oda_pkgs else " (SAPC không có gói data Internet chính)"
+                    oda_str = f" (SAPC chỉ có các gói tiện ích ODA: {', '.join(oda_pkgs)}, thiếu profile ODA_BIG_OCS)" if oda_pkgs else " (SAPC không có gói data Internet chính)"
+                    rep_p_clean = re.sub(r'[^A-Za-z0-9]', '', rep_p).upper()
+                    is_ocs_p = any(re.sub(r'[^A-Za-z0-9]', '', p).upper() in rep_p_clean or rep_p_clean in re.sub(r'[^A-Za-z0-9]', '', p).upper() for p in OCS_MIGRATED_PACKAGES)
+                    if is_ocs_p or oda_pkgs:
+                        return (
+                            "LỖI GÓI CƯỚC (THIẾU ODA_BIG_OCS)",
+                            f"Khách hàng phản ánh đang sử dụng gói {rep_p}{vol_str}, tuy nhiên tra cứu Core SAPC bị thiếu profile data chính (ODA_BIG_OCS){oda_str}. Thuê bao bị rớt/lỗi khai báo gói cước data trên SAPC dẫn đến không truy cập được Internet.",
+                            f"Chuyển IT/CCBS kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
+                            "FFF2CC"
+                        )
                     return (
                         "CHƯA ĐĂNG KÝ GÓI KHÁCH BÁO",
                         f"Khách hàng phản ánh đang sử dụng gói {rep_p}{vol_str}, tuy nhiên tra cứu hệ thống PCRF (SAPC) không ghi nhận gói cước này trên thuê bao{oda_str}. Do đó thuê bao không có quyền truy cập dữ liệu di động Internet.",
-                        f"Kính chuyển VNP kiểm tra lại lịch sử đăng ký gói {rep_p} của khách hàng (chưa đăng ký thành công, đã hủy hoặc khách phản ánh nhầm số), tư vấn khách hàng kiểm tra lại trạng thái gói cước hoặc hướng dẫn đăng ký mới." + action_suffix,
+                        f"Chuyển IT/CCBS kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
                         "FFF2CC"
                     )
 
@@ -1532,6 +1647,15 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         # 2. CHỈ CÓ GÓI TIỆN ÍCH / ADD-ON (KHÔNG CÓ GÓI DATA INTERNET TOÀN PHẦN)
         if not act_commercial and not exp_commercial and addon_apps:
             addon_names = ", ".join([p["name"] for p in addon_apps])
+            if extracted_reported_pkgs:
+                rep_p = extracted_reported_pkgs[0]
+                vol_str = f" (dung lượng báo còn: {vol_reported})" if vol_reported else ""
+                return (
+                    "LỖI GÓI CƯỚC (THIẾU ODA_BIG_OCS)",
+                    f"Khách hàng phản ánh đang sử dụng gói {rep_p}{vol_str}, tuy nhiên tra cứu Core SAPC bị thiếu profile data chính (ODA_BIG_OCS) (SAPC chỉ có gói tiện ích {addon_names}). Thuê bao bị rớt/lỗi khai báo gói cước data trên SAPC dẫn đến không truy cập được Internet.",
+                    f"Chuyển IT/CCBS kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
+                    "FFF2CC"
+                )
             return (
                 "CHỈ CÓ GÓI TIỆN ÍCH - THIẾU DATA INTERNET",
                 f"Hồ sơ SAPC ghi nhận thuê bao chỉ đăng ký gói tiện ích ứng dụng ({addon_names}) chạy trên nền PAYGO/M0, không có gói cước Data Internet toàn phần. Do tài khoản chính không đủ tiền duy trì cước ngoài gói nên thuê bao không thể truy cập các dịch vụ mạng ngoài phạm vi ưu đãi của gói.",
@@ -1789,6 +1913,15 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     if is_pure_system_codes_only and not act_commercial and not exp_commercial:
         if addon_apps:
             addon_names = ", ".join([p["name"] for p in addon_apps])
+            if extracted_reported_pkgs:
+                rep_p = extracted_reported_pkgs[0]
+                vol_str = f" (dung lượng báo còn: {vol_reported})" if vol_reported else ""
+                return (
+                    "LỖI GÓI CƯỚC (THIẾU ODA_BIG_OCS)",
+                    f"Khách hàng phản ánh đang sử dụng gói {rep_p}{vol_str}, tuy nhiên tra cứu Core SAPC bị thiếu profile data chính (ODA_BIG_OCS) (SAPC chỉ có gói tiện ích {addon_names}). Thuê bao bị rớt/lỗi khai báo gói cước data trên SAPC dẫn đến không truy cập được Internet.",
+                    f"Chuyển IT/CCBS kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
+                    "FFF2CC"
+                )
             return (
                 "CHỈ CÓ GÓI TIỆN ÍCH - THIẾU DATA INTERNET",
                 f"Lịch sử dữ liệu chỉ xuất hiện các mã hệ thống do thuê bao chỉ đăng ký gói tiện ích ứng dụng ({addon_names}) chạy trên nền PAYGO/M0, không có gói data Internet chính và tài khoản chính không đủ tiền để duy trì truy cập ngoài gói.",
@@ -2408,6 +2541,15 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
     if active_pkgs and all(p.get("is_paygo") or p.get("is_addon_app") for p in active_pkgs) and not [p for p in active_pkgs if not p.get("is_paygo") and not p.get("is_addon_app")]:
         if addon_pkgs:
             addon_names = ", ".join([p["name"] for p in addon_pkgs])
+            if extracted_reported_pkgs:
+                rep_p = extracted_reported_pkgs[0]
+                vol_str = f" (dung lượng báo còn: {vol_reported})" if vol_reported else ""
+                return (
+                    "LỖI GÓI CƯỚC (THIẾU ODA_BIG_OCS)",
+                    f"Khách hàng phản ánh đang sử dụng gói {rep_p}{vol_str}, tuy nhiên tra cứu Core SAPC bị thiếu profile data chính (ODA_BIG_OCS) (SAPC chỉ có gói tiện ích {addon_names}). Thuê bao bị rớt/lỗi khai báo gói cước data trên SAPC dẫn đến không truy cập được Internet.",
+                    f"Chuyển IT/CCBS kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
+                    "FFF2CC"
+                )
             return (
                 "CHỈ CÓ GÓI TIỆN ÍCH - THIẾU DATA INTERNET",
                 f"Thuê bao hiện chỉ có gói tiện ích ({addon_names}) chạy trên nền PAYGO/M0, không có gói data Internet chính thức.",
@@ -2461,17 +2603,41 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
 
     if commercial_pkgs and (recent_5d_mb < 1.0 or is_no_real_traffic_5d):
         all_act_names = ", ".join([p["name"] for p in commercial_pkgs])
-        extra_ai_note = f", khách hàng phản ánh gói [{pkg_ai}]" if (pkg_ai and pkg_ai not in act_names) else ""
+        # Đối soát tên gói khách phản ánh với hồ sơ SAPC qua từ điển đồng nhất
+        is_matched_commercial = any(is_package_match(pkg_ai, p["name"]) for p in commercial_pkgs) if pkg_ai else True
+        if pkg_ai and is_matched_commercial and pkg_ai not in act_names:
+            extra_ai_note = f" (tương ứng gói cước {pkg_ai} khách hàng phản ánh)"
+            extra_fix_note = f" ({pkg_ai})"
+        elif pkg_ai and not is_matched_commercial:
+            extra_ai_note = f", khách hàng phản ánh gói [{pkg_ai}]"
+            extra_fix_note = f" và gói {pkg_ai}"
+        else:
+            extra_ai_note = ""
+            extra_fix_note = ""
+
+        # Kiểm tra xem BTools có ghi nhận mã cước của gói chính (ví dụ 3000 hoặc các mã gói data thông thường)
+        pkg_matched_codes = [c for c in sorted(list(btools_service_codes)) if c in ["3000", "10001", "10002", "10003", "10004", "10005", "10006", "10007", "10008", "10009", "10010", "10011", "10012", "10013", "10014"]]
+        has_pkg_code = bool(pkg_matched_codes)
+
         rec_codes = [c for c in sorted(list(btools_service_codes)) if len(c) <= 5 and c not in ["0", "00"]]
         rec_codes_str = f" (BTools chỉ ghi nhận mã {', '.join(rec_codes[:3])})" if rec_codes else " (BTools không ghi nhận mã cước data hợp lệ)"
         # Case 1: Gói mới đăng ký trong 5 ngày qua -> ĐÓNG PHIẾU LUÔN
         if earliest_reg_dt and earliest_reg_dt.date() >= start_scan_date:
-            return (
-                "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
-                f"Hồ sơ SAPC ghi nhận gói [{all_act_names}]{extra_ai_note} đăng ký ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu sử dụng thực tế{rec_codes_str}, nghi ngờ lỗi luồng cước/profile gói.",
-                f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {all_act_names}{f' và gói {pkg_ai}' if (pkg_ai and pkg_ai not in act_names) else ''} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
-                "FFF2CC"
-            )
+            if has_pkg_code:
+                matched_str = ", ".join(pkg_matched_codes[:2])
+                return (
+                    "LỖI THIẾT BỊ / CHƯA BẬT DATA",
+                    f"Hồ sơ SAPC ghi nhận gói [{all_act_names}]{extra_ai_note} đăng ký ngày {act_reg_dates} (còn hạn đến {act_exp_dates}). BTools đã khởi tạo phiên tính cước đúng mã gói ({matched_str}) nhưng từ khi đăng ký đến nay không phát sinh lưu lượng sử dụng thực tế (dưới 1MB). Nghi ngờ khách hàng chưa bật Dữ liệu di động, đang kết nối Wi-Fi hoặc thiết bị/SIM bị treo kết nối.",
+                    "Nhờ KTV hướng dẫn khách hàng kiểm tra bật Dữ liệu di động (4G), tắt Wi-Fi, khởi động lại thiết bị hoặc tháo lắp SIM sang máy khác kiểm tra kết nối.",
+                    "FFF2CC"
+                )
+            else:
+                return (
+                    "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
+                    f"Hồ sơ SAPC ghi nhận gói [{all_act_names}]{extra_ai_note} đăng ký ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu sử dụng thực tế{rec_codes_str}, nghi ngờ lỗi luồng cước/profile gói.",
+                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {all_act_names}{extra_fix_note} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                    "FFF2CC"
+                )
 
         # Case 2: Gói đăng ký trước chu kỳ 5 ngày -> Thực hiện hành vi bổ sung tra thêm BTools
         elif earliest_reg_dt and earliest_reg_dt.date() < start_scan_date:
@@ -2501,12 +2667,21 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
 
             # Nhánh 2A: Sau khi tra bổ sung, từ lúc đăng ký đến nay cũng KHÔNG CÓ PHÁT SINH DATA (<1MB) -> Giống Case 1, ĐÓNG PHIẾU LUÔN
             if prior_mb < 1.0:
-                return (
-                    "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
-                    f"Hồ sơ SAPC ghi nhận gói [{all_act_names}]{extra_ai_note} đăng ký ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu sử dụng thực tế{rec_codes_str}, nghi ngờ lỗi luồng cước/profile gói.",
-                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {all_act_names}{f' và gói {pkg_ai}' if (pkg_ai and pkg_ai not in act_names) else ''} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
-                    "FFF2CC"
-                )
+                if has_pkg_code:
+                    matched_str = ", ".join(pkg_matched_codes[:2])
+                    return (
+                        "LỖI THIẾT BỊ / CHƯA BẬT DATA",
+                        f"Hồ sơ SAPC ghi nhận gói [{all_act_names}]{extra_ai_note} đăng ký ngày {act_reg_dates} (còn hạn đến {act_exp_dates}). BTools đã khởi tạo phiên tính cước đúng mã gói ({matched_str}) nhưng từ khi đăng ký đến nay không phát sinh lưu lượng sử dụng thực tế (dưới 1MB). Nghi ngờ khách hàng chưa bật Dữ liệu di động, đang kết nối Wi-Fi hoặc thiết bị/SIM bị treo kết nối.",
+                        "Nhờ KTV hướng dẫn khách hàng kiểm tra bật Dữ liệu di động (4G), tắt Wi-Fi, khởi động lại thiết bị hoặc tháo lắp SIM sang máy khác kiểm tra kết nối.",
+                        "FFF2CC"
+                    )
+                else:
+                    return (
+                        "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
+                        f"Hồ sơ SAPC ghi nhận gói [{all_act_names}]{extra_ai_note} đăng ký ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu sử dụng thực tế{rec_codes_str}, nghi ngờ lỗi luồng cước/profile gói.",
+                        f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {all_act_names}{extra_fix_note} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                        "FFF2CC"
+                    )
             # Nhánh 2B: Có phát sinh data trước đó, chỉ gần đây không phát sinh dù bắt RAT TYPE = 6 (4G) bình thường -> ĐÓNG PHIẾU LUÔN
             elif has_4g_recent:
                 return (
@@ -2640,7 +2815,13 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             has_expected_code = bool(expected_codes.intersection(btools_service_codes))
 
             sapc_str = ", ".join([p["name"] for p in active_pkgs]) if active_pkgs else ""
-            sapc_note = f" (Hồ sơ SAPC ghi nhận gói [{sapc_str}])" if (sapc_str and p_cand not in sapc_str) else ""
+            if sapc_str and p_cand not in sapc_str:
+                if any(is_package_match(p_cand, p["name"]) for p in active_pkgs):
+                    sapc_note = f" (khai báo SAPC: [{sapc_str}])"
+                else:
+                    sapc_note = f" (Hồ sơ SAPC ghi nhận gói [{sapc_str}])"
+            else:
+                sapc_note = ""
 
             rec_codes = [c for c in sorted(list(btools_service_codes)) if len(c) <= 5 and c not in ["0", "00"]]
 

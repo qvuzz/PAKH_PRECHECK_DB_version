@@ -17,6 +17,9 @@ function toggleLiveLogDropdown(event, forceClose = false) {
 
     // Khi người dùng bấm mở Live Log để xem -> Đánh dấu đã xem và tắt nhấp nháy ngay
     if (isLiveLogOpen) {
+        if (typeof fetchStatus === 'function') {
+            fetchStatus();
+        }
         window.liveLogDismissed = true;
         window.lastSeenErrorCount = window.currentLiveErrCount || 0;
         const pillLog = document.getElementById('pillLiveLog');

@@ -25,6 +25,8 @@ services:
       - ./tickets.db:/app/tickets.db
       - ./result:/app/result
       - ./scratch:/app/scratch
+      # Hàng đợi trao đổi file SMSC CDR giữa Docker và máy Watcher
+      - ./cdr_queue:/app/cdr_queue
       # Thư mục mô hình AI Offline (người dùng copy file .gguf vào đây)
       - ./models:/app/models
       # Cache Token / Cookie được Client đồng bộ lên máy chủ
@@ -41,6 +43,7 @@ services:
       - ./rattype.json:/app/rattype.json
       - ./serviceid.json:/app/serviceid.json
       - ./diagnostic_scenarios.json:/app/diagnostic_scenarios.json
+      - ./diagnostic_scenarios_sms.json:/app/diagnostic_scenarios_sms.json
       - ./incident_causes_ttsnew.json:/app/incident_causes_ttsnew.json
       - ./incident_causes_catalog.json:/app/incident_causes_catalog.json
       - ./DANH_MUC_KICH_BAN_DONG_PHIEU_MOBILE_INTERNET.xlsx:/app/DANH_MUC_KICH_BAN_DONG_PHIEU_MOBILE_INTERNET.xlsx
@@ -60,6 +63,7 @@ services:
       - ./region_detector.py:/app/region_detector.py
       - ./spam_call_analyzer.py:/app/spam_call_analyzer.py
       - ./ai_interpreter.py:/app/ai_interpreter.py
+      - ./ai_sms_interpreter.py:/app/ai_sms_interpreter.py
       - ./cem_client.py:/app/cem_client.py
       - ./auth_extractor.py:/app/auth_extractor.py
       - ./data_processor.py:/app/data_processor.py

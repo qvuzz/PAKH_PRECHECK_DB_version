@@ -10,7 +10,8 @@ echo "=== [PAKH PRECHECK] Dang chuan bi moi truong tren Server ==="
 find . -maxdepth 1 -type d \( -name "*.py" -o -name "*.json" \) -exec rm -rf {} + 2>/dev/null || true
 
 # 2. Tao cac thu muc can thiet
-mkdir -p result scratch models sapccheck templates static routers services
+mkdir -p result scratch models sapccheck templates static routers services cdr_queue/input cdr_queue/output
+chmod -R 777 cdr_queue 2>/dev/null || true
 
 # Kiem tra neu tickets.db bi loi (malformed) thi tu dong backup va lam sach
 if [ -f tickets.db ] && [ -s tickets.db ]; then

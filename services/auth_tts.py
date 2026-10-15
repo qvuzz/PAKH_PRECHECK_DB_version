@@ -705,25 +705,42 @@ def _worker_step2(active_sessions: dict, session_id: str, otp_code: str, timeout
             try:
                 all_cookies = context.cookies()
                 if system == "btools":
-                    jsession = ""
-                    for c in all_cookies:
-                        if c.get("name") == "JSESSIONID" and c.get("value"):
-                            dom = c.get("domain", "").lower()
-                            if "10.159.21.241" in dom or "b_tools" in c.get("path", "").lower() or ("vnpt.com.vn" not in dom and "vnpt.vn" not in dom):
-                                jsession = c["value"]
-                                break
-                    if not jsession:
+                    curr_u = (page.url or "").lower()
+                    # 1. Nếu vẫn còn ở cổng CAS login, tiếp tục đợi CAS chuyển hướng sang BTools
+                    if "id.vnpt.com.vn" in curr_u or "/cas/login" in curr_u:
+                        pass
+                    else:
+                        # Đã rời cổng CAS (hoặc về máy chủ 10.159.21.241)
+                        jsession = ""
                         for c in all_cookies:
-                            if c.get("name") == "JSESSIONID" and len(c.get("value", "")) > 10:
-                                jsession = c["value"]
+                            if c.get("name") == "JSESSIONID" and c.get("value"):
+                                dom = c.get("domain", "").lower()
+                                pth = c.get("path", "").lower()
+                                if "10.159.21.241" in dom or "b_tools" in pth or ("vnpt.com.vn" not in dom and "vnpt.vn" not in dom):
+                                    jsession = c["value"]
+                                    break
+                        if not jsession:
+                            try:
+                                raw_c = page.evaluate("() => document.cookie") or ""
+                                if "JSESSIONID=" in raw_c:
+                                    import re
+                                    m = re.search(r'JSESSIONID=([^;]+)', raw_c)
+                                    if m:
+                                        jsession = m.group(1).strip()
+                            except Exception:
+                                pass
+
+                        if jsession:
+                            from btools_manager import verify_btools_cookie, save_btools_cookie
+                            is_val, v_msg = verify_btools_cookie(jsession)
+                            if is_val:
+                                save_btools_cookie(jsession, verify=False)
+                                token = jsession
+                                user_info = {"username": username, "displayName": username}
+                                print(f"[OTP Step 2] [BTools] ✅ THÀNH CÔNG! Đã xác thực kết nối BTools với JSESSIONID: {token[:15]}...", flush=True)
                                 break
-                    if jsession:
-                        from btools_manager import save_btools_cookie
-                        save_btools_cookie(jsession, verify=False)
-                        token = jsession
-                        user_info = {"username": username, "displayName": username}
-                        print(f"[OTP Step 2] [BTools] ✅ THÀNH CÔNG! Đã lấy được JSESSIONID: {token[:15]}...", flush=True)
-                        break
+                            else:
+                                print(f"[OTP Step 2] [BTools] ⏳ Đang đợi session BTools sẵn sàng ({v_msg})...", flush=True)
                 elif system == "cem":
                     cem_k, c_dict = _extract_cem_key_and_cookies(page, context, captured_network_key)
                     if cem_k:

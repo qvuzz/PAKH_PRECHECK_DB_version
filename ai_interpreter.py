@@ -122,7 +122,14 @@ def analyze_ticket_offline(package_title, ticket_content):
         if package_match2:
             package_used = package_match2.group(1).upper()
         elif title_lower and "mobile internet" not in title_lower:
-            package_used = package_title
+            # Chỉ lấy package_title làm tên gói cước nếu nó KHÔNG PHẢI là tiêu đề sự cố viễn thông
+            issue_title_kws = ["lỗi", "sự cố", "phản ánh", "khiếu nại", "tin nhắn", "sms", "cuộc gọi", "gọi đi", "gọi đến", "chất lượng", "mạng", "truy cập", "hỏng"]
+            if not any(k in title_lower for k in issue_title_kws):
+                package_used = package_title
+            else:
+                package_used = "Không đề cập"
+        else:
+            package_used = "Không đề cập"
 
     # ----------------------------------------------------------------
     # 2. BÓC TÁCH TÌNH TRẠNG TRUY CẬP (THÔNG MINH: NHẬN DIỆN LỖI APP RIÊNG BIỆT)
@@ -275,19 +282,24 @@ def analyze_ticket_offline(package_title, ticket_content):
     elif any(k in content_lower_clean for k in ["thiết bị cảnh báo", "định vị", "camera", "hộp đen"]):
         device_used = "Thiết bị IoT / Camera / Cảnh báo"
     elif any(k in content_lower_clean for k in ["iphone", "ipad"]):
-        # Thử lấy thêm model (14 pro max, 15...)
-        model_match = re.search(r'iphone\s*([\w\s]+?)(?:,|\.|$)', content_lower_clean)
-        if model_match:
-            device_used = f"iPhone {model_match.group(1).strip().title()}"
+        # Chỉ nhận model số chuẩn: iPhone 11..16, Pro Max, Plus, Mini, X, XS, XR, SE...
+        m_ip = re.search(
+            r'\biphone\s*(1[1-6](?:\s*(?:pro\s*max|promax|pro|plus|mini))?|[6-8](?:\s*plus)?|x[rs]?(?:\s*max)?|se)\b',
+            content_lower_clean
+        )
+        if m_ip:
+            device_used = f"iPhone {m_ip.group(1).upper().replace('PROMAX', 'Pro Max').replace('PLUS', 'Plus').replace('MINI', 'Mini')}"
         else:
-            device_used = "IPHONE"
+            device_used = "iPhone"
     elif re.search(r'\bip\s?\d{1,2}[a-z]*\b', content_lower_clean):
-        # Viết tắt kiểu "ip15", "ip 13 pro max", "ip8 pls"...
-        model_match = re.search(r'\bip\s?(\d{1,2}[\w\s]*?)(?:,|\.|$)', content_lower_clean)
-        if model_match:
-            device_used = f"iPhone {model_match.group(1).strip().title()}"
+        m_ip_short = re.search(
+            r'\bip\s*(1[1-6](?:\s*(?:pro\s*max|promax|pro|plus|mini))?|[6-8](?:\s*plus)?|x[rs]?(?:\s*max)?|se)\b',
+            content_lower_clean
+        )
+        if m_ip_short:
+            device_used = f"iPhone {m_ip_short.group(1).upper().replace('PROMAX', 'Pro Max').replace('PLUS', 'Plus')}"
         else:
-            device_used = "IPHONE"
+            device_used = "iPhone"
     elif "samsung" in content_lower_clean:
         device_used = "SAMSUNG"
     elif "oppo" in content_lower_clean:
@@ -490,6 +502,17 @@ def generate_ticket_summary(package_title: str, ticket_content: str, phone: str 
 6. Tóm tắt thông tin khác: Không có thông tin phản ánh."""
 
     phone_clean = str(phone or "").strip()
+
+    # Phân luồng thông minh: Nếu là sự cố Tin nhắn (SMS), chuyển giao 100% cho module chuyên trách ai_sms_interpreter
+    try:
+        from db_manager import is_sms_ticket
+        t_low = pkg_title.lower()
+        c_low = content.lower()
+        if is_sms_ticket(pkg_title) or any(k in t_low for k in ["tin nhắn", "sms"]) or any(k in c_low for k in ["nhắn tin", "gửi tin", "nhận tin", "ttnt", "smo", "smt"]):
+            from ai_sms_interpreter import generate_sms_ticket_summary
+            return generate_sms_ticket_summary(pkg_title, content, phone=phone_clean)
+    except Exception:
+        pass
 
     # 1. Kiểm tra Cache
     if phone_clean:

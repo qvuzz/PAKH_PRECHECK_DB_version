@@ -69,4 +69,5 @@ models/
 *.tar
 *.zip
 VNPT TTS PRECHECK/
+cdr_queue/
 

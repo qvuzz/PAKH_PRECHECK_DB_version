@@ -367,8 +367,9 @@ def _process_single_ticket(
     with db_lock:
         save_or_update_ticket(rec)
 
-    # Tự động đóng phiếu 2 vòng nếu được phép theo chế độ auto_close_mode
-    if state.should_auto_close("tts_new") and ticket.get("flow_id") and ticket.get("ticket_id"):
+    # Tự động đóng phiếu 2 vòng nếu được phép theo phân vùng (region) của phiếu
+    ticket_reg = ticket.get("region") or rec.get("region")
+    if state.should_auto_close("tts_new", region=ticket_reg) and ticket.get("flow_id") and ticket.get("ticket_id"):
         from db_manager import check_ticket_can_close
         can_close, reason = check_ticket_can_close(rec)
         if not can_close:
@@ -523,6 +524,7 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False, target_
        - DB Cache: Nếu phiếu đã có kết quả hợp lệ trong SQLite, trả về ngay lập tức (1ms), trừ khi force_recheck=True.
     5. Đồng bộ an toàn cơ sở dữ liệu và xuất báo cáo Excel.
     """
+    token = user_token
     t_reg = str(target_region).strip().upper() if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT") else None
     if t_reg:
         state.set_region_status(t_reg, "PROCESSING", f"Đang chạy tiền kiểm Mobile Internet {t_reg}...")
@@ -550,21 +552,68 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False, target_
             driver=driver, token=user_token, target_region=t_reg
         )
         if not enriched_tickets:
-            state.log("WARN", f"Đã quét {total_scanned} phiếu trên TTS Mới nhưng không tìm thấy phiếu Mobile Internet nào đang xử lý{f' tại {t_reg}' if t_reg else ''}.", region=t_reg)
+            enriched_tickets = []
+
+        # TỰ ĐỘNG GỘP CÁC PHIẾU CHƯA ĐÓNG TỪ DATABASE NẾU force_recheck HOẶC CÓ PHIẾU LỖI BTOOLS
+        try:
+            from db_manager import get_all_tickets
+            db_unclosed = get_all_tickets(tab_filter="chua_dong", source="tts_new", service_type="data", region=t_reg)
+            existing_codes = {str(t.get("ticket_code", "")).strip() for t in enriched_tickets if t.get("ticket_code")}
+            existing_phones = {str(t.get("phone", "")).strip() for t in enriched_tickets if t.get("phone")}
+
+            for t_db in (db_unclosed or []):
+                p_clean = str(t_db.get("phone") or "").strip()
+                c_clean = str(t_db.get("ticket_code") or "").strip()
+                st_raw = str(t_db.get("status") or "")
+                is_err_status = (not _is_valid_technical_status(st_raw)) or ("BTOOLS" in st_raw.upper()) or ("LỖI" in st_raw.upper())
+
+                if force_recheck or is_err_status:
+                    if (c_clean and c_clean not in existing_codes) or (p_clean and p_clean not in existing_phones):
+                        enriched_tickets.append({
+                            "phone": p_clean,
+                            "ticket_code": c_clean,
+                            "ticket_id": t_db.get("ticket_id"),
+                            "flow_id": t_db.get("flow_id"),
+                            "title": t_db.get("package_title") or "",
+                            "content": t_db.get("ticket_content") or "",
+                            "incident_time": t_db.get("incident_time") or "",
+                            "created_time": t_db.get("created_time") or "",
+                            "reopen_count": t_db.get("reopen_count") or 0,
+                            "last_reopened_date": t_db.get("last_reopened_date") or "",
+                            "processing_content": t_db.get("processing_content") or "",
+                            "region": t_db.get("region") or t_reg or "MN",
+                            "loaded_by": t_db.get("loaded_by") or ""
+                        })
+                        if c_clean:
+                            existing_codes.add(c_clean)
+                        if p_clean:
+                            existing_phones.add(p_clean)
+        except Exception as ex_db_merge:
+            state.log("WARN", f"Lỗi nạp bổ sung phiếu từ DB khi tiền kiểm lại: {ex_db_merge}")
+
+        if not enriched_tickets:
+            state.log("WARN", f"Đã quét {total_scanned} phiếu trên TTS Mới và không có phiếu Mobile Internet nào đang xử lý / cần tiền kiểm lại{f' tại {t_reg}' if t_reg else ''}.", region=t_reg)
             return
 
         total_tickets = len(enriched_tickets)
-        state.log("SUCCESS", f"Thu được {total_tickets} thuê bao Mobile Internet từ TTS Mới{f' [{t_reg}]' if t_reg else ''} (Tổng {total_scanned} phiếu). Khởi chạy Core Engine đa luồng...", region=t_reg)
+        state.log("SUCCESS", f"Thu được {total_tickets} thuê bao Mobile Internet cần xử lý{f' [{t_reg}]' if t_reg else ''} (Quét TTS Mới: {total_scanned}). Khởi chạy Core Engine đa luồng...", region=t_reg)
 
-        # Đồng bộ danh sách phiếu hiện hữu với thực tế trên TTS Mới (theo từng phân vùng)
-        active_codes = {str(t.get("ticket_code", "")).strip() for t in enriched_tickets if t.get("ticket_code")}
-        scanned_regs = {t.get("region") for t in enriched_tickets if t.get("region")}
-        from db_manager import sync_active_tickets_state
-        if scanned_regs:
-            for s_reg in scanned_regs:
-                sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data", region=s_reg)
-        elif active_codes:
-            sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data")
+        # Đồng bộ danh sách phiếu hiện hữu với thực tế trên TTS Mới (chỉ sync khi quét live thực sự bởi SuperAdmin và không phải force recheck)
+        is_admin_sync = True
+        if user_token:
+            from services.session_manager import decode_jwt
+            from region_detector import is_superadmin
+            is_admin_sync = is_superadmin(decode_jwt(user_token))
+
+        if total_scanned > 0 and not force_recheck and is_admin_sync:
+            active_codes = {str(t.get("ticket_code", "")).strip() for t in enriched_tickets if t.get("ticket_code")}
+            scanned_regs = {t.get("region") for t in enriched_tickets if t.get("region")}
+            from db_manager import sync_active_tickets_state
+            if scanned_regs:
+                for s_reg in scanned_regs:
+                    sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data", region=s_reg)
+            elif active_codes:
+                sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data")
 
         now = datetime.now()
         start_d = (now - timedelta(days=4)).strftime("%d%m%Y")

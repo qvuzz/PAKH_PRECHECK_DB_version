@@ -147,6 +147,52 @@ def is_outbound_block_ticket(title: str, content: str) -> bool:
     return False
 
 
+def classify_call_ticket_with_qwen(title: str, content: str, phone: str = "") -> bool:
+    """
+    Sử dụng Mô hình Offline Qwen 2.5 (kết hợp Mỏ neo Rule Viễn thông)
+    để xác định xem phiếu thuộc phân hệ 'Cuộc gọi' có thực chất là 'Chặn gọi ngoại mạng' hay không.
+    Trả về True nếu là Chặn gọi ngoại mạng / Spam / Cam kết mở mạng, False nếu là sự cố thoại thường.
+    """
+    # 1. Mỏ neo Rule Viễn thông tốc độ cao (< 0.1ms)
+    if is_outbound_block_ticket(title, content):
+        return True
+
+    # 2. Nếu Regex chưa bắt được hoặc câu từ lửng lơ: Thử gọi Qwen 2.5 nếu bật
+    try:
+        from ai_interpreter import get_local_llm, _local_llm_lock
+        llm = get_local_llm()
+        if not llm:
+            return False
+
+        prompt = f"""Bạn là trợ lý AI chuyên gia phân loại sự cố Viễn thông VinaPhone / VNPT.
+Nhiệm vụ: Phân loại nội dung phản ánh khách hàng xem có phải là sự cố:
+1. CHẶN GỌI NGOẠI MẠNG / KHÓA CHIỀU DO SPAM / LIÊN MẠNG (Khách bị khóa chiều gọi, chặn gọi sang Viettel/Mobifone/Ngoại mạng, hoặc gửi bản cam kết mở mạng).
+2. LỖI CUỘC GỌI BÌNH THƯỜNG (Sóng yếu, rớt cuộc gọi, lỗi sim, tài khoản, lỗi chung không liên quan đến khóa spam hay chặn ngoại mạng).
+
+Tiêu đề: {title}
+Nội dung: {content}
+
+Chỉ trả về DUY NHẤT từ "SPAM_CALL" hoặc "NORMAL_CALL". Không giải thích."""
+
+        with _local_llm_lock:
+            completion = llm.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": "Bạn là chuyên gia phân loại sự cố mạng VNPT. Chỉ trả về 'SPAM_CALL' hoặc 'NORMAL_CALL'."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.0,
+                max_tokens=10,
+                stop=["\n", "<|im_end|>"]
+            )
+        ai_reply = completion["choices"][0]["message"]["content"].strip().upper()
+        if "SPAM_CALL" in ai_reply:
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
 def summarize_spam_call_offline(title: str, content: str, carriers: List[str], commitment_info: Dict[str, Any]) -> str:
     """
     Động cơ Regex Viễn thông sâu sắc (Offline):
@@ -464,7 +510,7 @@ def summarize_spam_call(title: str, content: str, carriers: List[str], commitmen
     return summarize_spam_call_offline(title, content, carriers, commitment_info)
 
 
-def analyze_spam_call_ticket(package_title: str, ticket_content: str, ccos_attachments: Optional[Any] = None, phone: str = "") -> Dict[str, Any]:
+def analyze_spam_call_ticket(package_title: str, ticket_content: str, ccos_attachments: Optional[Any] = None, phone: str = "", use_llm: bool = False) -> Dict[str, Any]:
     """
     Hàm phân tích toàn diện 1 phiếu:
     Trả về cấu trúc chuẩn:
@@ -483,7 +529,10 @@ def analyze_spam_call_ticket(package_title: str, ticket_content: str, ccos_attac
     is_block = is_outbound_block_ticket(title, content)
     carriers = extract_carriers(content, title)
     commit_info = extract_commitment_info(content, ccos_attachments)
-    summary = summarize_spam_call(title, content, carriers, commit_info, phone=phone)
+    if use_llm:
+        summary = summarize_spam_call(title, content, carriers, commit_info, phone=phone)
+    else:
+        summary = summarize_spam_call_offline(title, content, carriers, commit_info)
 
     carrier_display = ", ".join(carriers) if carriers else ("Ngoại mạng" if is_block else "--")
 

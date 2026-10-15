@@ -1,0 +1,187 @@
+{
+    "SMS_SCENARIOS": [
+        {
+            "id": "SMS_01_COST_DISPUTE_VALID_USAGE",
+            "name": "Khiếu nại phát sinh cước SMS (Hệ thống ghi nhận bản ghi MO phát sinh cước)",
+            "problem_type": "cost_issue",
+            "cause_code": "2006",
+            "cause_name": "Cung cấp log file SMS theo yêu cầu",
+            "conclusion": "CƯỚC PHÁT SINH CHÍNH XÁC THEO LƯU LƯỢNG",
+            "color": "E2EFDA",
+            "technical_analysis": "Hệ thống SMSC VNPT ghi nhận thuê bao có phát sinh {total_mo} lượt gửi tin nhắn (MO) trong {time_range}. Theo quy định cước viễn thông, cước dịch vụ SMS được tính khi thuê bao khởi tạo và truyền bản tin gửi đi lên tổng đài SMSC, không phụ thuộc vào trạng thái nhận của thuê bao đích. Tổng cước phát sinh được tính chính xác theo số lượng bản tin/phân đoạn tin nhắn thực tế phát sinh từ thiết bị.",
+            "action_plan": "Cung cấp chi tiết log SMSC phát sinh tin nhắn cho KTV/GDV giải thích cước cho khách hàng. Hướng dẫn khách hàng rà soát các ứng dụng nhắn tin ngầm hoặc mã độc trên thiết bị nếu khách hàng khẳng định không chủ động thao tác gửi.",
+            "evidence_rules": {
+                "cdr_check": "total_mo > 0"
+            }
+        },
+        {
+            "id": "SMS_02_OTP_DELIVERY_SUCCESS",
+            "name": "Lỗi không nhận được mã OTP (SMSC đã chuyển phát thành công, nghi ngờ bị lọc vào Thư rác trên máy)",
+            "problem_type": "otp",
+            "cause_code": "2111",
+            "cause_name": "Do thiết bị đầu cuối",
+            "conclusion": "SMSC ĐÃ PHÁT OTP THÀNH CÔNG VỀ MÁY",
+            "color": "E2EFDA",
+            "technical_analysis": "Kiểm tra hệ thống SMSC VNPT: Ghi nhận bản tin OTP từ {app_brand} đã được tổng đài SMSC chuyển phát thành công tới số máy thuê bao lúc {delivery_time} (Mã trạng thái: 100C/2 - Giao bản tin thành công). Mạng lưới VNPT đảm bảo thông suốt dịch vụ. Phân tích nguyên nhân thiết bị: Hệ điều hành (iOS hoặc Android) đã nhận được bản tin ở cấp độ hệ thống, tuy nhiên ứng dụng Tin nhắn (Google Messages, Samsung Messages hoặc bộ lọc iOS) tự động nhận diện đầu số là tin tiếp thị/rác và đưa vào thư mục ẩn, khiến hộp thư đến chính (Inbox) không hiển thị.",
+            "action_plan": "Hướng dẫn khách hàng kiểm chứng: Mở ứng dụng Tin nhắn trên điện thoại -> vào menu mở rộng (biểu tượng 3 chấm hoặc biểu tượng tài khoản) -> chọn mục 'Thư rác và bị chặn' (Spam & Blocked) hoặc 'Tin nhắn chưa biết & Rác' (Junk) để lấy mã OTP của {app_brand}. Hướng dẫn khách hàng chọn 'Không phải thư rác' hoặc thêm vào danh bạ tin cậy để các tin nhắn OTP tiếp theo hiển thị bình thường vào hộp thư chính.",
+            "evidence_rules": {
+                "cdr_check": "mt_found == True and mt_status in ['100C', '2']"
+            }
+        },
+        {
+            "id": "SMS_02B_OTP_RECEIVED_NORMAL",
+            "name": "Khách hàng đã nhận được mã OTP bình thường (Ghi nhận bản tin OTP thành công sau thời điểm phản ánh)",
+            "problem_type": "otp",
+            "cause_code": "2011",
+            "cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "conclusion": "KH ĐÃ NHẬN ĐƯỢC OTP BÌNH THƯỜNG",
+            "color": "E2EFDA",
+            "technical_analysis": "Kiểm tra hệ thống SMSC VNPT: Sau thời điểm phản ánh, thuê bao đã tiếp tục nhận được bản tin OTP từ {app_brand} thành công lúc {delivery_time} (Mã trạng thái: 100C/2 - Giao bản tin thành công). Hiện tại dịch vụ nhận tin nhắn xác thực/OTP hoạt động bình thường, không phát sinh lỗi trên mạng lưới.",
+            "action_plan": "Thông báo khách hàng dịch vụ nhận tin nhắn OTP đã hoạt động bình thường và thực hiện đóng phiếu theo quy định.",
+            "evidence_rules": {
+                "cdr_check": "mt_found == True and delivery_time > incident_time"
+            }
+        },
+        {
+            "id": "SMS_03_OTP_NOT_SENT_BY_PARTNER",
+            "name": "Lỗi không nhận được mã OTP (Phía đối tác/ngân hàng chưa đẩy tin sang SMSC VNPT)",
+            "problem_type": "otp",
+            "cause_code": "2011",
+            "cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "conclusion": "ĐỐI TÁC CHƯA ĐẨY BẢN TIN OTP",
+            "color": "FFF2CC",
+            "technical_analysis": "Kiểm tra hệ thống SMSC VNPT trong khung giờ {time_range}: Không ghi nhận bản tin OTP từ phía đối tác/ngân hàng {app_brand} gửi vào hệ thống SMSC VNPT để định tuyến đến thuê bao. Profile thuê bao nhận tin bình thường.",
+            "action_plan": "Thông báo khách hàng thao tác yêu cầu gửi lại OTP trên ứng dụng của đối tác hoặc liên hệ tổng đài đối tác {app_brand} để kiểm tra luồng phát tin OTP từ hệ thống của họ.",
+            "evidence_rules": {
+                "cdr_check": "mt_found == False"
+            }
+        },
+        {
+            "id": "SMS_03B_2WAY_OTP_MO_OK_MT_MISSING",
+            "name": "Xác thực 2 chiều: Thuê bao gửi MO thành công nhưng đối tác chưa đẩy bản tin MT OTP",
+            "problem_type": "otp",
+            "cause_code": "2011",
+            "cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "conclusion": "MO THÀNH CÔNG - ĐỐI TÁC CHƯA TRẢ OTP",
+            "color": "FFF2CC",
+            "technical_analysis": "Hệ thống SMSC VNPT ghi nhận luồng xác thực 2 chiều của thuê bao: Chiều gửi đi (MO) thành công đến đầu số dịch vụ {mo_destination} lúc {mo_time} (Mã trạng thái: {mo_status} - Giao bản tin thành công sang mạng đích). Tuy nhiên, SMSC VNPT hoàn toàn không ghi nhận bản tin phản hồi/OTP (MT) nào từ phía {app_brand} đẩy về cho thuê bao. Nguyên nhân: Đứt gãy luồng xác thực phía đối tác (Lỗi kết nối API giữa SMS Gateway trung gian với máy chủ {app_brand}, hoặc SMS Vendor đối tác gặp sự cố định tuyến mạng quốc tế). Mạng lưới VNPT đảm bảo thông suốt dịch vụ.",
+            "action_plan": "Mạng VNPT đã chuyển phát tin nhắn xác thực của khách hàng sang đối tác thành công. Đề nghị hướng dẫn khách hàng sử dụng tính năng 'Gửi lại mã' trên ứng dụng {app_brand} vào một thời điểm khác để hệ thống đối tác tạo phiên gửi mới, hoặc liên hệ kênh hỗ trợ của {app_brand} vì sự cố nằm ngoài phạm vi mạng VNPT.",
+            "evidence_rules": {
+                "cdr_check": "mo_success > 0 and mt_found == False"
+            }
+        },
+        {
+            "id": "SMS_04_MO_SEND_FAIL_WRONG_SMSC",
+            "name": "Không gửi được tin nhắn đi (Thiết bị cài sai số Trung tâm tin nhắn)",
+            "problem_type": "mo_fail",
+            "cause_code": "2014",
+            "cause_name": "Thuê bao cài đặt sai trung tâm tin nhắn",
+            "conclusion": "SAI SỐ TRUNG TÂM TIN NHẮN (SMSC)",
+            "color": "FCE4D6",
+            "technical_analysis": "Profile dịch vụ SMS trên Core HSS mở bình thường 2 chiều. Tổng đài SMSC không ghi nhận bản tin gửi đi từ thuê bao do thiết bị chưa cấu hình đúng số Trung tâm tin nhắn SMSC của VinaPhone.",
+            "action_plan": "Hướng dẫn khách hàng cài đặt lại số Trung tâm tin nhắn VinaPhone (+8491020005) trong phần Cài đặt tin nhắn trên thiết bị và khởi động lại máy.",
+            "evidence_rules": {
+                "core_check": "sms_barring == False",
+                "cdr_check": "total_mo == 0"
+            }
+        },
+        {
+            "id": "SMS_05_MO_SEND_FAIL_NO_BALANCE",
+            "name": "Không gửi được tin nhắn đi (Tài khoản chính không đủ hoặc khóa chiều cước)",
+            "problem_type": "mo_fail",
+            "cause_code": "2015",
+            "cause_name": "Thuê bao chưa mở dịch vụ, gói cước",
+            "conclusion": "KHÔNG ĐỦ SỐ DƯ TÀI KHOẢN CHÍNH / KHÓA CƯỚC",
+            "color": "F8CBAD",
+            "technical_analysis": "Kiểm tra trên hệ thống OCS/Core: Thuê bao không đủ số dư tài khoản chính để gửi tin nhắn hoặc đang bị chặn chiều gửi tin (khóa SMO/OC do cước hoặc thông tin thuê bao).",
+            "action_plan": "Tư vấn khách hàng nạp thêm tiền vào tài khoản chính để tiếp tục sử dụng dịch vụ nhắn tin, hoặc liên hệ điểm giao dịch để hoàn tất cập nhật TTTB nếu bị khóa chiều.",
+            "evidence_rules": {
+                "core_check": "nam == 1 or main_balance < 350 or smo_locked == True"
+            }
+        },
+        {
+            "id": "SMS_06_SPS_SPAM_BLOCK",
+            "name": "Thuê bao bị hệ thống SPS khóa chiều tin nhắn do nghi vấn phát tán Spam",
+            "problem_type": "spam",
+            "cause_code": "2007",
+            "cause_name": "Đóng/Mở chặn spam",
+            "conclusion": "BỊ HỆ THỐNG SPS KHÓA DO PHÁT TÁN SPAM",
+            "color": "F8CBAD",
+            "technical_analysis": "Thuê bao bị hệ thống giám sát SPS tự động khóa chiều nhắn tin (SMO) do phát sinh lưu lượng tin nhắn bất thường với tần suất cao theo quy định phòng chống tin nhắn rác (CV 939/2013/DQ-VNP-KD).",
+            "action_plan": "Hướng dẫn khách hàng mang CCCD ra điểm giao dịch VinaPhone để ký Bản cam kết sử dụng dịch vụ viễn thông và mở lại chiều gửi tin nhắn theo quy định.",
+            "evidence_rules": {
+                "history_check": "contains '[SPS] So may bi khoa do nhan tin rac'"
+            }
+        },
+        {
+            "id": "SMS_07_MT_RECEIVE_FAIL_GENERAL",
+            "name": "Không nhận được tin nhắn đến nói chung (Mạng lưới bình thường / Nghi lỗi thiết bị/SIM)",
+            "problem_type": "mt_fail",
+            "cause_code": "2011",
+            "cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "conclusion": "MẠNG LƯỚI ĐẢM BẢO - KIỂM TRA BỘ NHỚ/SIM",
+            "color": "FFF2CC",
+            "technical_analysis": "Trạng thái profile thuê bao trên Core HSS bình thường, dịch vụ SMS mở 2 chiều, tài khoản hoạt động bình thường. Mạng lưới VNPT đảm bảo thông suốt.",
+            "action_plan": "Đề nghị khách hàng xóa bớt tin nhắn cũ để giải phóng bộ nhớ SIM/máy, lắp lại SIM hoặc mang SIM qua điểm giao dịch kiểm tra đổi SIM nếu SIM vật lý đã dùng lâu năm bị suy hao.",
+            "evidence_rules": {
+                "core_check": "sms_profile_ok == True"
+            }
+        },
+        {
+            "id": "SMS_08_DEVICE_AUTO_SEND_BACKGROUND",
+            "name": "Thiết bị tự động phát sinh tin nhắn ngầm (Kích hoạt máy/Ứng dụng ngầm/Cloud sync)",
+            "problem_type": "device_background_sms",
+            "cause_code": "2111",
+            "cause_name": "Do thiết bị đầu cuối",
+            "conclusion": "TIN NHẮN PHÁT SINH TỰ ĐỘNG TỪ THIẾT BỊ",
+            "color": "E2EFDA",
+            "technical_analysis": "Hệ thống SMSC VNPT ghi nhận thuê bao có phát sinh các bản tin gửi đi (MO) thành công từ thiết bị tới đầu số {destination} trong {time_range}. Phân tích nguyên nhân kỹ thuật: Do tính năng tự động gửi tin nhắn kích hoạt/đồng bộ ngầm của hệ điều hành trên máy {device_brand} (Tài khoản dịch vụ hãng, sao lưu dữ liệu đám mây, tính năng Tìm thiết bị) hoặc do ứng dụng ngầm trên máy tự động khởi tạo bản tin MO mà không hiển thị trong giao diện soạn tin nhắn của người dùng. Mạng lưới VNPT tiếp nhận và định tuyến bản tin chính xác theo phát sinh thực tế từ thiết bị.",
+            "action_plan": "Giải thích cho khách hàng về cơ chế tin nhắn kích hoạt/đồng bộ tự động của dòng máy {device_brand}. Hướng dẫn khách hàng vào phần Cài đặt máy -> Tài khoản dịch vụ của máy -> tắt tính năng Tự động sao lưu/Tìm thiết bị qua SMS, hoặc rà soát quyền gửi SMS của các ứng dụng tải về trên thiết bị để tránh phát sinh tin nhắn ngoài ý muốn.",
+            "evidence_rules": {
+                "content_check": "contains any ['không thao tác gửi', 'tự gửi tin', 'khẳng định không nhắn tin', 'vừa gửi tin nhắn']"
+            }
+        },
+        {
+            "id": "SMS_01B_APPLE_IMESSAGE_FEE",
+            "name": "Trừ cước tin nhắn quốc tế kích hoạt iMessage / FaceTime của Apple",
+            "problem_type": "cost_issue",
+            "cause_code": "2111",
+            "cause_name": "Do thiết bị đầu cuối",
+            "conclusion": "CƯỚC KÍCH HOẠT IMESSAGE/FACETIME APPLE",
+            "color": "E2EFDA",
+            "technical_analysis": "Kiểm tra hệ thống SMSC: Thuê bao sử dụng thiết bị iPhone/Apple có phát sinh bản tin gửi đi (MO) quốc tế đến đầu số máy chủ kích hoạt dịch vụ của Apple (+44... Vương quốc Anh) lúc {mo_time}. Đây là cơ chế bảo mật tự động của hệ điều hành iOS khi người dùng bật tính năng iMessage/FaceTime, thay SIM hoặc cập nhật iOS. Cước phát sinh được tính chính xác theo đơn giá cước nhắn tin quốc tế hiện hành (2.500đ/SMS). Mạng lưới VNPT đảm bảo thông suốt dịch vụ.",
+            "action_plan": "Giải thích cho khách hàng về cơ chế gửi SMS kích hoạt iMessage/FaceTime quốc tế của Apple. Nếu khách hàng không có nhu cầu sử dụng, hướng dẫn vào Cài đặt -> Tin nhắn -> tắt iMessage; Cài đặt -> FaceTime -> tắt FaceTime.",
+            "evidence_rules": {
+                "cdr_check": "destination contains '+44' or destination startswith '0044'"
+            }
+        },
+        {
+            "id": "SMS_04B_PREMIUM_SMS_BLOCK",
+            "name": "Không gửi được tin nhắn đến đầu số ngắn/dịch vụ (Tính năng chặn SMS cước cao trên máy Android)",
+            "problem_type": "mo_fail",
+            "cause_code": "2111",
+            "cause_name": "Do thiết bị đầu cuối",
+            "conclusion": "MÁY CHẶN GỬI TIN NHẮN ĐẦU SỐ DỊCH VỤ",
+            "color": "FCE4D6",
+            "technical_analysis": "Profile thuê bao trên Core HSS mở đầy đủ 2 chiều. Thuê bao gửi tin nhắn đến các số di động thông thường bình thường nhưng không gửi được tới đầu số ngắn {destination}. Nguyên nhân kỹ thuật: Thiết bị Android đã bật tính năng 'Chặn dịch vụ SMS cước cao / Premium SMS' hoặc người dùng từng chọn 'Không bao giờ cho phép' khi máy hiển thị cảnh báo gửi tin đến đầu số ngắn.",
+            "action_plan": "Hướng dẫn khách hàng thao tác trên điện thoại: Vào Cài đặt máy -> Ứng dụng -> Dấu 3 chấm góc phải -> Truy cập đặc biệt -> Quyền truy cập dịch vụ SMS cước cao (Premium SMS) -> chọn ứng dụng Tin nhắn và chuyển sang 'Luôn cho phép' (Always allow).",
+            "evidence_rules": {
+                "destination_check": "len(destination) <= 6"
+            }
+        },
+        {
+            "id": "SMS_06B_SPS_COMMITMENT_RESTORE",
+            "name": "Mở lại chiều tin nhắn SMO theo Bản cam kết của khách hàng",
+            "problem_type": "spam",
+            "cause_code": "2007",
+            "cause_name": "Đóng/Mở chặn spam",
+            "conclusion": "TIẾP NHẬN BẢN CAM KẾT - MỞ CHIỀU SMO",
+            "color": "E2EFDA",
+            "technical_analysis": "Thuê bao trước đó bị hệ thống SPS chặn chiều gửi tin nhắn do vi phạm quy định chống tin nhắn rác. Điểm giao dịch / KTV đã tiếp nhận Bản cam kết sử dụng dịch vụ viễn thông đúng quy định của chủ thuê bao.",
+            "action_plan": "Kiểm tra hồ sơ cam kết hợp lệ, chuyển thông tin đề nghị mở chiều tin nhắn (SMO) trên hệ thống SPS/Core theo đúng quy trình.",
+            "evidence_rules": {
+                "content_check": "contains any ['cam kết', 'bản cam kết', 'mo lai tin nhan']"
+            }
+        }
+    ]
+}

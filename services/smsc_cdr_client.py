@@ -9,10 +9,26 @@ import requests
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Cấu hình Elastic SMSC (Hỗ trợ truy vấn cả 2 Site HCM & HNI, gồm M2P, P2A, P2P và Trace)
-INDEX_PATTERNS = "smsc-cdr-hcm-search-m2p-*,smsc-cdr-hcm-search-p2a-*,smsc-cdr-hcm-search-p2p-*,smsc-cdr-hcm-trace-m2p-*,smsc-cdr-hcm-trace-p2a-*,smsc-cdr-hcm-trace-p2p-*,smsc-cdr-hni-search-m2p-*,smsc-cdr-hni-search-p2a-*,smsc-cdr-hni-search-p2p-*,smsc-cdr-hni-trace-m2p-*,smsc-cdr-hni-trace-p2a-*,smsc-cdr-hni-trace-p2p-*"
-ELASTIC_URL = f"http://10.204.57.26/{INDEX_PATTERNS}/_search"
+# Cấu hình Elastic SMSC (Hỗ trợ truy vấn cả 2 Site HCM & HN, gồm M2P, P2A, P2P và Trace, bao gồm cả cụm HN và HNI)
+HN_INDEX_PATTERNS = "smsc-cdr-hn-search-m2p-*,smsc-cdr-hn-search-p2a-*,smsc-cdr-hn-search-p2p-*,smsc-cdr-hn-trace-m2p-*,smsc-cdr-hn-trace-p2a-*,smsc-cdr-hn-trace-p2p-*,smsc-cdr-hni-search-m2p-*,smsc-cdr-hni-search-p2a-*,smsc-cdr-hni-search-p2p-*,smsc-cdr-hni-trace-m2p-*,smsc-cdr-hni-trace-p2a-*,smsc-cdr-hni-trace-p2p-*"
+HCM_INDEX_PATTERNS = "smsc-cdr-hcm-search-m2p-*,smsc-cdr-hcm-search-p2a-*,smsc-cdr-hcm-search-p2p-*,smsc-cdr-hcm-trace-m2p-*,smsc-cdr-hcm-trace-p2a-*,smsc-cdr-hcm-trace-p2p-*"
+INDEX_PATTERNS = f"{HCM_INDEX_PATTERNS},{HN_INDEX_PATTERNS}"
+ALL_INDEX_PATTERNS = INDEX_PATTERNS
+
+ELASTIC_HOSTS = ["10.204.57.26"]
+DIRECT_TIMEOUT_SECS = 90.0
+ELASTIC_URL = f"http://{ELASTIC_HOSTS[0]}/{ALL_INDEX_PATTERNS}/_search"
 AUTH_HEADER = "Basic ZWxhc3RpYzpWSUFTWHRiek1MTFJhdklnTjAxQw=="
+
+def get_elastic_url_for_site(site_opt: str = "all") -> str:
+    s = str(site_opt or "all").strip().lower()
+    if s in ("hn", "hni", "hanoi", "ha_noi"):
+        p = HN_INDEX_PATTERNS
+    elif s in ("hcm", "hcmc", "sg", "sai_gon"):
+        p = HCM_INDEX_PATTERNS
+    else:
+        p = ALL_INDEX_PATTERNS
+    return f"http://{ELASTIC_HOSTS[0]}/{p}/_search"
 
 TERMINATION_CAUSE_MAP = {
     "0": "Normal / Successful",
@@ -70,12 +86,32 @@ WINSCP_PATH = r"C:\Program Files (x86)\WinSCP\WinSCP.com"
 if not os.path.exists(WINSCP_PATH):
     WINSCP_PATH = r"C:\Program Files\WinSCP\WinSCP.com"
 
-SFTP_HOST = "10.165.15.84"
-SFTP_USER = "ktm_soc2"
-SFTP_PASS = "slkwD![l(s"
-REMOTE_INPUT_DIR = "/home/sftp/ktm/soc2/quangvu/input"
-REMOTE_OUTPUT_DIR = "/home/sftp/ktm/soc2/quangvu/output"
-POLL_TIMEOUT_SECS = 45
+SFTP_HOST = os.getenv("SFTP_HOST", "10.155.59.158")
+SFTP_PORT = int(os.getenv("SFTP_PORT", "22"))
+SFTP_USER = os.getenv("SFTP_USER", "root")
+SFTP_PASS = os.getenv("SFTP_PASS", "TeamCode*vm158")
+REMOTE_INPUT_DIR = os.getenv("REMOTE_INPUT_DIR", "/home/web/VNPT_TTS_PRECHECK_DEPLOY/cdr_queue/input")
+REMOTE_OUTPUT_DIR = os.getenv("REMOTE_OUTPUT_DIR", "/home/web/VNPT_TTS_PRECHECK_DEPLOY/cdr_queue/output")
+POLL_TIMEOUT_SECS = 120
+
+def _get_poll_timeout_for_size(size: int = 100) -> int:
+    """Tính toán thời gian timeout linh hoạt dựa trên dung lượng số bản ghi truy vấn."""
+    if size >= 5000:
+        return 180  # 3 phút cho các ca lớn 5.000 - 10.000 tin
+    elif size >= 1000:
+        return 120  # 2 phút cho các ca 1.000 - 5.000 tin
+    return 90       # 1.5 phút cho truy vấn thông thường
+
+# Cấu hình Hàng đợi Local (cho Docker .158 trao đổi trực tiếp với Watcher trên máy .82)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CDR_QUEUE_DIR = os.getenv("CDR_QUEUE_DIR", os.path.join(BASE_DIR, "cdr_queue"))
+CDR_LOCAL_INPUT_DIR = os.path.join(CDR_QUEUE_DIR, "input")
+CDR_LOCAL_OUTPUT_DIR = os.path.join(CDR_QUEUE_DIR, "output")
+try:
+    os.makedirs(CDR_LOCAL_INPUT_DIR, exist_ok=True)
+    os.makedirs(CDR_LOCAL_OUTPUT_DIR, exist_ok=True)
+except Exception:
+    pass
 
 # Cache kết quả ngắn hạn (5 phút) tránh gọi lặp lại
 CDR_MEMORY_CACHE = {}
@@ -131,7 +167,7 @@ def _run_winscp_commands(commands: list) -> tuple[bool, str]:
     if not os.path.exists(WINSCP_PATH):
         return False, f"Không tìm thấy WinSCP tại {WINSCP_PATH}"
 
-    open_line = f'open sftp://{SFTP_USER}:{SFTP_PASS}@{SFTP_HOST}/ -hostkey=*'
+    open_line = f'open sftp://{SFTP_USER}:{SFTP_PASS}@{SFTP_HOST}:{SFTP_PORT}/ -hostkey=*'
     script_lines = ["option batch abort", "option confirm off", open_line] + commands + ["exit"]
     script_content = "\n".join(script_lines)
 
@@ -169,7 +205,102 @@ def _run_winscp_commands(commands: list) -> tuple[bool, str]:
             pass
 
 
-def _query_via_sftp(phone: str, direction_str: str, gte_time: str, lte_time: str, size: int) -> dict:
+def _merge_mo_mt_hits(raw_mo: dict, raw_mt: dict, limit: int) -> dict:
+    """Gộp các bản ghi hai chiều MO và MT từ kết quả query, sắp xếp giảm dần theo thời gian"""
+    hits_mo = raw_mo.get("hits", {}).get("hits", []) if isinstance(raw_mo, dict) else []
+    hits_mt = raw_mt.get("hits", {}).get("hits", []) if isinstance(raw_mt, dict) else []
+
+    seen_ids = set()
+    merged_hits = []
+    for h in hits_mo + hits_mt:
+        hid = h.get("_id")
+        if hid:
+            if hid not in seen_ids:
+                seen_ids.add(hid)
+                merged_hits.append(h)
+        else:
+            merged_hits.append(h)
+
+    def _get_sort_key(hit):
+        s = hit.get("_source", {})
+        return str(s.get("deliverytime") or s.get("@timestamp") or "")
+
+    merged_hits.sort(key=_get_sort_key, reverse=True)
+
+    val_mo = raw_mo.get("hits", {}).get("total", {}).get("value", len(hits_mo)) if isinstance(raw_mo, dict) else 0
+    val_mt = raw_mt.get("hits", {}).get("total", {}).get("value", len(hits_mt)) if isinstance(raw_mt, dict) else 0
+
+    return {
+        "hits": {
+            "total": {"value": max(val_mo + val_mt, len(merged_hits))},
+            "hits": merged_hits[:limit]
+        }
+    }
+
+
+def _query_via_local_queue(phone: str, direction_str: str, gte_time: str, lte_time: str, size: int, target_url: str = None) -> dict:
+    """
+    Gửi yêu cầu qua Hàng đợi Local File (cho Docker .158 trao đổi trực tiếp với Watcher trên máy .82).
+    - Input: ghi file .req vào CDR_LOCAL_INPUT_DIR (/app/cdr_queue/input)
+    - Output: chờ Watcher trên máy .82 nhả file .json vào CDR_LOCAL_OUTPUT_DIR (/app/cdr_queue/output)
+    """
+    os.makedirs(CDR_LOCAL_INPUT_DIR, exist_ok=True)
+    os.makedirs(CDR_LOCAL_OUTPUT_DIR, exist_ok=True)
+
+    req_id = f"{phone}_{datetime.now().strftime('%y%m%d%H%M%S')}"
+    req_fname = f"{req_id}.req"
+    json_fname = f"{req_id}.json"
+
+    params = {
+        "phone": phone,
+        "direction": direction_str,
+        "gte_time": gte_time,
+        "lte_time": lte_time,
+        "size": size,
+        "elastic_url": target_url or ELASTIC_URL
+    }
+    req_json_str = json.dumps(params, ensure_ascii=False)
+
+    local_req = os.path.join(CDR_LOCAL_INPUT_DIR, req_fname)
+    local_json = os.path.join(CDR_LOCAL_OUTPUT_DIR, json_fname)
+
+    # 1. Ghi file .req vào input/
+    with open(local_req, "w", encoding="utf-8") as f:
+        f.write(req_json_str)
+
+    # 2. Polling chờ file .json kết quả từ output/ do Watcher máy .82 ghi về
+    current_poll_timeout = _get_poll_timeout_for_size(size)
+    for _ in range(current_poll_timeout):
+        time.sleep(1)
+        if os.path.exists(local_json) and os.path.getsize(local_json) > 0:
+            try:
+                with open(local_json, "r", encoding="utf-8") as rf:
+                    data = json.load(rf)
+                # Dọn dẹp file kết quả và file request sau khi đọc thành công
+                try:
+                    os.remove(local_json)
+                except Exception:
+                    pass
+                try:
+                    if os.path.exists(local_req):
+                        os.remove(local_req)
+                except Exception:
+                    pass
+                return data
+            except json.JSONDecodeError:
+                continue
+
+    # Nếu timeout, dọn file .req tránh đầy thư mục
+    try:
+        if os.path.exists(local_req):
+            os.remove(local_req)
+    except Exception:
+        pass
+
+    raise TimeoutError(f"Hết thời gian {current_poll_timeout}s chờ Watcher trên máy .82 xử lý kết quả CDR ({size} bản ghi).")
+
+
+def _query_via_sftp(phone: str, direction_str: str, gte_time: str, lte_time: str, size: int, target_url: str = None) -> dict:
     """Gửi yêu cầu qua SFTP 10.165 và chờ VHKT xử lý trả kết quả"""
     req_id = f"{phone}_{datetime.now().strftime('%y%m%d%H%M%S')}"
     req_fname = f"{req_id}.req"
@@ -181,7 +312,7 @@ def _query_via_sftp(phone: str, direction_str: str, gte_time: str, lte_time: str
         "gte_time": gte_time,
         "lte_time": lte_time,
         "size": size,
-        "elastic_url": ELASTIC_URL
+        "elastic_url": target_url or ELASTIC_URL
     }
     req_json_str = json.dumps(params, ensure_ascii=False)
 
@@ -192,7 +323,7 @@ def _query_via_sftp(phone: str, direction_str: str, gte_time: str, lte_time: str
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(
             hostname=SFTP_HOST,
-            port=22,
+            port=SFTP_PORT,
             username=SFTP_USER,
             password=SFTP_PASS,
             timeout=10,
@@ -209,7 +340,8 @@ def _query_via_sftp(phone: str, direction_str: str, gte_time: str, lte_time: str
 
             # Poll output/ chờ file .json kết quả từ máy VHKT Watcher
             remote_json = f"{REMOTE_OUTPUT_DIR}/{json_fname}"
-            for _ in range(POLL_TIMEOUT_SECS):
+            current_poll_timeout = _get_poll_timeout_for_size(size)
+            for _ in range(current_poll_timeout):
                 time.sleep(1)
                 try:
                     st = sftp.stat(remote_json)
@@ -227,7 +359,7 @@ def _query_via_sftp(phone: str, direction_str: str, gte_time: str, lte_time: str
                 except (IOError, FileNotFoundError):
                     continue
 
-            raise TimeoutError(f"Hết thời gian {POLL_TIMEOUT_SECS}s chờ VHKT xử lý trả kết quả CDR.")
+            raise TimeoutError(f"Hết thời gian {current_poll_timeout}s chờ VHKT xử lý trả kết quả CDR ({size} bản ghi).")
         finally:
             try:
                 sftp.close()
@@ -278,8 +410,8 @@ def _query_via_sftp(phone: str, direction_str: str, gte_time: str, lte_time: str
         raise TimeoutError(f"Hết thời gian {POLL_TIMEOUT_SECS}s chờ VHKT xử lý trả kết quả CDR.")
 
 
-def _query_direct_elastic(phone: str, direction_str: str, gte_time: str, lte_time: str, size: int) -> dict:
-    """Truy vấn trực tiếp Elastic nếu có route mạng nội bộ (timeout nhanh 3.5s)"""
+def _query_direct_elastic(phone: str, direction_str: str, gte_time: str, lte_time: str, size: int, target_url: str = None) -> dict:
+    """Truy vấn trực tiếp Elastic nếu có route mạng nội bộ (hỗ trợ thử tuần tự các IP máy chủ Elastic SMSC)"""
     if direction_str == "MO (Gửi đi)":
         must_clauses = [
             {"range": {"deliverytime": {"gte": gte_time, "lte": lte_time}}},
@@ -317,15 +449,26 @@ def _query_direct_elastic(phone: str, direction_str: str, gte_time: str, lte_tim
         }
     }
 
-    resp = requests.post(
-        ELASTIC_URL,
-        params=params,
-        headers=HEADERS,
-        json=payload,
-        timeout=3.5
-    )
-    resp.raise_for_status()
-    return resp.json()
+    last_error = None
+    query_url = target_url or ELASTIC_URL
+    custom_headers = dict(HEADERS)
+    custom_headers["Origin"] = "http://10.204.57.26"
+    custom_headers["Referer"] = "http://10.204.57.26/admin/cdr-search"
+    try:
+        resp = requests.post(
+            query_url,
+            params=params,
+            headers=custom_headers,
+            json=payload,
+            timeout=DIRECT_TIMEOUT_SECS
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        last_error = f"HTTP {resp.status_code}: {resp.text[:100]}"
+    except Exception as ex:
+        last_error = f"Error: {ex}"
+
+    raise RuntimeError(f"Máy chủ Elastic SMSC không phản hồi: {last_error}")
 
 
 def fetch_smsc_cdr(
@@ -334,15 +477,29 @@ def fetch_smsc_cdr(
     from_time_str: str = None,
     to_time_str: str = None,
     hours: int = 48,
-    limit: int = 100
+    limit: int = 100,
+    site: str = "all",
+    **kwargs
 ) -> dict:
     """
     Tra cứu SMSC CDR cho số thuê bao:
     - direction: 'both', 'mo' (gửi đi), 'mt' (nhận vào)
+    - site: 'all' (Cả hai Site), 'hn' (Hà Nội), 'hcm' (Hồ Chí Minh)
     - from_time_str, to_time_str: định dạng YYMMDDhhmmss (hoặc để None để tự động tính theo `hours`)
     - Trả về dict chuẩn hóa: { success, phone, total_hits, method, records, message }
     """
+    # Hỗ trợ linh hoạt các tên tham số thay thế
+    if not from_time_str and "from_time" in kwargs:
+        from_time_str = kwargs["from_time"]
+    if not to_time_str and "to_time" in kwargs:
+        to_time_str = kwargs["to_time"]
+
+    if str(direction or "").lower() in ("all", "both", "cả hai chiều"):
+        direction = "both"
+
     limit = min(max(int(limit or 100), 1), 10000)
+    target_elastic_url = get_elastic_url_for_site(site)
+
     # Chuẩn hóa phone: 84xxxxxxxxx
     clean_p = "".join(filter(str.isdigit, str(phone or "").strip()))
     if len(clean_p) == 9:
@@ -368,79 +525,88 @@ def fetch_smsc_cdr(
     }
     dir_label = dir_map.get(direction.lower(), "Cả hai chiều")
 
-    cache_key = f"{clean_p}_{direction}_{from_time_str}_{to_time_str}_{limit}"
+    cache_key = f"{clean_p}_{direction}_{from_time_str}_{to_time_str}_{limit}_{site}"
     cached = CDR_MEMORY_CACHE.get(cache_key)
     if cached and (time.time() - cached["cached_at"] < 180):
         return cached["data"]
 
-    method_used = "direct"
+    method_used = "local_queue"
     raw_result = None
+    err_queue = None
     err_direct = None
+    err_sftp = None
 
-    # Thử gọi Elastic trực tiếp trước
-    try:
-        raw_result = _query_direct_elastic(clean_p, dir_label, from_time_str, to_time_str, limit)
-    except Exception as ex_dir:
-        err_direct = str(ex_dir)
-        # Nếu trực tiếp timeout/lỗi, chuyển sang SFTP qua VHKT
+    # 1. KÊNH ƯU TIÊN SỐ 1 (Dành cho Docker .158 trao đổi trực tiếp với Watcher trên máy .82 qua Local Queue)
+    use_local_queue = (os.getenv("IS_DOCKER") == "1")
+    if use_local_queue:
+        try:
+            if direction.lower() in ("both", "cả hai chiều", "all"):
+                raw_mo = None
+                raw_mt = None
+                err_mo = None
+                err_mt = None
+                try:
+                    raw_mo = _query_via_local_queue(clean_p, "MO (Gửi đi)", from_time_str, to_time_str, limit, target_url=target_elastic_url)
+                except Exception as e_mo:
+                    err_mo = str(e_mo)
+                try:
+                    raw_mt = _query_via_local_queue(clean_p, "MT (Nhận vào)", from_time_str, to_time_str, limit, target_url=target_elastic_url)
+                except Exception as e_mt:
+                    err_mt = str(e_mt)
+
+                if not raw_mo and not raw_mt:
+                    raise RuntimeError(f"Watcher máy .82 không phản hồi: MO ({err_mo or '--'}) | MT ({err_mt or '--'})")
+
+                raw_result = _merge_mo_mt_hits(raw_mo or {}, raw_mt or {}, limit)
+            else:
+                q_dir = "MT (Nhận vào)" if direction.lower() == "mt" else "MO (Gửi đi)"
+                raw_result = _query_via_local_queue(clean_p, q_dir, from_time_str, to_time_str, limit, target_url=target_elastic_url)
+        except Exception as ex_q:
+            err_queue = str(ex_q)
+            raw_result = None
+
+    # 2. KÊNH DỰ PHÒNG 2: Direct Elastic (nếu máy có kết nối thẳng mạng tới 10.204.57.26)
+    if not raw_result:
+        try:
+            method_used = "direct"
+            raw_result = _query_direct_elastic(clean_p, dir_label, from_time_str, to_time_str, limit, target_url=target_elastic_url)
+        except Exception as ex_dir:
+            err_direct = str(ex_dir)
+
+    # 3. KÊNH DỰ PHÒNG 3: SFTP VHKT 10.165 (Dành cho máy cá nhân test code)
+    if not raw_result:
         try:
             method_used = "sftp_vhkt"
             if direction.lower() in ("both", "cả hai chiều", "all"):
-                # SFTP VHKT hiện tại xử lý theo chiều đơn lẻ, thực hiện truy vấn cả MO và MT rồi gộp lại
                 raw_mo = None
                 raw_mt = None
+                err_mo = None
+                err_mt = None
                 try:
-                    raw_mo = _query_via_sftp(clean_p, "MO (Gửi đi)", from_time_str, to_time_str, limit)
+                    raw_mo = _query_via_sftp(clean_p, "MO (Gửi đi)", from_time_str, to_time_str, limit, target_url=target_elastic_url)
                 except Exception as e_mo:
-                    pass
+                    err_mo = str(e_mo)
                 try:
-                    raw_mt = _query_via_sftp(clean_p, "MT (Nhận vào)", from_time_str, to_time_str, limit)
+                    raw_mt = _query_via_sftp(clean_p, "MT (Nhận vào)", from_time_str, to_time_str, limit, target_url=target_elastic_url)
                 except Exception as e_mt:
-                    pass
+                    err_mt = str(e_mt)
 
                 if not raw_mo and not raw_mt:
-                    raise RuntimeError("Cả 2 chiều MO và MT qua SFTP VHKT đều không phản hồi kết quả.")
+                    raise RuntimeError(f"SFTP VHKT không phản hồi kết quả: MO ({err_mo or 'không có dữ liệu'}) | MT ({err_mt or 'không có dữ liệu'})")
 
-                hits_mo = raw_mo.get("hits", {}).get("hits", []) if isinstance(raw_mo, dict) else []
-                hits_mt = raw_mt.get("hits", {}).get("hits", []) if isinstance(raw_mt, dict) else []
-
-                seen_ids = set()
-                merged_hits = []
-                for h in hits_mo + hits_mt:
-                    hid = h.get("_id")
-                    if hid:
-                        if hid not in seen_ids:
-                            seen_ids.add(hid)
-                            merged_hits.append(h)
-                    else:
-                        merged_hits.append(h)
-
-                def _get_sort_key(hit):
-                    s = hit.get("_source", {})
-                    return str(s.get("deliverytime") or s.get("@timestamp") or "")
-
-                merged_hits.sort(key=_get_sort_key, reverse=True)
-
-                val_mo = raw_mo.get("hits", {}).get("total", {}).get("value", len(hits_mo)) if isinstance(raw_mo, dict) else 0
-                val_mt = raw_mt.get("hits", {}).get("total", {}).get("value", len(hits_mt)) if isinstance(raw_mt, dict) else 0
-
-                raw_result = {
-                    "hits": {
-                        "total": {"value": max(val_mo + val_mt, len(merged_hits))},
-                        "hits": merged_hits[:limit]
-                    }
-                }
+                raw_result = _merge_mo_mt_hits(raw_mo or {}, raw_mt or {}, limit)
             else:
                 sftp_dir = "MT (Nhận vào)" if direction.lower() == "mt" else "MO (Gửi đi)"
-                raw_result = _query_via_sftp(clean_p, sftp_dir, from_time_str, to_time_str, limit)
+                raw_result = _query_via_sftp(clean_p, sftp_dir, from_time_str, to_time_str, limit, target_url=target_elastic_url)
         except Exception as ex_sftp:
+            err_sftp = str(ex_sftp)
             return {
                 "success": False,
                 "phone": clean_p,
                 "total_hits": 0,
                 "method": "failed",
                 "records": [],
-                "message": f"Không thể kết nối SMSC (Direct: {err_direct} | SFTP VHKT: {ex_sftp})"
+                "message": f"Không thể lấy SMSC CDR (Watcher .82: {err_queue} | Direct: {err_direct} | SFTP VHKT: {err_sftp})"
             }
 
     # Bóc tách và chuẩn hóa bản ghi
@@ -454,7 +620,12 @@ def fetch_smsc_cdr(
         tags = [str(t).lower() for t in src.get("tags", [])] if isinstance(src.get("tags"), list) else []
 
         # 1. Xác định Site (HCM / HNI)
-        if "hni" in idx or "hni" in tags:
+        origin = str(h.get("_site_origin") or "").upper()
+        if "HNI" in origin or "HN" in origin:
+            site = "HNI"
+        elif "HCM" in origin:
+            site = "HCM"
+        elif "hn" in idx or "hni" in idx or "hn" in tags or "hni" in tags:
             site = "HNI"
         elif "hcm" in idx or "hcm" in tags:
             site = "HCM"
@@ -515,7 +686,7 @@ def fetch_smsc_cdr(
         "phone": clean_p,
         "total_hits": total_val,
         "method": method_used,
-        "source": "elastic_direct" if method_used == "direct" else "vhkt_bridge",
+        "source": "local_queue" if method_used == "local_queue" else ("elastic_direct" if method_used == "direct" else "vhkt_bridge"),
         "from_time": _format_smsc_timestamp(from_time_str),
         "to_time": _format_smsc_timestamp(to_time_str),
         "records": records,
@@ -528,3 +699,8 @@ def fetch_smsc_cdr(
     }
 
     return result_data
+
+
+# Alias tương thích ngược
+get_smsc_cdr = fetch_smsc_cdr
+

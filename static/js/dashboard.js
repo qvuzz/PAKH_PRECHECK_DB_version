@@ -140,7 +140,9 @@ function updateNavBadge(elem, count) {
 let autoCloseState = {
     tts_old: false,
     tts_new: false,
-    mode: 'none'
+    mode: 'none',
+    regions: { MB: false, MN: false, MT: false },
+    can_user_auto_close: false
 };
 
 function getCurrentSystemKey() {
@@ -150,15 +152,26 @@ function getCurrentSystemKey() {
 function updateModeUI() {
     const sysKey = getCurrentSystemKey();
     const isSysNew = (sysKey === 'tts_new');
-    const isSysActive = isSysNew ? autoCloseState.tts_new : autoCloseState.tts_old;
+    let isSysActive = false;
+    if (isSysNew) {
+        if (currentRegion && currentRegion !== 'ALL' && autoCloseState.regions) {
+            isSysActive = !!autoCloseState.regions[currentRegion];
+        } else {
+            isSysActive = !!autoCloseState.tts_new;
+        }
+    } else {
+        isSysActive = !!autoCloseState.tts_old;
+    }
     currentAutoClose = isSysActive;
 
     const chkUnified = document.getElementById('chkAutoCloseUnified');
     const ctrlUnified = document.getElementById('ctrlAutoCloseUnified');
     const lblUnified = document.getElementById('autoCloseUnifiedLabel');
 
+    const hasPerm = isSystemAdmin || !!autoCloseState.can_user_auto_close;
+
     if (chkUnified) {
-        if (!isSystemAdmin) {
+        if (!hasPerm) {
             chkUnified.checked = false;
             chkUnified.disabled = true;
         } else {
@@ -167,8 +180,11 @@ function updateModeUI() {
         }
     }
 
+    const regMap = { MB: 'Miền Bắc', MT: 'Miền Trung', MN: 'Miền Nam', ALL: 'Toàn quốc' };
+    const regLabel = regMap[currentRegion] || (currentRegion ? currentRegion : 'Toàn quốc');
+
     if (lblUnified) {
-        lblUnified.innerText = 'Tự đóng TTS Mới';
+        lblUnified.innerText = `Tự đóng TTS Mới [${regLabel}]`;
     }
 
     if (ctrlUnified) {
@@ -176,12 +192,12 @@ function updateModeUI() {
             ctrlUnified.style.background = '#fef2f2';
             ctrlUnified.style.borderColor = 'rgba(220,38,38,0.5)';
             ctrlUnified.style.color = '#dc2626';
-            ctrlUnified.title = `Chế độ: ĐANG BẬT tự động đóng cho TTS Mới (Bấm để tắt)`;
+            ctrlUnified.title = `Chế độ: ĐANG BẬT tự động đóng cho TTS Mới [${regLabel}] (Bấm để tắt)`;
         } else {
             ctrlUnified.style.background = '#f8fafc';
             ctrlUnified.style.borderColor = '#cbd5e1';
             ctrlUnified.style.color = '#64748b';
-            ctrlUnified.title = `Chế độ: ĐANG TẮT tự động đóng cho TTS Mới (Bấm để bật)`;
+            ctrlUnified.title = `Chế độ: ĐANG TẮT tự động đóng cho TTS Mới [${regLabel}] (Bấm để bật)`;
         }
     }
 
@@ -223,26 +239,42 @@ function updateModeUI() {
 function handleAutoCloseClick(e) {
     if (e) e.stopPropagation();
 
-    // 1. Nếu không phải Admin (Client LAN kết nối tới) -> Mở modal thông báo bị khóa
-    if (!isSystemAdmin) {
+    // 1. Kiểm tra quyền hạn: SuperAdmin HOẶC KTV được cấp cờ can_auto_close
+    const hasPerm = isSystemAdmin || !!autoCloseState.can_user_auto_close;
+    if (!hasPerm) {
         showAutoCloseClientBlocked();
         return;
     }
 
     const sysKey = getCurrentSystemKey();
     const isSysNew = (sysKey === 'tts_new');
-    const isSysActive = isSysNew ? autoCloseState.tts_new : autoCloseState.tts_old;
+    let isSysActive = false;
+    if (isSysNew) {
+        if (currentRegion && currentRegion !== 'ALL' && autoCloseState.regions) {
+            isSysActive = !!autoCloseState.regions[currentRegion];
+        } else {
+            isSysActive = !!autoCloseState.tts_new;
+        }
+    } else {
+        isSysActive = !!autoCloseState.tts_old;
+    }
 
-    // 2. Nếu đang BẬT -> Click là TẮT ngay lập tức cho riêng hệ thống này
+    // 2. Nếu đang BẬT -> Click là TẮT ngay lập tức cho riêng hệ thống / khu vực này
     if (isSysActive) {
-        if (isSysNew) autoCloseState.tts_new = false;
-        else autoCloseState.tts_old = false;
+        if (isSysNew) {
+            if (currentRegion && currentRegion !== 'ALL' && autoCloseState.regions) {
+                autoCloseState.regions[currentRegion] = false;
+            }
+            autoCloseState.tts_new = false;
+        } else {
+            autoCloseState.tts_old = false;
+        }
         updateModeUI();
-        saveAutoCloseConfig(sysKey, false);
+        saveAutoCloseConfig(sysKey, false, currentRegion);
         return;
     }
 
-    // 3. Nếu đang TẮT -> Bật Modal xác nhận 2 bước cho hệ thống này
+    // 3. Nếu đang TẮT -> Bật Modal xác nhận 2 bước cho hệ thống & phân vùng này
     openAutoCloseConfirmModal();
 }
 
@@ -254,7 +286,9 @@ function openAutoCloseConfirmModal() {
     if (!modal) return;
 
     const sysKey = getCurrentSystemKey();
-    const sysName = 'HỆ THỐNG TTS MỚI';
+    const regMap = { MB: 'Miền Bắc', MT: 'Miền Trung', MN: 'Miền Nam', ALL: 'Toàn quốc' };
+    const regLabel = regMap[currentRegion] || (currentRegion ? currentRegion : 'Toàn quốc');
+    const sysName = `HỆ THỐNG TTS MỚI [${regLabel}]`;
 
     const targetSub1 = document.getElementById('autoCloseModalTargetSub1');
     const targetSub2 = document.getElementById('autoCloseModalTargetSub2');
@@ -300,23 +334,40 @@ function cancelAutoCloseModal() {
 async function confirmAndActivateAutoClose() {
     cancelAutoCloseModal();
     const sysKey = getCurrentSystemKey();
-    if (sysKey === 'tts_new') autoCloseState.tts_new = true;
-    else autoCloseState.tts_old = true;
+    if (sysKey === 'tts_new') {
+        if (currentRegion && currentRegion !== 'ALL') {
+            if (!autoCloseState.regions) autoCloseState.regions = {};
+            autoCloseState.regions[currentRegion] = true;
+        }
+        autoCloseState.tts_new = true;
+    } else {
+        autoCloseState.tts_old = true;
+    }
     updateModeUI();
-    await saveAutoCloseConfig(sysKey, true);
+    await saveAutoCloseConfig(sysKey, true, currentRegion);
 }
 
-async function saveAutoCloseConfig(targetSystem, isActive) {
+async function saveAutoCloseConfig(targetSystem, isActive, region) {
     try {
         const sys = targetSystem || getCurrentSystemKey();
-        await fetch('/api/config', {
+        const reg = region || currentRegion || 'ALL';
+        const clientAuthTok = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+        const res = await fetch('/api/config', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': clientAuthTok ? (clientAuthTok.startsWith('Bearer ') ? clientAuthTok : `Bearer ${clientAuthTok}`) : ''
+            },
             body: JSON.stringify({
                 system: sys,
-                auto_close: !!isActive
+                auto_close: !!isActive,
+                region: reg
             })
         });
+        const resData = await res.json();
+        if (resData && !resData.success && resData.message) {
+            alert(resData.message);
+        }
         loadTickets();
     } catch (e) {
         console.error("Lỗi cập nhật cấu hình tự động đóng:", e);
@@ -374,7 +425,9 @@ async function fetchStatus() {
     isFetchingStatus = true;
     try {
         const regParam = encodeURIComponent(currentRegion || 'ALL');
-        const res = await fetch(`/api/status?region=${regParam}`);
+        const clientAuthTok = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+        const reqHeaders = clientAuthTok ? { 'Authorization': clientAuthTok } : {};
+        const res = await fetch(`/api/status?region=${regParam}`, { headers: reqHeaders });
         const data = await res.json();
 
         // Đồng bộ lựa chọn mô hình Tóm tắt nội dung
@@ -527,6 +580,12 @@ async function fetchStatus() {
             if (cbUnified) cbUnified.innerText = '--:--';
         }
 
+        if (data.can_auto_close !== undefined) {
+            autoCloseState.can_user_auto_close = !!data.can_auto_close;
+        }
+        if (data.auto_close_regions) {
+            autoCloseState.regions = data.auto_close_regions;
+        }
         if (data.auto_close_tts_old !== undefined && data.auto_close_tts_new !== undefined) {
             autoCloseState.tts_old = !!data.auto_close_tts_old;
             autoCloseState.tts_new = !!data.auto_close_tts_new;
@@ -557,13 +616,13 @@ async function fetchStatus() {
         const term = document.getElementById('logTerminal');
         if (term) {
             const atBottom = term.scrollHeight - term.clientHeight <= term.scrollTop + 40;
-            term.innerHTML = logs.map(l => `
+            term.innerHTML = logs.length ? logs.map(l => `
                         <div class="log-line">
                             <span class="log-time">[${l.time}]</span>
                             <span class="log-level ${l.level}">[${l.level}]</span>
                             <span class="log-msg">${escapeHtml(l.message)}</span>
                         </div>
-                    `).join('');
+                    `).join('') : '<div class="log-line" style="color:#64748b; font-style:italic;">Chưa có nhật ký tiến trình mới...</div>';
             if (atBottom) term.scrollTop = term.scrollHeight;
         }
 
@@ -708,9 +767,51 @@ window.applyRegionUI = applyRegionUI;
 // SẮP XẾP DANH SÁCH PHIẾU THEO NGÀY TIẾP NHẬN
 let sortIncidentTimeOrder = 'none'; // 'none', 'desc' (mới nhất trước), 'asc' (cũ nhất trước)
 
-function parseIncidentDate(dateStr) {
+function formatIncidentTimeDisplay(timeStr, ticketCode = '') {
+    if (!timeStr || timeStr === '--' || timeStr === 'null') return '--';
+    const str = String(timeStr).trim();
+    // 1. Nếu dạng ISO YYYY-MM-DD
+    const isoMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s]+(\d{1,2}:\d{1,2}(?::\d{1,2})?))?/);
+    if (isoMatch) {
+        const y = isoMatch[1];
+        const m = String(isoMatch[2]).padStart(2, '0');
+        const d = String(isoMatch[3]).padStart(2, '0');
+        const t = isoMatch[4] ? ' ' + isoMatch[4] : '';
+        return `${d}/${m}/${y}${t}`.trim();
+    }
+    // 2. Nếu dạng A/B/YYYY hoặc A-B-YYYY [HH:mm[:ss]]
+    const slashMatch = str.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:[T\s]+(\d{1,2}:\d{1,2}(?::\d{1,2})?))?/);
+    if (slashMatch) {
+        let p1 = parseInt(slashMatch[1], 10);
+        let p2 = parseInt(slashMatch[2], 10);
+        const y = slashMatch[3];
+        const t = slashMatch[4] ? ' ' + slashMatch[4] : '';
+
+        let tcM = String(ticketCode || '').match(/HT\/\d{4}\/(\d{2})\/(\d{2})/);
+        let tcMonth = tcM ? parseInt(tcM[1], 10) : 0;
+
+        let d = p1;
+        let m = p2;
+        if (p1 > 12) {
+            d = p1; m = p2;
+        } else if (p2 > 12) {
+            d = p2; m = p1;
+        } else {
+            if (tcMonth && p1 === tcMonth && p2 !== tcMonth) {
+                d = p2; m = p1;
+            } else if (tcMonth && p2 === tcMonth && p1 !== tcMonth) {
+                d = p1; m = p2;
+            }
+        }
+        return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}${t}`.trim();
+    }
+    return str;
+}
+window.formatIncidentTimeDisplay = formatIncidentTimeDisplay;
+
+function parseIncidentDate(dateStr, ticketCode = '') {
     if (!dateStr || dateStr === '--' || dateStr === 'null') return 0;
-    const str = String(dateStr).trim();
+    const str = formatIncidentTimeDisplay(dateStr, ticketCode);
     // 1. DD/MM/YYYY HH:mm[:ss] hoặc DD/MM/YYYY
     const dmyMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
     if (dmyMatch) {
@@ -785,6 +886,64 @@ function updateSortIncidentTimeUI() {
     }
 }
 window.updateSortIncidentTimeUI = updateSortIncidentTimeUI;
+
+// SẮP XẾP DANH SÁCH PHIẾU THEO THỜI ĐIỂM ĐÓNG (TAB LỊCH SỬ ĐÃ ĐÓNG)
+let sortClosedTimeOrder = 'none'; // 'none', 'desc' (mới đóng nhất trước), 'asc' (cũ nhất trước)
+
+function parseClosedDate(dateStr) {
+    if (!dateStr || dateStr === '--' || dateStr === 'null') return 0;
+    return parseIncidentDate(dateStr);
+}
+
+function toggleClosedTimeSort() {
+    if (sortClosedTimeOrder === 'none' || sortClosedTimeOrder === 'asc') {
+        sortClosedTimeOrder = 'desc';
+    } else {
+        sortClosedTimeOrder = 'asc';
+    }
+    // Khi bấm sort theo thời điểm đóng, hủy sort ngày tiếp nhận để tránh xung đột
+    sortIncidentTimeOrder = 'none';
+    updateSortIncidentTimeUI();
+    updateSortClosedTimeUI();
+    renderTicketsTable(true);
+}
+window.toggleClosedTimeSort = toggleClosedTimeSort;
+
+function updateSortClosedTimeUI() {
+    const iconContainer = document.getElementById('sortClosedTimeIcon');
+    const th = document.getElementById('thAiSummary');
+    if (!iconContainer || currentTableTab !== 'da_dong') return;
+
+    if (sortClosedTimeOrder === 'desc') {
+        iconContainer.className = 'sort-icon active';
+        iconContainer.innerHTML = `
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <polyline points="19 12 12 19 5 12"></polyline>
+            </svg>
+        `;
+        if (th) th.title = "Đang xếp: Mới đóng nhất trước (Bấm để đổi sang cũ nhất trước)";
+    } else if (sortClosedTimeOrder === 'asc') {
+        iconContainer.className = 'sort-icon active';
+        iconContainer.innerHTML = `
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="19" x2="12" y2="5"></line>
+                <polyline points="5 12 12 5 19 12"></polyline>
+            </svg>
+        `;
+        if (th) th.title = "Đang xếp: Đóng cũ nhất trước (Bấm để đổi sang mới nhất trước)";
+    } else {
+        iconContainer.className = 'sort-icon';
+        iconContainer.innerHTML = `
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 15l5 5 5-5"/>
+                <path d="M7 9l5-5 5 5"/>
+            </svg>
+        `;
+        if (th) th.title = "Thời Điểm Đóng (Bấm để sắp xếp theo thời gian đóng)";
+    }
+}
+window.updateSortClosedTimeUI = updateSortClosedTimeUI;
 
 // PHÂN TRANG DANH SÁCH PHIẾU
 let currentTicketPage = 1;
@@ -1092,40 +1251,64 @@ function adjustTableColumnsLayout(srv, tab) {
     const currentTab = tab || currentTableTab || 'chua_dong';
     const thStatus = document.getElementById('thStatus');
     const thCategory = document.getElementById('thCategory');
+    const thSmsIncidentTime = document.getElementById('thSmsIncidentTime');
     const thProfile = document.getElementById('thProfile');
     const thInfrastructure = document.getElementById('thInfrastructure');
     const thCemData = document.getElementById('thCemData');
+    const thSmsHistory = document.getElementById('thSmsHistory');
     const thAiSummary = document.getElementById('thAiSummary');
     const thComment = document.getElementById('thComment');
     const thActionPlan = document.getElementById('thActionPlan');
 
     if (service === 'spam_call') {
         // Module Chặn gọi ngoại mạng:
-        // Khóa cứng STT: 36px (col 1)
-        // Mã Phiếu: 11% (col 2)
-        // Nhà Mạng: 7.5% (col 3)
-        // Số Thuê Bao: 7% (col 4)
-        // Cam Kết & File: 10% (col 5)
-        // Tiếp Nhận: 6% (col 6)
-        // Ẩn: thProfile, thInfrastructure, thCemData
-        // Mở rộng Nội dung (thAiSummary: 26%) và 2 cột 10, 11 (thComment: 12%, thActionPlan: 12%)
-        // Thao Tác: 6%
-        // Tổng: 11 + 7.5 + 7 + 10 + 6 + 26 + 12 + 12 + 6 = 97.5% (+ STT 2.5% = 100%)
+        if (thSmsIncidentTime) thSmsIncidentTime.style.display = 'none';
         if (thStatus) { thStatus.style.display = ''; thStatus.innerText = 'Nhà Mạng'; thStatus.style.width = '7.5%'; thStatus.style.minWidth = '80px'; }
         if (thCategory) { thCategory.innerText = 'Cam Kết & File'; thCategory.style.width = '10%'; thCategory.style.minWidth = '110px'; }
         if (thProfile) thProfile.style.display = 'none';
         if (thInfrastructure) thInfrastructure.style.display = 'none';
         if (thCemData) thCemData.style.display = 'none';
+        if (thSmsHistory) thSmsHistory.style.display = 'none';
         if (thAiSummary) { thAiSummary.style.width = '26%'; thAiSummary.style.minWidth = '260px'; }
         if (thComment) { thComment.style.width = '12%'; thComment.style.minWidth = '120px'; }
         if (thActionPlan) { thActionPlan.style.width = '12%'; thActionPlan.style.minWidth = '120px'; }
-    } else if (service === 'call' || service === 'sms' || service === 'roaming' || service === 'sim') {
-        // Module Cuộc gọi, Tin nhắn, Chuyển vùng quốc tế, Sim/MultiSIM:
-        // Ẩn: thStatus (0%), thCemData (0%)
+    } else if (service === 'sms') {
+        // Module Tin nhắn:
+        // Ẩn hoàn toàn: thStatus (0%), thProfile (0%), thInfrastructure (0%), thCemData (0%)
+        // Hiển thị mới: thSmsIncidentTime (8%), thSmsHistory (11%)
+        if (thStatus) thStatus.style.display = 'none';
+        if (thCategory) {
+            thCategory.innerText = 'Loại Tin Nhắn';
+            thCategory.style.width = '6.5%';
+            thCategory.style.minWidth = '85px';
+        }
+        if (thSmsIncidentTime) {
+            thSmsIncidentTime.style.display = '';
+            thSmsIncidentTime.style.width = '8%';
+            thSmsIncidentTime.style.minWidth = '85px';
+        }
+        if (thProfile) thProfile.style.display = 'none';
+        if (thInfrastructure) thInfrastructure.style.display = 'none';
+        if (thCemData) thCemData.style.display = 'none';
+        if (thSmsHistory) {
+            thSmsHistory.style.display = '';
+            thSmsHistory.style.width = '11%';
+            thSmsHistory.style.minWidth = '125px';
+        }
+        if (thAiSummary) {
+            thAiSummary.innerText = window.aiSmsAnalysisEnabled ? 'Phân Tích AI & Nội Dung' : 'Nội Dung Tin Nhắn';
+            thAiSummary.style.width = '23%';
+            thAiSummary.style.minWidth = '230px';
+        }
+        if (thComment) { thComment.style.width = '9.5%'; thComment.style.minWidth = '100px'; }
+        if (thActionPlan) { thActionPlan.style.width = '9.5%'; thActionPlan.style.minWidth = '100px'; }
+    } else if (service === 'call' || service === 'roaming' || service === 'sim') {
+        // Module Cuộc gọi, Chuyển vùng quốc tế, Sim/MultiSIM:
+        if (thSmsIncidentTime) thSmsIncidentTime.style.display = 'none';
+        if (thSmsHistory) thSmsHistory.style.display = 'none';
         if (thStatus) thStatus.style.display = 'none';
         if (thCategory) {
             if (service === 'call') thCategory.innerText = 'Loại Cuộc Gọi';
-            else if (service === 'sms') thCategory.innerText = 'Loại Tin Nhắn';
             else if (service === 'roaming') thCategory.innerText = 'Loại CVQT';
             else if (service === 'sim') thCategory.innerText = 'Loại SIM';
             thCategory.style.width = '7%';
@@ -1140,7 +1323,7 @@ function adjustTableColumnsLayout(srv, tab) {
             thProfile.style.minWidth = '95px';
         }
         if (thInfrastructure) {
-            thInfrastructure.innerText = (service === 'sms') ? 'Hạ Tầng' : 'Sóng';
+            thInfrastructure.innerText = 'Sóng';
             thInfrastructure.style.display = '';
             thInfrastructure.style.width = '4.5%';
             thInfrastructure.style.minWidth = '52px';
@@ -1151,6 +1334,8 @@ function adjustTableColumnsLayout(srv, tab) {
         if (thActionPlan) { thActionPlan.style.width = '11%'; thActionPlan.style.minWidth = '115px'; }
     } else if (service === 'other') {
         // Module Gói Cước & PA Khác:
+        if (thSmsIncidentTime) thSmsIncidentTime.style.display = 'none';
+        if (thSmsHistory) thSmsHistory.style.display = 'none';
         if (thStatus) thStatus.style.display = 'none';
         if (thCategory) { thCategory.innerText = 'Loại PAKH'; thCategory.style.width = '6.5%'; thCategory.style.minWidth = '90px'; }
         if (thProfile) { thProfile.innerText = 'Gói Cước Core'; thProfile.style.display = ''; thProfile.style.width = '7.5%'; thProfile.style.minWidth = '95px'; }
@@ -1161,9 +1346,10 @@ function adjustTableColumnsLayout(srv, tab) {
         if (thActionPlan) { thActionPlan.style.width = '9%'; thActionPlan.style.minWidth = '95px'; }
     } else {
         // Module Data (Mobile Internet) hoặc Toàn bộ CSDL:
-        const hideStatusInData = (currentTab === 'da_dong');
+        if (thSmsIncidentTime) thSmsIncidentTime.style.display = 'none';
+        if (thSmsHistory) thSmsHistory.style.display = 'none';
         if (thStatus) {
-            thStatus.style.display = hideStatusInData ? 'none' : '';
+            thStatus.style.display = '';
             thStatus.innerText = 'Nhận Định';
             thStatus.style.width = '6.5%';
             thStatus.style.minWidth = '85px';
@@ -1172,15 +1358,9 @@ function adjustTableColumnsLayout(srv, tab) {
         if (thProfile) { thProfile.innerText = 'Hồ Sơ Core'; thProfile.style.display = ''; thProfile.style.width = '7.5%'; thProfile.style.minWidth = '95px'; }
         if (thInfrastructure) { thInfrastructure.innerText = 'Hạ Tầng'; thInfrastructure.style.display = ''; thInfrastructure.style.width = '4%'; thInfrastructure.style.minWidth = '50px'; }
         if (thCemData) { thCemData.style.display = ''; thCemData.innerText = 'Dữ Liệu CEM'; thCemData.style.width = '6.5%'; thCemData.style.minWidth = '85px'; }
-        if (hideStatusInData) {
-            if (thAiSummary) { thAiSummary.style.width = '26%'; thAiSummary.style.minWidth = '250px'; }
-            if (thComment) { thComment.style.width = '8.25%'; thComment.style.minWidth = '90px'; }
-            if (thActionPlan) { thActionPlan.style.width = '8.25%'; thActionPlan.style.minWidth = '90px'; }
-        } else {
-            if (thAiSummary) { thAiSummary.style.width = '23%'; thAiSummary.style.minWidth = '230px'; }
-            if (thComment) { thComment.style.width = '6.75%'; thComment.style.minWidth = '85px'; }
-            if (thActionPlan) { thActionPlan.style.width = '6.75%'; thActionPlan.style.minWidth = '85px'; }
-        }
+        if (thAiSummary) { thAiSummary.style.width = '23%'; thAiSummary.style.minWidth = '230px'; }
+        if (thComment) { thComment.style.width = '6.75%'; thComment.style.minWidth = '85px'; }
+        if (thActionPlan) { thActionPlan.style.width = '6.75%'; thActionPlan.style.minWidth = '85px'; }
     }
 }
 
@@ -1276,6 +1456,12 @@ function selectModule(sys, srv, updateUrl = true) {
     if (ctrlAutoClose) ctrlAutoClose.style.display = isDataSrv ? 'flex' : 'none';
     const btnCdr = document.getElementById('btnOpenSmscCdrSearch');
     if (btnCdr) btnCdr.style.display = (srv === 'sms') ? 'inline-flex' : 'none';
+    const btnPrecheckSms = document.getElementById('btnPrecheckAllSms');
+    if (btnPrecheckSms) btnPrecheckSms.style.display = (srv === 'sms') ? 'inline-flex' : 'none';
+
+    // Ẩn nút Tiền kiểm lại trên thanh công cụ khi ở module Cuộc gọi & Tin nhắn (chỉ hỗ trợ On-Demand từng số hoặc nút Tiền kiểm toàn bộ riêng)
+    const btnRecheck = document.getElementById('btnRecheckModule');
+    if (btnRecheck) btnRecheck.style.display = (srv === 'call' || srv === 'sms') ? 'none' : 'inline-block';
 
     // Ẩn bộ lọc nguồn & loại PAKH vì đây là menu chuyên biệt của TTS
     const srcSel = document.getElementById('filterSourceSelect');
@@ -1294,6 +1480,8 @@ function selectHistoryModule(tab = 'all', updateUrl = true) {
 
     const btnCdr = document.getElementById('btnOpenSmscCdrSearch');
     if (btnCdr) btnCdr.style.display = 'none';
+    const btnPrecheckSms = document.getElementById('btnPrecheckAllSms');
+    if (btnPrecheckSms) btnPrecheckSms.style.display = 'none';
 
     if (updateUrl && window.location.pathname !== '/lich-su') {
         history.pushState({ tab: 'lich-su' }, '', '/lich-su');
@@ -1495,9 +1683,18 @@ async function startNewVoiceScan(srvType = null) {
     if (srv === 'call') {
         endpoint = '/api/ttsnew/scan_call';
         label = 'Cuộc gọi';
+    } else if (srv === 'spam_call') {
+        endpoint = '/api/ttsnew/scan_spam_call';
+        label = 'Chặn gọi ngoại mạng';
     } else if (srv === 'sms') {
         endpoint = '/api/ttsnew/scan_sms';
         label = 'Tin nhắn';
+    } else if (srv === 'roaming') {
+        endpoint = '/api/ttsnew/scan_roaming';
+        label = 'Chuyển vùng quốc tế';
+    } else if (srv === 'sim') {
+        endpoint = '/api/ttsnew/scan_sim';
+        label = 'Sim / MultiSIM';
     } else if (srv === 'other') {
         endpoint = '/api/ttsnew/scan_other';
         label = 'Gói cước / PA Khác';
@@ -1633,10 +1830,27 @@ function switchTableTab(tab) {
     const thAiSummary = document.getElementById('thAiSummary');
     if (thAiSummary) {
         if (tab === 'da_dong') {
-            thAiSummary.innerText = 'Thời Điểm Đóng';
-            thAiSummary.style.textAlign = 'center';
-            thAiSummary.title = 'Thời gian KTV bấm đóng 2.6 / 5.1 hoặc hệ thống tự động đóng';
+            thAiSummary.className = 'sortable-th';
+            thAiSummary.onclick = toggleClosedTimeSort;
+            thAiSummary.style.cursor = 'pointer';
+            thAiSummary.title = 'Bấm để sắp xếp theo thời điểm đóng (mới nhất/cũ nhất)';
+            thAiSummary.innerHTML = `
+                <div style="display:inline-flex; align-items:center; gap:4px;">
+                    <span>Thời Điểm Đóng</span>
+                    <span id="sortClosedTimeIcon" class="sort-icon ${sortClosedTimeOrder !== 'none' ? 'active' : ''}">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M7 15l5 5 5-5"/>
+                            <path d="M7 9l5-5 5 5"/>
+                        </svg>
+                    </span>
+                </div>
+            `;
+            thAiSummary.style.textAlign = 'left';
+            updateSortClosedTimeUI();
         } else {
+            thAiSummary.className = '';
+            thAiSummary.onclick = null;
+            thAiSummary.style.cursor = '';
             if (currentService === 'spam_call') {
                 thAiSummary.innerText = 'Tóm Tắt Sự Cố & Phản Ánh';
             } else if (currentService === 'sms') {
@@ -1646,7 +1860,7 @@ function switchTableTab(tab) {
             } else {
                 thAiSummary.innerText = 'Tóm Tắt Nội Dung PAKH';
             }
-            thAiSummary.style.textAlign = '';
+            thAiSummary.style.textAlign = 'left';
             thAiSummary.title = '';
         }
     }
@@ -1677,7 +1891,13 @@ function switchTableTab(tab) {
     const hasFreshModuleCache = window.ticketsModuleCache && window.ticketsModuleCache[expectedCacheKey] && (Date.now() - window.ticketsModuleCache[expectedCacheKey].timestamp < 30000);
 
     if (!hasFreshModuleCache && tbody) {
-        renderTicketsSkeleton(tbody, totalCols);
+        // Nếu tbody chưa có hàng nào hoặc đang là skeleton thì hiển thị skeleton, nếu đã có dữ liệu thì làm mờ nhẹ để chuyển tab tức thì
+        if (tbody.children.length === 0 || tbody.querySelector('.table-skeleton-row')) {
+            renderTicketsSkeleton(tbody, totalCols);
+        } else {
+            tbody.style.opacity = '0.55';
+            tbody.style.transition = 'opacity 0.15s ease';
+        }
     }
 
     lastTicketsSignature = "";
@@ -1698,6 +1918,12 @@ async function precheckSingleTicket(phone, incidentTime, btnElem) {
         });
         const data = await res.json();
         if (data.success) {
+            let cleanP = String(phone || '').trim().replace(/\D/g, '');
+            if (cleanP.startsWith('0')) cleanP = '84' + cleanP.slice(1);
+            if (!cleanP.startsWith('84') && cleanP.length === 9) cleanP = '84' + cleanP;
+            if (data.sms_cdr_summary && window.smsCdrSummaryCache) {
+                window.smsCdrSummaryCache[cleanP] = data.sms_cdr_summary;
+            }
             clearTicketsModuleCache();
             lastTicketsSignature = "";
             await loadTickets(true);
@@ -1706,7 +1932,7 @@ async function precheckSingleTicket(phone, incidentTime, btnElem) {
             alert(data.error || "Không thể thực hiện tiền kiểm.");
             if (btnElem) {
                 btnElem.disabled = false;
-                btnElem.innerHTML = 'Tiền kiểm lại';
+                btnElem.innerHTML = 'Tiền kiểm';
                 btnElem.style.opacity = '1';
             }
         }
@@ -1714,11 +1940,688 @@ async function precheckSingleTicket(phone, incidentTime, btnElem) {
         alert("Lỗi khi gửi yêu cầu tiền kiểm: " + e);
         if (btnElem) {
             btnElem.disabled = false;
-            btnElem.innerHTML = 'Tiền kiểm lại';
+            btnElem.innerHTML = 'Tiền kiểm';
             btnElem.style.opacity = '1';
         }
     }
 }
+
+// ==============================================================================
+// MODULE TIN NHẮN (SMS): PHÂN TÍCH AI VÀ TRA CỨU LỊCH SỬ CDR
+// ==============================================================================
+window.aiSmsAnalysisEnabled = (localStorage.getItem('ai_sms_analysis_enabled') === 'true');
+window.smsCdrSummaryCache = window.smsCdrSummaryCache || {};
+
+async function runBatchAiSmsAnalysis(btn) {
+    const tickets = (typeof cachedTickets !== 'undefined' && Array.isArray(cachedTickets) && cachedTickets.length > 0)
+        ? cachedTickets
+        : [];
+
+    if (tickets.length === 0) {
+        alert('Không có phiếu tin nhắn nào trong danh sách cần phân tích.');
+        return;
+    }
+
+    window.aiSmsAnalysisEnabled = true;
+    localStorage.setItem('ai_sms_analysis_enabled', 'true');
+
+    if (btn) {
+        btn.disabled = true;
+        btn.style.opacity = '0.75';
+        btn.innerText = 'Đang phân tích...';
+    }
+
+    const total = tickets.length;
+    const batchItems = [];
+
+    // Phân tích bóc tách siêu tốc trong bộ nhớ (< 0.1ms/phiếu)
+    for (let i = 0; i < total; i++) {
+        const t = tickets[i];
+        const parsed = extractSmsIncidentDetails(t.ticket_content || t.ai_summary || '', t.incident_time || '');
+        t.sms_incident_time = parsed.incidentTime;
+        t.sms_problem = parsed.problemSummary;
+
+        batchItems.push({
+            phone: t.phone,
+            incident_time: t.incident_time,
+            ticket_code: t.ticket_code,
+            sms_incident_time: parsed.incidentTime,
+            sms_problem: parsed.problemSummary
+        });
+    }
+
+    // Lưu kết quả hàng loạt vào SQLite database để lưu vết vĩnh viễn
+    try {
+        await fetch('/api/tickets/save_sms_analysis', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: batchItems })
+        });
+    } catch (err) {
+        console.error('[AI SMS] Lỗi lưu kết quả vào database:', err);
+    }
+
+    renderTicketsTable(true);
+    await fetchStatus();
+
+    if (btn) {
+        btn.innerText = `Đã phân tích ${total} phiếu`;
+    }
+
+    setTimeout(() => {
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.innerText = 'Phân tích AI SMS';
+        }
+    }, 1200);
+}
+window.runBatchAiSmsAnalysis = runBatchAiSmsAnalysis;
+
+function handleAiSmsToggle(checked) {
+    window.aiSmsAnalysisEnabled = Boolean(checked);
+    localStorage.setItem('ai_sms_analysis_enabled', window.aiSmsAnalysisEnabled ? 'true' : 'false');
+    const thAiSummary = document.getElementById('thAiSummary');
+    if (thAiSummary && currentService === 'sms') {
+        thAiSummary.innerText = window.aiSmsAnalysisEnabled ? 'Phân Tích AI & Nội Dung' : 'Nội Dung Tin Nhắn';
+    }
+    renderTicketsTable(true);
+}
+window.handleAiSmsToggle = handleAiSmsToggle;
+
+function extractSmsIncidentDetails(content, incidentTimeFallback) {
+    const raw = String(content || '').trim();
+    const pad = (n) => String(n).padStart(2, '0');
+
+    let fallbackYear = 2026;
+    let fallbackMonth = 10;
+    let fallbackDay = 1;
+    if (incidentTimeFallback) {
+        const yMatch = String(incidentTimeFallback).match(/\b(20\d{2})\b/);
+        if (yMatch) fallbackYear = parseInt(yMatch[1], 10);
+        const dmMatch = String(incidentTimeFallback).match(/(\d{1,2})[\/\-](\d{1,2})/);
+        if (dmMatch) {
+            fallbackDay = parseInt(dmMatch[1], 10);
+            fallbackMonth = parseInt(dmMatch[2], 10);
+        }
+    }
+
+    let detectedTime = '';
+    let fromDate = '';
+    let toDate = '';
+    let timeRangeDesc = '';
+
+    // Quét giờ xảy ra nếu có (vd: 09:15, 9h30, lúc 14:00)
+    let timeStr = '';
+    const tMatch = raw.match(/\b([0-2]?[0-9])[:hH]([0-5][0-9])(?:\s*(?:phút|p))?\b/);
+    if (tMatch) {
+        timeStr = `${pad(parseInt(tMatch[1], 10))}:${pad(parseInt(tMatch[2], 10))}`;
+    }
+
+    // ƯU TIÊN 0: Quét Khoảng Ngày Cụ Thể (Date Range, vd: 13-09-2026 - 20-09-2026, từ 13/09 đến 20/09/2026, 08/10 → 11/10/2026)
+    const rangePat = /(?:từ\s+(?:ngày\s+)?)?([0-3]?[0-9])[\/\-]([0-1]?[0-9])(?:[\/\-](20\d{2}|\d{2}))?\s*(?:đến|\-|–|—|->|→|tới)\s*(?:ngày\s+)?([0-3]?[0-9])[\/\-]([0-1]?[0-9])(?:[\/\-](20\d{2}|\d{2}))?/i;
+    let mRange = raw.match(rangePat);
+    if (!mRange && incidentTimeFallback) {
+        mRange = String(incidentTimeFallback).match(rangePat);
+    }
+    if (mRange) {
+        const d1 = parseInt(mRange[1], 10);
+        const m1 = parseInt(mRange[2], 10);
+        const d2 = parseInt(mRange[4], 10);
+        const m2 = parseInt(mRange[5], 10);
+        if (d1 >= 1 && d1 <= 31 && m1 >= 1 && m1 <= 12 && d2 >= 1 && d2 <= 31 && m2 >= 1 && m2 <= 12) {
+            const y2Val = mRange[6] ? (mRange[6].length === 2 ? parseInt('20' + mRange[6], 10) : parseInt(mRange[6], 10)) : fallbackYear;
+            const y1Val = mRange[3] ? (mRange[3].length === 2 ? parseInt('20' + mRange[3], 10) : parseInt(mRange[3], 10)) : y2Val;
+            fromDate = `${y1Val}-${pad(m1)}-${pad(d1)} 00:00:00`;
+            toDate = `${y2Val}-${pad(m2)}-${pad(d2)} 23:59:59`;
+            timeRangeDesc = `${pad(d1)}/${pad(m1)} → ${pad(d2)}/${pad(m2)}/${y2Val}`;
+            detectedTime = `${pad(d1)}/${pad(m1)}/${y1Val} → ${pad(d2)}/${pad(m2)}/${y2Val}`;
+        }
+    }
+
+    // ƯU TIÊN 1: Quét Ngày đầy đủ có năm (dd/mm/yyyy, vd: 14/10/2026, 05/10/2026)
+    if (!detectedTime) {
+        const fullDatePattern = /\b([0-3]?[0-9])[\/\-]([0-1]?[0-9])[\/\-](20\d{2}|\d{2})\b/;
+        const dateMatch = raw.match(fullDatePattern);
+        if (dateMatch) {
+            const dVal = parseInt(dateMatch[1], 10);
+            const mVal = parseInt(dateMatch[2], 10);
+            if (dVal >= 1 && dVal <= 31 && mVal >= 1 && mVal <= 12) {
+                const yVal = dateMatch[3].length === 2 ? parseInt('20' + dateMatch[3], 10) : parseInt(dateMatch[3], 10);
+                const baseDateStr = `${pad(dVal)}/${pad(mVal)}/${yVal}`;
+                detectedTime = timeStr ? `${timeStr} ngày ${baseDateStr}` : baseDateStr;
+                const targetDate = new Date(yVal, mVal - 1, dVal);
+                const prevDate = new Date(targetDate.getTime() - 1 * 86400000);
+                const now = new Date();
+                fromDate = `${prevDate.getFullYear()}-${pad(prevDate.getMonth() + 1)}-${pad(prevDate.getDate())} 00:00:00`;
+                toDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} 23:59:59`;
+                timeRangeDesc = `${baseDateStr} → Hiện tại`;
+            }
+        }
+    }
+
+    // ƯU TIÊN 2: Quét mẫu Tháng (vd: cước tháng 9/2026, trong tháng 09/2026, T09/2026, hoặc độc lập 09/2026)
+    if (!detectedTime) {
+        let monthMatch = raw.match(/(?<![0-9/])(?:trong\s+tháng|cước\s+tháng|tháng|t)\s*([0-1]?[0-9])(?:\s*(?:[\/\-]|năm)?\s*(20\d{2}))?\b/i) ||
+                         raw.match(/(?<![0-9/])([0-1]?[0-9])[\/\-](20\d{2})\b/);
+        if (!monthMatch && incidentTimeFallback) {
+            monthMatch = String(incidentTimeFallback).match(/(?<![0-9/])(?:trong\s+tháng|cước\s+tháng|tháng|t)\s*([0-1]?[0-9])(?:\s*(?:[\/\-]|năm)?\s*(20\d{2}))?\b/i) ||
+                         String(incidentTimeFallback).match(/(?<![0-9/])([0-1]?[0-9])[\/\-](20\d{2})\b/);
+        }
+
+        if (monthMatch) {
+            const mVal = parseInt(monthMatch[1], 10);
+            if (mVal >= 1 && mVal <= 12) {
+                const yr = monthMatch[2] ? parseInt(monthMatch[2], 10) : fallbackYear;
+                const lastDay = new Date(yr, mVal, 0).getDate();
+                detectedTime = `Tháng ${pad(mVal)}/${yr}`;
+                fromDate = `${yr}-${pad(mVal)}-01 00:00:00`;
+                toDate = `${yr}-${pad(mVal)}-${pad(lastDay)} 23:59:59`;
+                timeRangeDesc = `01/${pad(mVal)}/${yr} → ${pad(lastDay)}/${pad(mVal)}/${yr} (${detectedTime})`;
+            }
+        }
+    }
+
+    // ƯU TIÊN 3: Quét ngày/tháng không có năm (vd: ngày 28/08, 14/10, lúc 14:00 ngày 28/08)
+    if (!detectedTime) {
+        const dmMatch = raw.match(/(?:ngày|hôm|lúc|từ)\s*([0-3]?[0-9])[\/\-]([0-1]?[0-9])\b/i) ||
+                        raw.match(/(?<![0-9/])([0-3]?[0-9])[\/\-]([0-1]?[0-9])(?![0-9/])/);
+        if (dmMatch) {
+            const dVal = parseInt(dmMatch[1], 10);
+            const mVal = parseInt(dmMatch[2], 10);
+            if (dVal >= 1 && dVal <= 31 && mVal >= 1 && mVal <= 12) {
+                const yVal = fallbackYear;
+                const baseDateStr = `${pad(dVal)}/${pad(mVal)}/${yVal}`;
+                detectedTime = timeStr ? `${timeStr} ngày ${baseDateStr}` : baseDateStr;
+                const targetDate = new Date(yVal, mVal - 1, dVal);
+                const prevDate = new Date(targetDate.getTime() - 1 * 86400000);
+                const now = new Date();
+                fromDate = `${prevDate.getFullYear()}-${pad(prevDate.getMonth() + 1)}-${pad(prevDate.getDate())} 00:00:00`;
+                toDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} 23:59:59`;
+                timeRangeDesc = `${baseDateStr} → Hiện tại`;
+            }
+        }
+    }
+
+    // ƯU TIÊN 4: Fallback theo ngày tiếp nhận của phiếu
+    if (!detectedTime) {
+        if (incidentTimeFallback && incidentTimeFallback !== '--') {
+            detectedTime = incidentTimeFallback.split(' ')[0] || incidentTimeFallback;
+            const baseDate = new Date(fallbackYear, fallbackMonth - 1, fallbackDay);
+            const past3Days = new Date(baseDate.getTime() - 3 * 86400000);
+            fromDate = `${past3Days.getFullYear()}-${pad(past3Days.getMonth() + 1)}-${pad(past3Days.getDate())} 00:00:00`;
+            toDate = `${fallbackYear}-${pad(fallbackMonth)}-${pad(fallbackDay)} 23:59:59`;
+            timeRangeDesc = `${pad(past3Days.getDate())}/${pad(past3Days.getMonth() + 1)} → ${pad(fallbackDay)}/${pad(fallbackMonth)}/${fallbackYear}`;
+        } else {
+            detectedTime = '--';
+            const now = new Date();
+            const past3 = new Date(now.getTime() - 3 * 86400000);
+            fromDate = `${past3.getFullYear()}-${pad(past3.getMonth() + 1)}-${pad(past3.getDate())} 00:00:00`;
+            toDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} 23:59:59`;
+            timeRangeDesc = '3 ngày gần nhất';
+        }
+    }
+
+    // 4. Trích xuất Lỗi cụ thể, Dòng máy, Số tiền cước & Thao tác KTV
+    let problemSummary = '';
+    let appBrand = '';
+    let deviceType = '';
+    let claimedAmount = '';
+    let anomaly = '';
+    let priorActions = [];
+    const low = raw.toLowerCase();
+
+    // Dòng máy
+    const deviceKeywords = [
+        ['iPhone (iOS)', ['iphone', 'ip1', 'ip2', 'ip3', 'ip4', 'ip5', 'ip6', 'ip7', 'ip8', 'ip9', 'ipx', 'apple', 'ios', 'ipad']],
+        ['Samsung', ['samsung', 'galaxy', 'ss ']],
+        ['Oppo', ['oppo', 'reno']],
+        ['Vivo', ['vivo']],
+        ['Xiaomi / Redmi', ['xiaomi', 'redmi', 'mi ']],
+        ['Realme', ['realme']],
+        ['Huawei', ['huawei']],
+        ['Nokia', ['nokia']]
+    ];
+    for (const [devName, kws] of deviceKeywords) {
+        if (kws.some(k => low.includes(k))) {
+            deviceType = devName;
+            const modelM = raw.match(new RegExp(`(?:máy|dùng|dt|điện thoại)?\\s*(${kws[0]}[A-Za-z0-9_\\s]{1,12})`, 'i'));
+            if (modelM) deviceType = modelM[1].trim();
+            break;
+        }
+    }
+
+    // Thao tác KTV/KH
+    if (low.includes('cài lại tttn') || low.includes('cài lại trung tâm tin nhắn')) priorActions.push('Đã cài lại TTTN');
+    if (low.includes('reset smt') || low.includes('rs smt')) priorActions.push('Đã reset SMT');
+    if (low.includes('reset máy') || low.includes('rs máy') || low.includes('tắt mở máy')) priorActions.push('Đã reset máy');
+    if (low.includes('thay sim') || low.includes('đổi sim')) priorActions.push('Đã thử đổi SIM');
+    if (low.includes('cam kết') || low.includes('bản cam kết')) priorActions.push('Đã có cam kết');
+
+    // Bất thường (mã độc / app ngầm / gửi liên tục / khách khẳng định không gửi)
+    const denialKws = [
+        'không có soạn tin', 'không soạn tin', 'không nhắn tin', 'không hề nhắn tin',
+        'không gửi tin', 'không hề gửi tin', 'không sử dụng dịch vụ tin nhắn',
+        'không thao tác nhắn tin', 'không chủ động soạn tin', 'không gửi tin nhắn đi',
+        'không quen biết', 'không hề quen biết', 'không biết của ai', 'không biết nhắn tin',
+        'không cho ai mượn', 'không ai mượn', 'không ai giữ máy', 'không có lịch sử gửi',
+        'không hiện việc gửi tin', 'không gửi cho ai', 'không làm gì mà trừ cước', 'không hề gửi',
+        'không gửi tin nhắn cho ai', 'không gửi bất cứ số nào'
+    ];
+    const hasDenial = denialKws.some(k => low.includes(k));
+    const isIphone = ['iphone', 'ios', 'ip ', 'ipx', 'apple', 'imesage', 'imessage'].some(k => low.includes(k));
+
+    if (low.includes('vài giây') || low.includes('liên tục') || low.includes('nhanh liên tục') || low.includes('tự động gửi')) {
+        anomaly = 'Gửi tin nhắn liên tục vài giây/tin - Dấu hiệu mã độc / Botnet tự động phát tán';
+    } else if (/\b(004\d{7,}|84004\d{7,})\b/.test(raw)) {
+        anomaly = 'Phát sinh tin nhắn gửi đi quốc tế lạ (004...) - Dấu hiệu mã độc chiếm quyền SMS';
+    } else if (hasDenial) {
+        if (isIphone) {
+            anomaly = 'KH khẳng định không gửi: Nghi vấn tính năng iMessage tự chuyển đổi sang SMS (Send as SMS) hoặc kích hoạt ngầm';
+        } else {
+            anomaly = 'KH khẳng định không gửi: Nghi vấn thiết bị cài app ngầm / nhiễm mã độc tự phát sinh SMS trong nền';
+        }
+    }
+
+    // Bóc tách loại lỗi
+    if (low.includes('phát sinh cước') || low.includes('hoàn cước') || low.includes('trừ cước') || low.includes('trừ tiền') || low.includes('cước cao') || (low.includes('phát sinh') && low.includes('cước'))) {
+        let amountMatch = raw.match(/(\d{1,3}(?:[.,]\d{3})+)/);
+        claimedAmount = amountMatch ? `${amountMatch[1]} đ` : '';
+        let amountText = claimedAmount ? ` (${claimedAmount})` : '';
+        problemSummary = `Khiếu nại phát sinh cước SMS${amountText}`;
+    } else if (low.includes('otp') || low.includes('mã xác thực') || low.includes('ma xac thuc') || /[-–]\s*BRN:/i.test(raw)) {
+        const brnM = raw.match(/(?:^|[\n\-\–\—\s])BRN:\s*([^,\n\-\–]+)/i);
+        if (brnM) {
+            appBrand = brnM[1].trim();
+        }
+        if (!appBrand) {
+            const appList = ['1414', 'My VNPT', 'VNeID', 'Vietcombank', 'MB Bank', 'Agribank', 'BIDV', 'VietinBank', 'TPBank', 'Techcombank', 'ACB', 'SHB', 'HD Bank', 'Nam A Bank', 'VPBank', 'Sacombank', 'SeABank', 'FE Credit', 'Dai Ngan', 'OCB', 'VIB', 'Shinhan', 'MSB', 'Eximbank', 'Tinhte', 'Momo', 'Zalo', 'Facebook', 'Shopee', 'TikTok', 'Xanh SM'];
+            for (const a of appList) {
+                if (low.includes(a.toLowerCase())) {
+                    appBrand = a;
+                    break;
+                }
+            }
+        }
+        if (!appBrand) {
+            const appMatch = raw.match(/(?:từ|của|qua|app|brn)\s*[:\s]*([A-Za-z0-9_\s]{2,20}?)(?:,|\.|\s+bị|\s+không|\s+báo|\n|$)/i);
+            if (appMatch) {
+                const cand = appMatch[1].trim();
+                const stops = ['sdt', 'số', 'tb', 'kh', 'máy', 'ai', 'nào', 'gì', 'đâu'];
+                if (!stops.includes(cand.toLowerCase()) && (/[A-Z]/.test(cand) || cand.length >= 3)) {
+                    appBrand = cand;
+                }
+            }
+        }
+        problemSummary = `Không nhận được tin nhắn OTP${appBrand ? ` (${appBrand})` : ''}`;
+    } else if (low.includes('không gửi được') || low.includes('ko gửi được') || low.includes('ko gui duoc') || low.includes('khong gui duoc') || low.includes('gửi không được') || low.includes('gửi ko được') || low.includes('gui ko duoc') || low.includes('gửi tin thất bại') || low.includes('dấu chấm than') || low.includes('chấm than')) {
+        problemSummary = 'Không gửi được tin nhắn đi (Báo lỗi)';
+    } else if (low.includes('không nhận được tin') || low.includes('ko nhận được tin') || low.includes('ko nhan duoc tin') || low.includes('khong nhan duoc tin') || low.includes('không nhận được sms') || low.includes('ko nhận được sms') || low.includes('không có tin nhắn đến')) {
+        problemSummary = 'Không nhận được tin nhắn đến';
+    } else if (low.includes('chậm') || low.includes('trễ') || low.includes('delay') || low.includes('muộn')) {
+        problemSummary = 'Tin nhắn bị trễ / chậm';
+    } else if (low.includes('đầu số') || low.includes('tổng đài') || low.includes('brandname') || low.includes('tin nhắn rác') || low.includes('spam')) {
+        problemSummary = 'Sự cố tin nhắn đầu số / Brandname';
+    }
+
+    return {
+        incidentTime: detectedTime,
+        fromDate,
+        toDate,
+        timeRangeDesc,
+        problemSummary: problemSummary || '',
+        appBrand,
+        deviceType,
+        claimedAmount,
+        anomaly,
+        priorActions
+    };
+}
+window.extractSmsIncidentDetails = extractSmsIncidentDetails;
+
+async function fetchInlineSmsCdr(phone, incidentTime, ticketKey, btnElem, event, customFromDate, customToDate) {
+    if (event) event.stopPropagation();
+    const container = document.getElementById(`sms-cdr-summary-${ticketKey}`);
+    const detailCardContainer = document.getElementById(`sms-cdr-detail-card-${ticketKey}`);
+
+    if (btnElem) {
+        btnElem.disabled = true;
+        btnElem.innerText = 'Đang lấy...';
+        btnElem.style.opacity = '0.7';
+    }
+
+    try {
+        let cleanPhone = String(phone || '').trim().replace(/\D/g, '');
+        if (cleanPhone.startsWith('0')) cleanPhone = '84' + cleanPhone.slice(1);
+        if (!cleanPhone.startsWith('84') && cleanPhone.length === 9) cleanPhone = '84' + cleanPhone;
+
+        let fromDateVal = customFromDate || '';
+        let toDateVal = customToDate || '';
+        let timeRangeDesc = '';
+
+        let ticketCodeVal = '';
+        const tList = (typeof cachedTickets !== 'undefined' && Array.isArray(cachedTickets)) ? cachedTickets : [];
+        
+        // Tìm tObj chuẩn xác: Ưu tiên theo ticket_key, ticket_code hoặc số điện thoại chuẩn hóa
+        const tObj = tList.find(x => {
+            const xPhone = String(x.phone || '').trim().replace(/\D/g, '');
+            const cleanX = xPhone.startsWith('0') ? ('84' + xPhone.slice(1)) : ((!xPhone.startsWith('84') && xPhone.length === 9) ? ('84' + xPhone) : xPhone);
+            const xKey = (x.phone + '_' + (x.incident_time || x.ticket_code || '')).replace(/[^a-zA-Z0-9]/g, '_');
+            return (ticketKey && xKey === ticketKey) ||
+                   (ticketKey && String(x.ticket_code || '').replace(/[^a-zA-Z0-9]/g, '_') === ticketKey) ||
+                   (ticketKey && String(x.id || '') === ticketKey) ||
+                   (cleanX === cleanPhone);
+        });
+
+        if (tObj) {
+            ticketCodeVal = tObj.ticket_code || '';
+            if (!fromDateVal || !toDateVal) {
+                const pad = (n) => String(n).padStart(2, '0');
+                const smsIncTime = String(tObj.sms_incident_time || '').trim();
+                const mDirect = smsIncTime.match(/(?:tháng|t)?\s*([0-1]?[0-9])[\/\-](20\d{2})/i);
+                if (mDirect) {
+                    const mVal = parseInt(mDirect[1], 10);
+                    const yr = parseInt(mDirect[2], 10);
+                    if (mVal >= 1 && mVal <= 12) {
+                        const lastDay = new Date(yr, mVal, 0).getDate();
+                        fromDateVal = `${yr}-${pad(mVal)}-01 00:00:00`;
+                        toDateVal = `${yr}-${pad(mVal)}-${pad(lastDay)} 23:59:59`;
+                        timeRangeDesc = `01/${pad(mVal)}/${yr} → ${pad(lastDay)}/${pad(mVal)}/${yr} (Tháng ${pad(mVal)}/${yr})`;
+                    }
+                }
+                if (!fromDateVal || !toDateVal) {
+                    const ticketContent = tObj.ticket_content || tObj.ai_summary || '';
+                    const parsed = extractSmsIncidentDetails(ticketContent, smsIncTime || incidentTime);
+                    fromDateVal = parsed.fromDate;
+                    toDateVal = parsed.toDate;
+                    timeRangeDesc = parsed.timeRangeDesc;
+                }
+            }
+        }
+
+        // Nếu vẫn chưa có dải ngày, parse trực tiếp từ incidentTime truyền vào
+        if (!fromDateVal || !toDateVal) {
+            const parsed = extractSmsIncidentDetails('', incidentTime);
+            if (parsed.fromDate && parsed.toDate) {
+                fromDateVal = parsed.fromDate;
+                toDateVal = parsed.toDate;
+                timeRangeDesc = parsed.timeRangeDesc;
+            }
+        }
+
+        // Lấy nhanh luôn là 2 chiều (direction=both) và 10.000 dòng (limit=10000)
+        let url = `/api/cdr/sms?phone=${encodeURIComponent(cleanPhone)}&direction=both&limit=10000`;
+        if (ticketCodeVal) url += `&ticket_code=${encodeURIComponent(ticketCodeVal)}`;
+        if (incidentTime) url += `&incident_time=${encodeURIComponent(incidentTime)}`;
+        if (fromDateVal && toDateVal) {
+            url += `&from_date=${encodeURIComponent(fromDateVal)}&to_date=${encodeURIComponent(toDateVal)}`;
+        } else {
+            url += `&hours=72`;
+        }
+
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.success && Array.isArray(data.records)) {
+            const recs = data.records;
+            let moCount = 0;
+            let moOk = 0;
+            let mtCount = 0;
+            let mtOk = 0;
+            const causeMap = {};
+
+            recs.forEach(r => {
+                const isMo = (r.direction && r.direction.toUpperCase().includes('MO')) || (r.calling_number === cleanPhone);
+                const isOk = (r.status_type === 'success');
+                if (isMo) {
+                    moCount++;
+                    if (isOk) moOk++;
+                } else {
+                    mtCount++;
+                    if (isOk) mtOk++;
+                }
+                if (!isOk) {
+                    const cause = r.termination_cause_info || r.termination_cause || r.status_desc || 'Lỗi không xác định';
+                    causeMap[cause] = (causeMap[cause] || 0) + 1;
+                }
+            });
+
+            const moRate = moCount > 0 ? Math.round((moOk / moCount) * 100) : 0;
+            const mtRate = mtCount > 0 ? Math.round((mtOk / mtCount) * 100) : 0;
+            const topErrors = Object.entries(causeMap)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3)
+                .map(([cause, count]) => ({ cause, count }));
+
+            const summaryObj = {
+                phone: cleanPhone,
+                totalHits: data.total_hits || recs.length,
+                moCount,
+                moOk,
+                moFail: moCount - moOk,
+                moRate,
+                mtCount,
+                mtOk,
+                mtFail: mtCount - mtOk,
+                mtRate,
+                fromDate: fromDateVal,
+                toDate: toDateVal,
+                timeRangeDesc: timeRangeDesc || (fromDateVal + ' - ' + toDateVal),
+                topErrors,
+                records: recs
+            };
+
+            window.smsCdrSummaryCache[cleanPhone] = summaryObj;
+            if (tObj) {
+                tObj.sms_cdr_summary = summaryObj;
+            }
+
+            if (container) {
+                container.innerHTML = `
+                    <div style="font-family:'JetBrains Mono', monospace; font-size:10.5px; line-height:1.35; text-align:center;">
+                        <div style="color:${moCount === 0 ? '#64748b' : (moRate >= 90 ? '#15803d' : '#b45309')}; font-weight:700;">
+                            MO: ${moCount} (${moCount > 0 ? moRate + '%' : '--'})
+                        </div>
+                        <div style="color:${mtCount === 0 ? '#64748b' : (mtRate >= 90 ? '#0369a1' : '#b45309')}; font-weight:700; margin-top:1px;">
+                            MT: ${mtCount} (${mtCount > 0 ? mtRate + '%' : '--'})
+                        </div>
+                        <div style="margin-top:2px;">
+                            <a href="javascript:void(0)" onclick="openSmscCdrModal('${cleanPhone}', event)" style="font-size:10px; color:#0284c7; font-weight:700; text-decoration:underline;">
+                                Chi tiết (${recs.length}) ↗
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (detailCardContainer) {
+                detailCardContainer.innerHTML = renderSmsCdrDetailContent(ticketKey, phone, incidentTime, '');
+            }
+        } else {
+            if (container) {
+                container.innerHTML = `
+                    <div style="font-size:10.5px; color:#dc2626; text-align:center;">
+                        <span>Không có CDR</span>
+                        <div style="margin-top:2px;">
+                            <button type="button" class="btn btn-sm" onclick="fetchInlineSmsCdr('${escapeHtml(phone)}', '${escapeHtml(incidentTime)}', '${escapeHtml(ticketKey)}', this, event)" style="padding:1px 6px; font-size:10px; cursor:pointer;">Thử lại</button>
+                        </div>
+                    </div>
+                `;
+            }
+            if (detailCardContainer) {
+                detailCardContainer.innerHTML = `
+                    <div style="text-align:center; padding:18px 12px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px;">
+                        <div style="font-size:11.5px; font-weight:700; color:#dc2626; margin-bottom:4px;">Không tìm thấy bản ghi SMSC CDR</div>
+                        <div style="font-size:10.5px; color:#64748b; margin-bottom:10px;">Dải thời gian: ${escapeHtml(timeRangeDesc || fromDateVal + ' - ' + toDateVal)}</div>
+                        <button type="button" class="btn btn-sm" onclick="fetchInlineSmsCdr('${escapeHtml(phone)}', '${escapeHtml(incidentTime)}', '${escapeHtml(ticketKey)}', this, event)" style="padding:3px 10px; font-size:11px; cursor:pointer;">Thử lại</button>
+                    </div>
+                `;
+            }
+        }
+    } catch (e) {
+        if (container) {
+            container.innerHTML = `<span style="font-size:10px; color:#dc2626;">Lỗi tra cứu CDR</span>`;
+        }
+        if (detailCardContainer) {
+            detailCardContainer.innerHTML = `<div style="color:#dc2626; font-size:11px; padding:12px; text-align:center;">Lỗi truy vấn CDR: ${escapeHtml(e.message || 'Lỗi mạng')}</div>`;
+        }
+    }
+}
+window.fetchInlineSmsCdr = fetchInlineSmsCdr;
+
+function renderSmsCdrDetailContent(ticketKey, phone, incidentTime, ticketContent) {
+    let cleanP = String(phone || '').trim().replace(/\D/g, '');
+    if (cleanP.startsWith('0')) cleanP = '84' + cleanP.slice(1);
+    if (!cleanP.startsWith('84') && cleanP.length === 9) cleanP = '84' + cleanP;
+
+    const tList = (typeof cachedTickets !== 'undefined' && Array.isArray(cachedTickets)) ? cachedTickets : [];
+    const tObj = tList.find(x => {
+        const xPhone = String(x.phone || '').trim().replace(/\D/g, '');
+        const cleanX = xPhone.startsWith('0') ? ('84' + xPhone.slice(1)) : ((!xPhone.startsWith('84') && xPhone.length === 9) ? ('84' + xPhone) : xPhone);
+        const xKey = (x.phone + '_' + (x.incident_time || x.ticket_code || '')).replace(/[^a-zA-Z0-9]/g, '_');
+        return (ticketKey && xKey === ticketKey) ||
+               (ticketKey && String(x.ticket_code || '').replace(/[^a-zA-Z0-9]/g, '_') === ticketKey) ||
+               (ticketKey && String(x.id || '') === ticketKey) ||
+               (cleanX === cleanP);
+    });
+
+    const finalContent = ticketContent || (tObj ? (tObj.ticket_content || tObj.ai_summary || '') : '');
+    const finalIncidentTime = (tObj && tObj.sms_incident_time) ? tObj.sms_incident_time : incidentTime;
+    const parsed = extractSmsIncidentDetails(finalContent, finalIncidentTime);
+
+    let cached = window.smsCdrSummaryCache[cleanP];
+    if (!cached && tObj && tObj.sms_cdr_summary) {
+        try {
+            cached = (typeof tObj.sms_cdr_summary === 'string') ? JSON.parse(tObj.sms_cdr_summary) : tObj.sms_cdr_summary;
+            window.smsCdrSummaryCache[cleanP] = cached;
+        } catch (e) {}
+    }
+
+    if (!cached) {
+        return `
+            <div style="padding:14px 10px; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:6px; text-align:center;">
+                <div style="font-size:11.5px; font-weight:700; color:#1e293b; margin-bottom:4px;">
+                    Chưa có dữ liệu thống kê SMSC CDR
+                </div>
+                <div style="font-size:11px; color:#475569; margin-bottom:12px; line-height:1.4;">
+                    Thời điểm phản ánh: <strong style="color:#0f172a;">${escapeHtml(parsed.incidentTime)}</strong><br>
+                    <span style="font-size:10.5px; color:#64748b; font-family:'JetBrains Mono', monospace;">(${escapeHtml(parsed.timeRangeDesc)})</span>
+                </div>
+                <button type="button" class="btn btn-sm" onclick="fetchInlineSmsCdr('${escapeHtml(phone)}', '${escapeHtml(incidentTime)}', '${escapeHtml(ticketKey)}', this, event)" style="padding:4px 14px; font-size:11.5px; font-weight:700; color:#0d9488; background:#f0fdfa; border:1px solid #99f6e4; border-radius:4px; cursor:pointer;">
+                    Tra cứu SMSC CDR theo thời điểm phản ánh
+                </button>
+            </div>
+        `;
+    }
+
+    if (cached) {
+        if (!cached.timeRangeDesc || String(cached.timeRangeDesc).includes('undefined')) {
+            cached.timeRangeDesc = parsed.timeRangeDesc || finalIncidentTime || 'Thời gian gần đây';
+        }
+        if (!cached.fromDate || String(cached.fromDate).includes('undefined')) {
+            cached.fromDate = parsed.fromDate || '';
+        }
+        if (!cached.toDate || String(cached.toDate).includes('undefined')) {
+            cached.toDate = parsed.toDate || '';
+        }
+    }
+
+    const moFail = cached.moFail || 0;
+    const mtFail = cached.mtFail || 0;
+
+    let displayRange = (cached.timeRangeDesc && !String(cached.timeRangeDesc).includes('undefined'))
+        ? cached.timeRangeDesc
+        : ((cached.fromDate && cached.toDate && !String(cached.fromDate).includes('undefined') && !String(cached.toDate).includes('undefined'))
+            ? `${cached.fromDate} → ${cached.toDate}`
+            : (parsed.timeRangeDesc || finalIncidentTime || 'Thời gian gần đây'));
+    if (!displayRange || String(displayRange).includes('undefined')) {
+        displayRange = parsed.timeRangeDesc || finalIncidentTime || 'Thời gian gần đây';
+    }
+
+    return `
+        <div style="display:flex; flex-direction:column; gap:8px;">
+            <!-- Header dải thời gian tra cứu -->
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:4px 8px;">
+                <div style="font-size:11px; color:#475569; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                    <span style="color:#64748b;">Thời gian:</span>
+                    <strong style="color:#0f172a; font-family:'JetBrains Mono', monospace; font-size:10.5px;">${escapeHtml(displayRange)}</strong>
+                </div>
+                <button type="button" onclick="fetchInlineSmsCdr('${escapeHtml(phone)}', '${escapeHtml(incidentTime)}', '${escapeHtml(ticketKey)}', this, event)" style="background:#ffffff; border:1px solid #cbd5e1; border-radius:3px; padding:1px 6px; font-size:10px; font-weight:600; color:#0284c7; cursor:pointer;" title="Truy vấn lại dữ liệu SMSC CDR">
+                    Tra cứu lại
+                </button>
+            </div>
+
+            <!-- Khối thống kê 2 cột MO & MT -->
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
+                <!-- Khối Tin gửi đi MO -->
+                <div style="background:#f8fafc; border:1px solid ${moFail > 0 ? '#fca5a5' : '#e2e8f0'}; border-radius:5px; padding:6px 8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:3px; margin-bottom:5px;">
+                        <span style="font-weight:700; font-size:10.5px; color:#1e293b;">TIN GỬI ĐI (MO)</span>
+                        <span style="font-weight:800; font-size:11px; font-family:'JetBrains Mono', monospace; color:${cached.moCount === 0 ? '#64748b' : (cached.moRate >= 90 ? '#15803d' : '#b91c1c')};">
+                            ${cached.moCount > 0 ? cached.moRate + '%' : '--'}
+                        </span>
+                    </div>
+                    <div style="font-size:10.5px; display:flex; flex-direction:column; gap:2px;">
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:#64748b;">Tổng số tin:</span>
+                            <strong style="font-family:'JetBrains Mono', monospace; color:#0f172a;">${cached.moCount}</strong>
+                        </div>
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:#15803d;">Thành công:</span>
+                            <strong style="font-family:'JetBrains Mono', monospace; color:#15803d;">${cached.moOk}</strong>
+                        </div>
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:${moFail > 0 ? '#b91c1c' : '#64748b'};">Thất bại:</span>
+                            <strong style="font-family:'JetBrains Mono', monospace; color:${moFail > 0 ? '#b91c1c' : '#64748b'};">${moFail}</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Khối Tin nhận vào MT -->
+                <div style="background:#f8fafc; border:1px solid ${mtFail > 0 ? '#fca5a5' : '#e2e8f0'}; border-radius:5px; padding:6px 8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:3px; margin-bottom:5px;">
+                        <span style="font-weight:700; font-size:10.5px; color:#1e293b;">TIN NHẬN VÀO (MT)</span>
+                        <span style="font-weight:800; font-size:11px; font-family:'JetBrains Mono', monospace; color:${cached.mtCount === 0 ? '#64748b' : (cached.mtRate >= 90 ? '#0284c7' : '#b91c1c')};">
+                            ${cached.mtCount > 0 ? cached.mtRate + '%' : '--'}
+                        </span>
+                    </div>
+                    <div style="font-size:10.5px; display:flex; flex-direction:column; gap:2px;">
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:#64748b;">Tổng số tin:</span>
+                            <strong style="font-family:'JetBrains Mono', monospace; color:#0f172a;">${cached.mtCount}</strong>
+                        </div>
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:#0284c7;">Thành công:</span>
+                            <strong style="font-family:'JetBrains Mono', monospace; color:#0284c7;">${cached.mtOk}</strong>
+                        </div>
+                        <div style="display:flex; justify-content:space-between;">
+                            <span style="color:${mtFail > 0 ? '#b91c1c' : '#64748b'};">Thất bại:</span>
+                            <strong style="font-family:'JetBrains Mono', monospace; color:${mtFail > 0 ? '#b91c1c' : '#64748b'};">${mtFail}</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tóm tắt nguyên nhân lỗi nếu có -->
+            ${(cached.topErrors && cached.topErrors.length > 0) ? `
+                <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:5px; padding:5px 8px; font-size:10px;">
+                    <strong style="color:#9a3412; display:block; margin-bottom:3px;">Nguyên nhân lỗi ghi nhận từ SMSC:</strong>
+                    ${cached.topErrors.map(e => `
+                        <div style="display:flex; justify-content:space-between; margin-bottom:1px; color:#7c2d12;">
+                            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:85%;">• ${escapeHtml(e.cause)}</span>
+                            <strong style="font-family:'JetBrains Mono', monospace;">${e.count} tin</strong>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : (moFail === 0 && mtFail === 0) ? `
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:5px; padding:5px 8px; font-size:10.5px; color:#15803d; font-weight:600;">
+                    Không ghi nhận bản ghi lỗi gửi hoặc nhận tin trong khoảng thời gian này.
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+window.renderSmsCdrDetailContent = renderSmsCdrDetailContent;
 
 // ==============================================================================
 // BỘ NHỚ ĐỆM CLIENT (SWR CACHE - INSTANT MODULE SWITCHING)
@@ -2293,7 +3196,7 @@ function renderPrecheckBtnHtml(phone, incidentTime, precheckedAtStr) {
     const timeDisplay = formatPrecheckTimeDisplay(precheckedAtStr);
     return `
         <div style="display:inline-flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; vertical-align:middle;">
-            <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff; line-height:1.2;" onclick="precheckSingleTicket('${escapeHtml(phone)}', '${escapeHtml(incidentTime || '')}', this)" title="Tiền kiểm tra lại Core tức thì">Tiền kiểm lại</button>
+            <button class="btn-sm btn-outline" style="padding:4px 8px; font-size:11px; color:#0284c7; border-color:#93c5fd; background:#f0f9ff; line-height:1.2;" onclick="precheckSingleTicket('${escapeHtml(phone)}', '${escapeHtml(incidentTime || '')}', this)" title="Tiền kiểm tra Core tức thì cho số thuê bao này">Tiền kiểm</button>
             <div style="font-size:9.5px; color:#64748b; font-family:'JetBrains Mono', monospace; font-weight:600; text-align:center; line-height:1; white-space:nowrap;">${timeDisplay}</div>
         </div>
     `;
@@ -2324,17 +3227,19 @@ function formatClosedTimeDisplay(closedAtStr, closedBy, ticketStatus) {
     }
 
     let actorHtml = '';
+    const stLower = String(ticketStatus || '').toLowerCase();
+    const isStep51 = stLower.includes('5.1');
     if (closedBy && closedBy !== 'null' && String(closedBy).trim()) {
         actorHtml = `<span style="font-size:9.5px; font-weight:600; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:3px; max-width:130px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="KTV thực hiện: ${escapeHtml(closedBy)}">${escapeHtml(closedBy)}</span>`;
     } else {
-        actorHtml = `<span style="font-size:9.5px; font-weight:600; color:#15803d; background:#dcfce7; border:1px solid #86efac; padding:1px 5px; border-radius:3px;">Đã đóng</span>`;
+        const fallbackTxt = isStep51 ? 'Đã đóng 5.1' : 'Đã đóng 2.6';
+        actorHtml = `<span style="font-size:9.5px; font-weight:600; color:#15803d; background:#dcfce7; border:1px solid #86efac; padding:1px 5px; border-radius:3px;">${fallbackTxt}</span>`;
     }
 
     let stepBadge = '';
-    const stLower = String(ticketStatus || '').toLowerCase();
-    if (stLower.includes('5.1')) {
+    if (isStep51) {
         stepBadge = `<span style="font-size:9px; font-weight:700; color:#b45309; background:#fef3c7; border:1px solid #fde68a; padding:1px 4px; border-radius:2px;" title="Đóng hướng 5.1 Xây dựng PA xử lý">Đóng 5.1</span>`;
-    } else if (stLower.includes('2.6')) {
+    } else {
         stepBadge = `<span style="font-size:9px; font-weight:700; color:#15803d; background:#dcfce7; border:1px solid #86efac; padding:1px 4px; border-radius:2px;" title="Đóng dứt điểm bước 2.6">Đóng 2.6</span>`;
     }
 
@@ -2356,6 +3261,7 @@ function renderTicketsTable(force = false) {
     const tbody = document.getElementById('ticketsBody');
     const pagContainer = document.getElementById('ticketsPaginationContainer');
     if (!tbody) return;
+    tbody.style.opacity = '1';
 
     // Cột Nhận Định / Nhà Mạng và số lượng cột theo từng phân hệ
     const isDataService = (currentService === 'data');
@@ -2365,7 +3271,7 @@ function renderTicketsTable(force = false) {
     const isRoamingService = (currentService === 'roaming');
     const isSimService = (currentService === 'sim');
     const hideCemColumn = isCallService || isSmsService || isSpamCallService || isRoamingService || isSimService;
-    const totalCols = isSpamCallService ? 10 : (hideCemColumn ? 11 : (isDataService ? 13 : 12));
+    const totalCols = isSpamCallService ? 10 : ((isSmsService || hideCemColumn) ? 11 : (isDataService ? 13 : 12));
 
     adjustTableColumnsLayout(currentService, currentTableTab);
 
@@ -2382,10 +3288,29 @@ function renderTicketsTable(force = false) {
     const thAiSummary = document.getElementById('thAiSummary');
     if (thAiSummary) {
         if (currentTableTab === 'da_dong') {
-            thAiSummary.innerText = 'Thời Điểm Đóng';
-            thAiSummary.style.textAlign = 'center';
-            thAiSummary.title = 'Thời gian KTV bấm đóng 2.6 / 5.1 hoặc hệ thống tự động đóng';
+            thAiSummary.className = 'sortable-th';
+            thAiSummary.onclick = toggleClosedTimeSort;
+            thAiSummary.style.cursor = 'pointer';
+            thAiSummary.title = 'Bấm để sắp xếp theo thời điểm đóng (mới nhất/cũ nhất)';
+            if (!document.getElementById('sortClosedTimeIcon')) {
+                thAiSummary.innerHTML = `
+                    <div style="display:inline-flex; align-items:center; gap:4px;">
+                        <span>Thời Điểm Đóng</span>
+                        <span id="sortClosedTimeIcon" class="sort-icon ${sortClosedTimeOrder !== 'none' ? 'active' : ''}">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M7 15l5 5 5-5"/>
+                                <path d="M7 9l5-5 5 5"/>
+                            </svg>
+                        </span>
+                    </div>
+                `;
+            }
+            thAiSummary.style.textAlign = 'left';
+            updateSortClosedTimeUI();
         } else {
+            thAiSummary.className = '';
+            thAiSummary.onclick = null;
+            thAiSummary.style.cursor = '';
             if (isSpamCallService) {
                 thAiSummary.innerText = 'Tóm Tắt Sự Cố & Phản Ánh';
             } else if (currentService === 'sms') {
@@ -2395,7 +3320,7 @@ function renderTicketsTable(force = false) {
             } else {
                 thAiSummary.innerText = 'Tóm Tắt Nội Dung PAKH';
             }
-            thAiSummary.style.textAlign = '';
+            thAiSummary.style.textAlign = 'left';
             thAiSummary.title = '';
         }
     }
@@ -2415,24 +3340,59 @@ function renderTicketsTable(force = false) {
         return;
     }
 
-    // Sắp xếp danh sách phiếu nếu sortIncidentTimeOrder khác 'none'
+    // Sắp xếp danh sách phiếu
     let displayTickets = cachedTickets;
-    if (sortIncidentTimeOrder === 'desc') {
-        displayTickets = [...cachedTickets].sort((a, b) => {
-            const timeA = parseIncidentDate(a.incident_time);
-            const timeB = parseIncidentDate(b.incident_time);
-            return timeB - timeA;
-        });
-    } else if (sortIncidentTimeOrder === 'asc') {
-        displayTickets = [...cachedTickets].sort((a, b) => {
-            const timeA = parseIncidentDate(a.incident_time);
-            const timeB = parseIncidentDate(b.incident_time);
-            return timeA - timeB;
-        });
+    if (currentTableTab === 'da_dong') {
+        // Tab Đã Đóng:
+        // Nếu user bấm sort closed_at (hoặc cả 2 sort đều 'none'), mặc định mới đóng nhất lên đầu (desc)
+        const effectiveClosedSort = (sortIncidentTimeOrder === 'none')
+            ? (sortClosedTimeOrder === 'asc' ? 'asc' : 'desc')
+            : 'none';
+
+        if (effectiveClosedSort === 'desc') {
+            displayTickets = [...cachedTickets].sort((a, b) => {
+                const timeA = parseClosedDate(a.closed_at || a.updated_at);
+                const timeB = parseClosedDate(b.closed_at || b.updated_at);
+                return timeB - timeA;
+            });
+        } else if (effectiveClosedSort === 'asc') {
+            displayTickets = [...cachedTickets].sort((a, b) => {
+                const timeA = parseClosedDate(a.closed_at || a.updated_at);
+                const timeB = parseClosedDate(b.closed_at || b.updated_at);
+                return timeA - timeB;
+            });
+        } else if (sortIncidentTimeOrder === 'desc') {
+            displayTickets = [...cachedTickets].sort((a, b) => {
+                const timeA = parseIncidentDate(a.incident_time, a.ticket_code);
+                const timeB = parseIncidentDate(b.incident_time, b.ticket_code);
+                return timeB - timeA;
+            });
+        } else if (sortIncidentTimeOrder === 'asc') {
+            displayTickets = [...cachedTickets].sort((a, b) => {
+                const timeA = parseIncidentDate(a.incident_time, a.ticket_code);
+                const timeB = parseIncidentDate(b.incident_time, b.ticket_code);
+                return timeA - timeB;
+            });
+        }
+    } else {
+        if (sortIncidentTimeOrder === 'desc') {
+            displayTickets = [...cachedTickets].sort((a, b) => {
+                const timeA = parseIncidentDate(a.incident_time, a.ticket_code);
+                const timeB = parseIncidentDate(b.incident_time, b.ticket_code);
+                return timeB - timeA;
+            });
+        } else if (sortIncidentTimeOrder === 'asc') {
+            displayTickets = [...cachedTickets].sort((a, b) => {
+                const timeA = parseIncidentDate(a.incident_time, a.ticket_code);
+                const timeB = parseIncidentDate(b.incident_time, b.ticket_code);
+                return timeA - timeB;
+            });
+        }
     }
 
     // Cập nhật biểu tượng mũi tên sắp xếp trên header
     updateSortIncidentTimeUI();
+    updateSortClosedTimeUI();
 
     // Tính toán số trang & vị trí trang
     let pageSizeNum = (currentTicketPageSize === 'all') ? totalItems : (parseInt(currentTicketPageSize, 10) || 10);
@@ -2453,7 +3413,7 @@ function renderTicketsTable(force = false) {
     if (pagContainer) pagContainer.style.display = 'flex';
     renderPaginationNav(currentTicketPage, totalPages);
 
-    const newSignature = JSON.stringify(pageTickets) + '_' + currentTicketPage + '_' + currentAutoClose + '_' + currentTableTab + '_' + currentSystem + '_' + currentService + '_' + currentTicketPageSize + '_' + sortIncidentTimeOrder;
+    const newSignature = JSON.stringify(pageTickets) + '_' + currentTicketPage + '_' + currentAutoClose + '_' + currentTableTab + '_' + currentSystem + '_' + currentService + '_' + currentTicketPageSize + '_' + sortIncidentTimeOrder + '_' + sortClosedTimeOrder;
     if (!force && newSignature === lastTicketsSignature) {
         return;
     }
@@ -2519,8 +3479,8 @@ function renderTicketsTable(force = false) {
         const isStep26 = rawStepCheck.includes('2.6') || (t.ticket_status === 'Chờ đóng lần 2');
         const isStep24 = !isStep23 && !isStep26;
 
-        if (t.ticket_status === 'Đã đóng' || t.ticket_status === 'Da dong' || (t.ticket_status && t.ticket_status.includes('Đã đóng'))) {
-            let closeLabel = 'ĐÃ ĐÓNG';
+        if (t.ticket_status === 'Đã đóng' || t.ticket_status === 'Da dong' || (t.ticket_status && t.ticket_status.includes('Đã đóng')) || currentTableTab === 'da_dong') {
+            let closeLabel = 'ĐÃ ĐÓNG 2.6';
             let closeBadgeStyle = 'font-weight:700; padding:4px 8px; font-size:11px;';
             let compactBadgeStyle = 'font-weight:700; padding:2px 6px; font-size:10px;';
             let closeBadgeClass = 'badge-status badge-green';
@@ -2531,7 +3491,7 @@ function renderTicketsTable(force = false) {
                 closeBadgeClass = 'badge-status';
                 closeBadgeStyle += ' background:#e0e7ff; color:#3730a3; border:1px solid #c7d2fe;';
                 compactBadgeStyle += ' background:#e0e7ff; color:#3730a3; border:1px solid #c7d2fe;';
-            } else if (stStr.includes('2.6')) {
+            } else {
                 closeLabel = 'ĐÃ ĐÓNG 2.6';
                 closeBadgeClass = 'badge-status badge-green';
             }
@@ -2672,14 +3632,16 @@ function renderTicketsTable(force = false) {
             }
         }
 
-        // Tóm tắt nội dung chỉ dùng cho Mobile Internet. Các trường hợp khác chỉ đưa nội dung phản ánh vào.
+        // Tóm tắt nội dung: Hỗ trợ cả Mobile Internet và Tin nhắn SMS
         let aiSummaryHtml = '--';
         let compactSummaryHtml = '--';
         let compactSummaryTooltip = '';
-        const hasStructuredSummary = isDataTicket && t.ai_summary && t.ai_summary !== 'null' && t.ai_summary.trim() !== '' && (
+        const isSmsTicketType = (typeof isSmsTicket !== 'undefined' && isSmsTicket) || (currentService === 'sms') || (t.service_type === 'sms');
+        const hasStructuredSummary = (isDataTicket || isSmsTicketType) && t.ai_summary && t.ai_summary !== 'null' && t.ai_summary.trim() !== '' && (
             t.ai_summary !== t.ticket_content || 
             t.ai_summary.includes('1.') || 
             t.ai_summary.includes('Gói cước sử dụng:') ||
+            t.ai_summary.includes('Vấn đề phản ánh:') ||
             t.ai_summary.toLowerCase().includes('tình trạng')
         );
 
@@ -2717,15 +3679,15 @@ function renderTicketsTable(force = false) {
             compactSummaryTooltip = (wardLocation ? `[${wardLocation}] ` : '') + lines.join(' | ');
             const summaryText = lines.join(' • ');
             compactSummaryHtml = `
-                <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding:1px 0;">
+                <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding:1px 0; text-align:left;">
                     ${compactWardBadgeHtml}
-                    <div class="compact-summary-text" title="${escapeHtml(compactSummaryTooltip)}">
+                    <div class="compact-summary-text" style="text-align:left;" title="${escapeHtml(compactSummaryTooltip)}">
                         ${escapeHtml(summaryText)}
                     </div>
                 </div>
             `;
             aiSummaryHtml = `
-                        <div style="font-size:11.5px; line-height:1.45;">
+                        <div style="font-size:11.5px; line-height:1.45; text-align:left; word-break:break-word; overflow-wrap:anywhere; white-space:normal;">
                             ${wardBadgeHtml}
                             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
                                 <div style="display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:2px 8px; border-radius:4px;">
@@ -2740,14 +3702,14 @@ function renderTicketsTable(force = false) {
                 if (colonIdx !== -1) {
                     const label = line.substring(0, colonIdx);
                     const val = line.substring(colonIdx + 1).trim();
-                    return `<div style="margin-bottom:3px;"><span style="color:#475569; font-weight:600;">${escapeHtml(label)}:</span> <span style="color:#0f172a; font-weight:500;">${escapeHtml(val)}</span></div>`;
+                    return `<div style="margin-bottom:3px; word-break:break-word; overflow-wrap:anywhere; white-space:normal;"><span style="color:#475569; font-weight:600;">${escapeHtml(label)}:</span> <span style="color:#0f172a; font-weight:500;">${escapeHtml(val)}</span></div>`;
                 }
-                return `<div>${escapeHtml(line)}</div>`;
+                return `<div style="word-break:break-word; overflow-wrap:anywhere; white-space:normal;">${escapeHtml(line)}</div>`;
             }).join('')}
                             ${t.ticket_content ? `
                                 <details style="margin-top:6px; font-size:10.5px; border-top:1px dashed #cbd5e1; padding-top:4px;">
-                                    <summary style="cursor:pointer; color:#0369a1; font-weight:600;">Xem phản ánh gốc</summary>
-                                    <div style="margin-top:4px; max-height:85px; overflow-y:auto; color:#64748b; font-style:italic; line-height:1.35; background:#f8fafc; padding:4px 6px; border-radius:4px; border:1px solid #e2e8f0;">${escapeHtml(t.ticket_content)}</div>
+                                    <summary style="cursor:pointer; color:#0369a1; font-weight:700; outline:none;">Xem phản ánh gốc</summary>
+                                    <div class="raw-ticket-content-box">${escapeHtml(t.ticket_content)}</div>
                                 </details>
                             ` : ''}
                             ${ccosProcessingHtml}
@@ -2759,17 +3721,17 @@ function renderTicketsTable(force = false) {
                 compactSummaryTooltip = (wardLocation ? `[${wardLocation}] ` : '') + content;
                 const summaryText = content.replace(/\n/g, ' ');
                 compactSummaryHtml = `
-                    <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding:1px 0;">
+                    <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding:1px 0; text-align:left;">
                         ${compactWardBadgeHtml}
-                        <div class="compact-summary-text" title="${escapeHtml(compactSummaryTooltip)}">
+                        <div class="compact-summary-text" style="text-align:left;" title="${escapeHtml(compactSummaryTooltip)}">
                             ${escapeHtml(summaryText)}
                         </div>
                     </div>
                 `;
                 aiSummaryHtml = `
-                    <div style="font-size:11.5px; color:#1e293b; line-height:1.45; word-break:break-word;">
+                    <div style="font-size:11.5px; color:#1e293b; line-height:1.45; word-break:break-word; text-align:left;">
                         ${wardBadgeHtml}
-                        ${escapeHtml(content)}
+                        <div class="raw-ticket-content-box" style="margin:4px 0 6px 0;">${escapeHtml(content)}</div>
                         <div style="margin-top:4px;">
                             <button type="button" onclick="openAiTeachModal(event, '${escapeHtml(t.phone || '')}', '${escapeHtml(t.incident_time || '')}', ${t.ticket_id || 0})" style="display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:600; color:#0284c7; background:#ffffff; border:1px solid #bae6fd; padding:1px 6px; border-radius:4px; cursor:pointer;" title="Tạo mẫu chuẩn 6 mục cho AI học">
                                 Dạy AI
@@ -3226,12 +4188,12 @@ function renderTicketsTable(force = false) {
             } else {
                 let refinedBtoolsText = btoolsLines.length > 0 ? refineBtoolsWithSapc(btoolsLines.join(' '), sapcItems, t) : '';
                 let btoolsHtml = `
-                    <div style="font-size:10.5px; line-height:1.4; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; margin-top:4px;">
+                    <div style="font-size:10.5px; line-height:1.4; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; margin-top:4px; min-width:0; width:100%; box-sizing:border-box; word-break:break-word; overflow-wrap:anywhere;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
                             <strong style="color:#b45309; font-size:10px; text-transform:uppercase; letter-spacing:0.03em;">Data Usage (BTools):</strong>
                             <a href="${btoolsUrl}" target="_blank" style="font-size:10.5px; color:#b45309; font-weight:700; text-decoration:none;" title="Tra cứu BTools cho thuê bao ${t.phone}">Xem BTools ↗</a>
                         </div>
-                        <span style="color:#334155;">${refinedBtoolsText ? escapeHtml(refinedBtoolsText) : '<span style="color:#94a3b8; font-style:italic;">Chưa có dữ liệu btools hoặc không phát sinh</span>'}</span>
+                        <span style="color:#334155; display:block; word-break:break-word; overflow-wrap:anywhere; white-space:normal;">${refinedBtoolsText ? escapeHtml(refinedBtoolsText) : '<span style="color:#94a3b8; font-style:italic;">Chưa có dữ liệu btools hoặc không phát sinh</span>'}</span>
                     </div>
                 `;
 
@@ -3324,12 +4286,12 @@ function renderTicketsTable(force = false) {
                     return `<div style="margin-top:2px; color:#64748b; font-size:10px;">${escapeHtml(line.replace(/^[⚠️ℹ️\s*]+/, ''))}</div>`;
                 }
                 if (line.startsWith('•')) {
-                    return `<div style="margin-top:2px; font-family:'JetBrains Mono', monospace; font-weight:600; color:#0f172a;">${escapeHtml(line)}</div>`;
+                    return `<div style="margin-top:2px; font-family:'JetBrains Mono', monospace; font-weight:600; color:#0f172a; word-break:break-word; overflow-wrap:anywhere; white-space:normal;">${escapeHtml(line)}</div>`;
                 }
                 if (line.startsWith('(') && line.endsWith('):')) {
-                    return `<div style="margin-top:2px; font-weight:700; color:#0284c7;">${escapeHtml(line)}</div>`;
+                    return `<div style="margin-top:2px; font-weight:700; color:#0284c7; word-break:break-word; overflow-wrap:anywhere; white-space:normal;">${escapeHtml(line)}</div>`;
                 }
-                return `<div style="margin-top:2px;">${escapeHtml(line)}</div>`;
+                return `<div style="margin-top:2px; word-break:break-word; overflow-wrap:anywhere; white-space:normal;">${escapeHtml(line)}</div>`;
             });
             if (!isIncident && showVpnAlert && vpnAppName && !rawText.includes('VPN')) {
                 rendered.push(`<div style="margin-top:3px; padding:2px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:3px; font-weight:700; font-size:10px;">CẢNH BÁO VPN: Phát hiện thiết bị có app ${escapeHtml(vpnAppName)}</div>`);
@@ -3559,20 +4521,63 @@ function renderTicketsTable(force = false) {
                                 <span style="font-family:'JetBrains Mono', monospace; font-weight:700; font-size:11.5px; color:#0f172a; letter-spacing:0.2px;">
                                     ${escapeHtml(t.phone)}
                                 </span>
-                                ${isSmsTicket ? `
-                                <button type="button" onclick="openSmscCdrModal('${t.phone}', event)" style="background:transparent; border:none; color:#0d9488; cursor:pointer; padding:2px; display:inline-flex; align-items:center; border-radius:3px; transition:all 0.15s ease;" onmouseover="this.style.background='#ccfbf1'" onmouseout="this.style.background='transparent'" title="Tra cứu SMSC CDR cho số ${t.phone}">
-                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                                </button>
-                                ` : ''}
                             </div>
                         </td>
                         <td style="vertical-align:middle; text-align:center; padding:2px 3px;">
                             ${isSpamCallModule ? commitmentColumnHtml : compactPakhTypeHtml}
                         </td>
                         <td style="text-align:center; vertical-align:middle; padding:2px 3px; white-space:nowrap;">
-                            <span class="table-time-val" title="${escapeHtml(t.incident_time || '--')}">${escapeHtml(t.incident_time || '--')}</span>
+                            <span class="table-time-val" title="${escapeHtml(formatIncidentTimeDisplay(t.incident_time, t.ticket_code))}">${escapeHtml(formatIncidentTimeDisplay(t.incident_time, t.ticket_code))}</span>
                         </td>
                         ${!isSpamCallModule ? `
+                        ${(currentService === 'sms') ? `
+                        <!-- Cột Thời Điểm Sự Cố (Chỉ phân hệ SMS) -->
+                        <td style="text-align:center; vertical-align:middle; padding:2px 4px; white-space:nowrap;">
+                            ${(() => {
+                                const incTimeVal = t.sms_incident_time || (extractSmsIncidentDetails(t.ticket_content || t.ai_summary || '', t.incident_time || '').incidentTime) || '--';
+                                return `<span style="display:inline-block; padding:2px 6px; border-radius:4px; font-weight:700; font-size:10.5px; background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-family:'JetBrains Mono', monospace;" title="Thời điểm sự cố: ${escapeHtml(incTimeVal)}">${escapeHtml(incTimeVal)}</span>`;
+                            })()}
+                        </td>
+                        <!-- Cột Lịch Sử Nhắn Tin (Chỉ phân hệ SMS) -->
+                        <td style="vertical-align:middle; text-align:center; padding:2px 4px;">
+                            <div id="sms-cdr-summary-${ticketKey}">
+                                ${(() => {
+                                    let cleanP = String(t.phone || '').trim().replace(/\D/g, '');
+                                    if (cleanP.startsWith('0')) cleanP = '84' + cleanP.slice(1);
+                                    if (!cleanP.startsWith('84') && cleanP.length === 9) cleanP = '84' + cleanP;
+                                    let cachedCdr = window.smsCdrSummaryCache[cleanP];
+                                    if (!cachedCdr && t.sms_cdr_summary) {
+                                        try {
+                                            cachedCdr = (typeof t.sms_cdr_summary === 'string') ? JSON.parse(t.sms_cdr_summary) : t.sms_cdr_summary;
+                                            window.smsCdrSummaryCache[cleanP] = cachedCdr;
+                                        } catch (e) {}
+                                    }
+                                    if (cachedCdr) {
+                                        return `
+                                            <div style="font-family:'JetBrains Mono', monospace; font-size:10.5px; line-height:1.35; text-align:center;">
+                                                <div style="color:${cachedCdr.moCount === 0 ? '#64748b' : (cachedCdr.moRate >= 90 ? '#15803d' : '#b45309')}; font-weight:700;">
+                                                    MO: ${cachedCdr.moCount} (${cachedCdr.moCount > 0 ? cachedCdr.moRate + '%' : '--'})
+                                                </div>
+                                                <div style="color:${cachedCdr.mtCount === 0 ? '#64748b' : (cachedCdr.mtRate >= 90 ? '#0369a1' : '#b45309')}; font-weight:700; margin-top:1px;">
+                                                    MT: ${cachedCdr.mtCount} (${cachedCdr.mtCount > 0 ? cachedCdr.mtRate + '%' : '--'})
+                                                </div>
+                                                <div style="margin-top:2px;">
+                                                    <a href="javascript:void(0)" onclick="openSmscCdrModal('${cleanP}', event)" style="font-size:10px; color:#0284c7; font-weight:700; text-decoration:underline;">
+                                                        Chi tiết (${cachedCdr.totalHits || (cachedCdr.records ? cachedCdr.records.length : 0)}) ↗
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }
+                                    return `
+                                        <button type="button" class="btn btn-sm" onclick="fetchInlineSmsCdr('${escapeHtml(t.phone)}', '${escapeHtml(t.incident_time || '')}', '${escapeHtml(ticketKey)}', this, event)" style="padding:2px 8px; font-size:11px; font-weight:700; color:#0d9488; background:#f0fdfa; border:1px solid #99f6e4; border-radius:4px; cursor:pointer;" title="Tra cứu lịch sử tin nhắn CDR theo thời điểm phản ánh">
+                                            Lấy CDR
+                                        </button>
+                                    `;
+                                })()}
+                            </div>
+                        </td>
+                        ` : `
                         <td style="vertical-align:middle; padding:2px 4px;">
                             <div class="compact-ellipsis" style="font-size:10.5px; color:#334155;" title="${escapeHtml(compactProfileTooltip)}">
                                 ${compactProfileHtml}
@@ -3603,17 +4608,42 @@ function renderTicketsTable(force = false) {
                             </div>
                         </td>
                         ` : ''}
+                        `}
                         ` : ''}
-                        <td style="vertical-align:middle; padding:2px 4px;">
-                            ${isSpamCallModule 
-                                ? spamSummaryHtml 
-                                : ((currentTableTab === 'da_dong') 
-                                    ? `<div>${formatClosedTimeDisplay(t.closed_at || t.updated_at, t.closed_by, t.ticket_status)}${(() => {
-                                        const shortDesc = (t.ticket_content || t.ai_summary || '').replace(/\n/g, ' ').trim();
-                                        return shortDesc ? `<div class="compact-ellipsis" style="font-size:10px; color:#64748b; max-width:210px; margin:3px auto 0; text-align:center; line-height:1.25;" title="${escapeHtml(shortDesc)}">${escapeHtml(shortDesc)}</div>` : '';
-                                    })()}</div>`
-                                    : compactSummaryHtml
-                                )
+                        <td style="vertical-align:middle; padding:2px 6px; text-align:left;">
+                            ${(currentTableTab === 'da_dong') 
+                                ? `<div>${formatClosedTimeDisplay(t.closed_at || t.updated_at, t.closed_by, t.ticket_status)}${(() => {
+                                    const shortDesc = (t.ticket_content || t.ai_summary || '').replace(/\n/g, ' ').trim();
+                                    return shortDesc ? `<div class="compact-ellipsis" style="font-size:10px; color:#64748b; max-width:210px; margin:3px 0 0 0; text-align:left; line-height:1.25;" title="${escapeHtml(shortDesc)}">${escapeHtml(shortDesc)}</div>` : '';
+                                })()}</div>`
+                                : (isSmsService && (window.aiSmsAnalysisEnabled || t.sms_problem || t.ticket_content))
+                                    ? (() => {
+                                        const parsedSms = extractSmsIncidentDetails(t.ticket_content || t.ai_summary || '', t.incident_time || '');
+                                        const probVal = t.sms_problem || parsedSms.problemSummary;
+                                        if (probVal) {
+                                            const devText = parsedSms.deviceType ? `<span style="display:inline-block; font-size:9.5px; color:#4338ca; background:#e0e7ff; border:1px solid #c7d2fe; padding:0 4px; border-radius:3px; margin-right:3px;">${escapeHtml(parsedSms.deviceType)}</span>` : '';
+                                            const actText = (parsedSms.priorActions && parsedSms.priorActions.length > 0) ? `<span style="display:inline-block; font-size:9.5px; color:#475569; background:#f1f5f9; border:1px solid #cbd5e1; padding:0 4px; border-radius:3px; margin-right:3px;">${escapeHtml(parsedSms.priorActions.join(', '))}</span>` : '';
+                                            const anomText = parsedSms.anomaly ? `<div style="margin-top:2px; font-size:10px; font-weight:700; color:#b91c1c; background:#fee2e2; border:1px solid #fca5a5; padding:1px 5px; border-radius:3px;">⚠️ ${escapeHtml(parsedSms.anomaly)}</div>` : '';
+                                            return `
+                                                <div style="font-size:11.5px; line-height:1.4; text-align:left; padding:1px 0;">
+                                                    <div style="margin-bottom:3px; font-weight:600; color:#0f172a; font-size:11px;">
+                                                        <span style="color:#b45309; font-weight:700; font-size:10px; background:#fffbeb; border:1px solid #fde68a; padding:1px 5px; border-radius:3px; margin-right:4px;">Lỗi cụ thể:</span>
+                                                        ${escapeHtml(probVal)}
+                                                    </div>
+                                                    ${(devText || actText) ? `<div style="margin-bottom:2px; line-height:1.3;">${devText}${actText}</div>` : ''}
+                                                    ${anomText}
+                                                    ${t.ticket_content ? `
+                                                    <details style="margin-top:2px; font-size:10px; border-top:1px dashed #e2e8f0; padding-top:2px;">
+                                                        <summary style="cursor:pointer; color:#64748b; font-weight:600; outline:none;">Xem phản ánh gốc</summary>
+                                                        <div style="margin-top:2px; color:#475569; font-size:10px; line-height:1.35; white-space:pre-wrap; max-height:80px; overflow-y:auto; background:#f8fafc; padding:3px 5px; border-radius:3px;">${escapeHtml(t.ticket_content)}</div>
+                                                    </details>
+                                                    ` : ''}
+                                                </div>
+                                            `;
+                                        }
+                                        return compactSummaryHtml;
+                                    })()
+                                    : (isSpamCallModule ? spamSummaryHtml : compactSummaryHtml)
                             }
                         </td>
                         ${(() => {
@@ -3656,7 +4686,7 @@ function renderTicketsTable(force = false) {
                                         <span>${isSpamCallModule ? 'TÓM TẮT NỘI DUNG & CAM KẾT' : 'TÓM TẮT NỘI DUNG PHẢN ÁNH'}</span>
                                         <span style="font-size:10px; color:#64748b; font-family:'JetBrains Mono', monospace;">${escapeHtml(t.package_title || '')}</span>
                                     </div>
-                                    <div style="flex:1; overflow-y:auto; max-height:290px;">
+                                    <div style="flex:1; overflow-y:auto; overflow-x:hidden; max-height:290px; word-break:break-word; overflow-wrap:anywhere; white-space:normal; box-sizing:border-box;">
                                         ${isSpamCallModule ? `
                                             <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:8px 10px; margin-bottom:8px;">
                                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
@@ -3680,7 +4710,7 @@ function renderTicketsTable(force = false) {
                                         <span>THÔNG TIN THUÊ BAO & NHÀ MẠNG BỊ CHẶN</span>
                                         <span style="font-size:10.5px; color:#005baa; font-family:'JetBrains Mono', monospace; font-weight:700;">${escapeHtml(t.phone)}</span>
                                     </div>
-                                    <div style="flex:1; overflow-y:auto; max-height:290px; font-size:11.5px; line-height:1.5;">
+                                    <div style="flex:1; overflow-y:auto; overflow-x:hidden; max-height:290px; font-size:11.5px; line-height:1.5; word-break:break-word; overflow-wrap:anywhere; white-space:normal; box-sizing:border-box;">
                                         <div style="margin-bottom:8px; padding:8px 10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;">
                                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
                                                 <span style="color:#64748b;">Nhà mạng ảnh hưởng:</span>
@@ -3708,19 +4738,31 @@ function renderTicketsTable(force = false) {
                                         </div>
                                     </div>
                                 </div>
-                                ` : `
+                                ` : isSmsService ? `
                                 <div class="detail-card">
                                     <div class="detail-card-title">
-                                        <span>${(isCallService || isSmsService) ? 'HỒ SƠ THUÊ BAO (SAPC / HLR)' : 'PROFILE & DỮ LIỆU CEM'}</span>
+                                        <span>THỐNG KÊ NHẬT KÝ TIN NHẮN (SMSC CDR)</span>
                                         <div style="display:flex; align-items:center; gap:8px;">
-                                            ${isSmsTicket ? `<button type="button" onclick="openSmscCdrModal('${t.phone}', event)" style="background:#f0fdfa; border:1px solid #99f6e4; color:#0d9488; font-size:10.5px; font-weight:700; border-radius:4px; padding:1px 6px; cursor:pointer;" title="Tra cứu nhật ký tin nhắn SMSC CDR">SMSC CDR ↗</button>` : ''}
+                                            <button type="button" onclick="openSmscCdrModal('${t.phone}', event)" style="background:#f0fdfa; border:1px solid #99f6e4; color:#0d9488; font-size:10.5px; font-weight:700; border-radius:4px; padding:2px 8px; cursor:pointer;" title="Mở bảng tra cứu chi tiết toàn màn hình">Chi tiết CDR ↗</button>
                                             <a href="http://10.155.42.218/checkall#" target="_blank" style="font-size:10.5px; color:#005baa; font-weight:700; text-decoration:none;" title="Mở cổng tra cứu SAPC (10.155.42.218/checkall#)">SAPC ↗</a>
                                         </div>
                                     </div>
-                                    <div style="flex:1; overflow-y:auto; max-height:290px; font-size:11px; line-height:1.4;">
-                                        <div style="margin-bottom:8px;">${pkgHtml}</div>
+                                    <div id="sms-cdr-detail-card-${ticketKey}" style="flex:1; overflow-y:auto; overflow-x:hidden; max-height:290px; font-size:11px; line-height:1.4; word-break:break-word; overflow-wrap:anywhere; white-space:normal; box-sizing:border-box;">
+                                        ${renderSmsCdrDetailContent(ticketKey, t.phone, t.incident_time, t.ticket_content || t.ai_summary || '')}
+                                    </div>
+                                </div>
+                                ` : `
+                                <div class="detail-card">
+                                    <div class="detail-card-title">
+                                        <span>${isCallService ? 'HỒ SƠ THUÊ BAO (SAPC / HLR)' : 'PROFILE & DỮ LIỆU CEM'}</span>
+                                        <div style="display:flex; align-items:center; gap:8px;">
+                                            <a href="http://10.155.42.218/checkall#" target="_blank" style="font-size:10.5px; color:#005baa; font-weight:700; text-decoration:none;" title="Mở cổng tra cứu SAPC (10.155.42.218/checkall#)">SAPC ↗</a>
+                                        </div>
+                                    </div>
+                                    <div style="flex:1; overflow-y:auto; overflow-x:hidden; max-height:290px; font-size:11px; line-height:1.4; word-break:break-word; overflow-wrap:anywhere; box-sizing:border-box;">
+                                        <div style="margin-bottom:8px; min-width:0; width:100%; box-sizing:border-box;">${pkgHtml}</div>
                                         ${(!isCallService && !isSmsService && ((t.cem_data && t.cem_data !== '--') || (showVpnAlert && vpnAppName))) ? `
-                                             <div style="border-top:1px dashed #cbd5e1; padding-top:6px; margin-top:6px;">
+                                             <div style="border-top:1px dashed #cbd5e1; padding-top:6px; margin-top:6px; min-width:0; width:100%; box-sizing:border-box;">
                                                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                                                      <div style="display:flex; align-items:center; gap:6px;">
                                                          <strong style="color:#0f172a; font-size:11px;">Dữ liệu CEM:</strong>
@@ -3728,14 +4770,14 @@ function renderTicketsTable(force = false) {
                                                      </div>
                                                      ${showVpnAlert && vpnAppName ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; font-weight:700; font-size:9.5px; padding:1px 6px; border-radius:3px;">CẢNH BÁO VPN: ${escapeHtml(vpnAppName)}</span>` : ''}
                                                  </div>
-                                                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-                                                     <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; display:flex; flex-direction:column; justify-content:space-between;">
+                                                 <div style="display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:6px; min-width:0; width:100%; box-sizing:border-box;">
+                                                     <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; display:flex; flex-direction:column; justify-content:space-between; min-width:0; word-break:break-word; overflow-wrap:anywhere; box-sizing:border-box;">
                                                          <div>
                                                              <div style="font-weight:700; font-size:10.5px; color:#0369a1; border-bottom:1px solid #e2e8f0; padding-bottom:3px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
                                                                  <span>NGÀY TIẾP NHẬN</span>
                                                                  <span style="font-size:10px; font-weight:600; color:#475569;">${escapeHtml(incidentDateDisplay)}</span>
                                                              </div>
-                                                             <div style="font-size:10.5px; line-height:1.35; color:#334155;">
+                                                             <div style="font-size:10.5px; line-height:1.35; color:#334155; word-break:break-word; overflow-wrap:anywhere; white-space:normal;">
                                                                  ${cemIncidentHtml}
                                                              </div>
                                                          </div>
@@ -3743,12 +4785,12 @@ function renderTicketsTable(force = false) {
                                                              ${renderCemIncidentLocation(ticketKey, rawCemIncident, t.phone, t.incident_time)}
                                                          </div>
                                                      </div>
-                                                     <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px;">
+                                                     <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; min-width:0; word-break:break-word; overflow-wrap:anywhere; box-sizing:border-box;">
                                                          <div style="font-weight:700; font-size:10.5px; color:#059669; border-bottom:1px solid #e2e8f0; padding-bottom:3px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
                                                              <span>GẦN NHẤT CÓ DATA</span>
                                                              <span style="font-size:10px; font-weight:600; color:#475569;">5 ngày</span>
                                                          </div>
-                                                         <div style="font-size:10.5px; line-height:1.35; color:#334155;">
+                                                         <div style="font-size:10.5px; line-height:1.35; color:#334155; word-break:break-word; overflow-wrap:anywhere; white-space:normal;">
                                                              ${cemRecentHtml}
                                                          </div>
                                                      </div>
@@ -4573,12 +5615,16 @@ async function startAutomation(engine = 'selenium') {
         autoClose = chk ? chk.checked : true;
     }
 
-    await fetch('/api/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ engine: engine, interval_minutes: interval, auto_close: autoClose })
-    });
-    fetchStatus();
+    try {
+        await fetch('/api/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ engine: engine, interval_minutes: interval, auto_close: autoClose })
+        });
+        await fetchStatus();
+    } catch (e) {
+        console.error("Lỗi khởi động quét:", e);
+    }
 }
 
 async function stopAutomation() {
@@ -4603,9 +5649,13 @@ async function stopAutomation() {
 }
 
 async function runNow() {
-    await fetch('/api/run-now', { method: 'POST' });
-    fetchStatus();
-    setTimeout(() => loadTickets(true), 3000);
+    try {
+        await fetch('/api/run-now', { method: 'POST' });
+        await fetchStatus();
+        setTimeout(() => loadTickets(true), 3000);
+    } catch (e) {
+        console.error("Lỗi kích hoạt quét ngay:", e);
+    }
 }
 
 // =====================================================================
@@ -4760,13 +5810,31 @@ async function triggerManualScan() {
         btnRefresh.classList.add('spinning');
     }
     const scopes = getSelectedScopes();
+    const clientAuthTok = (typeof getTtsNewAuthToken === 'function') ? getTtsNewAuthToken() : '';
+    const reqHeaders = { 'Content-Type': 'application/json' };
+    if (clientAuthTok) {
+        reqHeaders['Authorization'] = clientAuthTok.startsWith('Bearer ') ? clientAuthTok : `Bearer ${clientAuthTok}`;
+    }
+
     try {
+        // Kích hoạt quét trực tiếp cho phân hệ đang xem
+        if (currentService === 'call') {
+            fetch('/api/ttsnew/scan_call', { method: 'POST', headers: reqHeaders, body: JSON.stringify({ token: clientAuthTok, region: currentRegion, force: true }) }).catch(() => {});
+        } else if (currentService === 'sms') {
+            fetch('/api/ttsnew/scan_sms', { method: 'POST', headers: reqHeaders, body: JSON.stringify({ token: clientAuthTok, region: currentRegion, force: true }) }).catch(() => {});
+        } else if (currentService === 'other') {
+            fetch('/api/ttsnew/scan_other', { method: 'POST', headers: reqHeaders, body: JSON.stringify({ token: clientAuthTok, region: currentRegion, force: true }) }).catch(() => {});
+        } else if (currentService === 'data') {
+            fetch('/api/ttsnew/run-now', { method: 'POST', headers: reqHeaders, body: JSON.stringify({ token: clientAuthTok, region: currentRegion }) }).catch(() => {});
+        }
+
         const res = await fetch('/api/run-now', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: reqHeaders,
             body: JSON.stringify({
                 scan_scopes: scopes,
-                region: currentRegion
+                region: currentRegion,
+                token: clientAuthTok
             })
         });
         const data = await res.json();
@@ -4777,8 +5845,11 @@ async function triggerManualScan() {
         console.error("Lỗi kích hoạt quét ngay:", e);
     } finally {
         clearTicketsModuleCache();
-        await fetchStatus();
-        await loadTickets(true);
+        lastTicketsSignature = "";
+        await Promise.all([
+            fetchStatus(),
+            loadTickets(true, true)
+        ]);
         setTimeout(() => {
             if (btnRefresh && window.currentServerStatus !== 'PROCESSING') {
                 btnRefresh.classList.remove('spinning');
@@ -4799,7 +5870,7 @@ window.triggerManualScan = triggerManualScan;
 window.toggleUnifiedAutomation = toggleUnifiedAutomation;
 window.startUnifiedAutomation = startUnifiedAutomation;
 
-// TIỀN KIỂM LẠI CHO RIÊNG MODULE HIỆN TẠI (TÁI SỬ DỤNG KẾT QUẢ DB NẾU PHIẾU ĐANG Ở BƯỚC 2.6)
+// TIỀN KIỂM LẠI CHO RIÊNG MODULE HIỆN TẠI (ÉP CHẠY LẠI CORE TOÀN BỘ CÁC PHIẾU LỖI BTOOLS & PHIẾU HIỆN HỮU)
 async function recheckCurrentModule(btn) {
     let endpoint = '/api/ttsnew/run-now';
     let moduleLabel = 'Mobile Internet (TTS Mới)';
@@ -4807,9 +5878,18 @@ async function recheckCurrentModule(btn) {
     if (currentService === 'call') {
         endpoint = '/api/ttsnew/scan_call';
         moduleLabel = 'Cuộc gọi (TTS Mới)';
+    } else if (currentService === 'spam_call') {
+        endpoint = '/api/ttsnew/scan_spam_call';
+        moduleLabel = 'Chặn gọi ngoại mạng (TTS Mới)';
     } else if (currentService === 'sms') {
         endpoint = '/api/ttsnew/scan_sms';
         moduleLabel = 'Tin nhắn (TTS Mới)';
+    } else if (currentService === 'roaming') {
+        endpoint = '/api/ttsnew/scan_roaming';
+        moduleLabel = 'Chuyển vùng quốc tế (TTS Mới)';
+    } else if (currentService === 'sim') {
+        endpoint = '/api/ttsnew/scan_sim';
+        moduleLabel = 'Sim / MultiSIM (TTS Mới)';
     } else if (currentService === 'other') {
         endpoint = '/api/ttsnew/scan_other';
         moduleLabel = 'Gói cước / PA Khác (TTS Mới)';
@@ -4821,32 +5901,156 @@ async function recheckCurrentModule(btn) {
     if (btn) {
         btn.disabled = true;
         btn.style.opacity = '0.7';
-        btn.innerText = 'Đang tiền kiểm...';
+        btn.innerText = 'Đang kích hoạt...';
     }
 
     try {
+        const clientAuthTok = (typeof getTtsNewAuthToken === 'function') 
+            ? getTtsNewAuthToken() 
+            : (localStorage.getItem('ttsnew_auth_token') || localStorage.getItem('tts_auth_token') || '');
+        const bearerTok = clientAuthTok ? (clientAuthTok.startsWith('Bearer ') ? clientAuthTok : `Bearer ${clientAuthTok}`) : '';
+
+        const headers = { 'Content-Type': 'application/json' };
+        if (bearerTok) headers['Authorization'] = bearerTok;
+
         const res = await fetch(endpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ force: true, force_recheck: true, region: currentRegion })
+            headers: headers,
+            body: JSON.stringify({ 
+                force: true, 
+                force_recheck: true, 
+                region: currentRegion,
+                token: clientAuthTok
+            })
         });
         const data = await res.json();
         console.log(`[Tiền kiểm lại ${moduleLabel}]:`, data);
-    } catch (e) {
-        console.error("Lỗi tiền kiểm lại:", e);
-    } finally {
-        setTimeout(async () => {
+
+        if (!data.success) {
+            alert(data.message || `Hệ thống đang bận hoặc không thể kích hoạt tiền kiểm lại cho ${moduleLabel}.`);
             if (btn) {
                 btn.disabled = false;
                 btn.style.opacity = '1';
                 btn.innerText = 'Tiền kiểm lại';
             }
-            await fetchStatus();
-            await loadTickets(true);
-        }, 1200);
+            return;
+        }
+
+        if (btn) {
+            btn.innerText = 'Đang tiền kiểm...';
+        }
+
+        // Chờ và theo dõi tiến trình chạy nền Core Engine
+        let pollCount = 0;
+        const maxPolls = 30; // Tối đa 60 giây (mỗi 2s poll 1 lần)
+        const pollTimer = setInterval(async () => {
+            pollCount++;
+            try {
+                await fetchStatus();
+                const isProcessing = (systemState.status === 'PROCESSING') || 
+                    (currentRegion && systemState.region_status && systemState.region_status[currentRegion] === 'PROCESSING');
+
+                if (!isProcessing || pollCount >= maxPolls) {
+                    clearInterval(pollTimer);
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                        btn.innerText = 'Tiền kiểm lại';
+                    }
+                    clearTicketsModuleCache();
+                    lastTicketsSignature = "";
+                    await loadTickets(true);
+                }
+            } catch (pollErr) {
+                if (pollCount >= maxPolls) {
+                    clearInterval(pollTimer);
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                        btn.innerText = 'Tiền kiểm lại';
+                    }
+                    await loadTickets(true);
+                }
+            }
+        }, 2000);
+
+    } catch (e) {
+        console.error("Lỗi tiền kiểm lại:", e);
+        alert("Lỗi kết nối khi gửi yêu cầu tiền kiểm lại: " + e);
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.innerText = 'Tiền kiểm lại';
+        }
     }
 }
 window.recheckCurrentModule = recheckCurrentModule;
+
+// TIỀN KIỂM TOÀN BỘ PHIẾU TIN NHẮN (CHUYÊN BIỆT CHO MODULE TIN NHẮN, TÁCH BIỆT NÚT LÀM MỚI VÀ CÁC DỊCH VỤ KHÁC)
+async function precheckAllSmsTickets(btn) {
+    if (!confirm("Bắt đầu tiền kiểm toàn bộ các phiếu tin nhắn trong danh sách hiện tại?\nHệ thống sẽ bóc tách AI và đối soát SMSC CDR với cơ chế kiểm soát tải.")) {
+        return;
+    }
+
+    if (btn) {
+        btn.disabled = true;
+        btn.style.opacity = '0.7';
+        btn.innerHTML = `
+            <svg class="spinning" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+            </svg>
+            <span>Đang tiền kiểm SMS...</span>
+        `;
+    }
+
+    try {
+        const clientAuthTok = (typeof getTtsNewAuthToken === 'function') 
+            ? getTtsNewAuthToken() 
+            : (localStorage.getItem('ttsnew_auth_token') || localStorage.getItem('tts_auth_token') || '');
+        const bearerTok = clientAuthTok ? (clientAuthTok.startsWith('Bearer ') ? clientAuthTok : `Bearer ${clientAuthTok}`) : '';
+
+        const headers = { 'Content-Type': 'application/json' };
+        if (bearerTok) headers['Authorization'] = bearerTok;
+
+        const res = await fetch('/api/tickets/precheck_all_sms', {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+                region: currentRegion,
+                force_recheck: true
+            })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            alert(data.message || `Đang tiến hành tiền kiểm song song có kiểm soát cho ${data.total || 0} phiếu tin nhắn.`);
+            // Tự động tải lại danh sách phiếu theo chu kỳ ngắn để cập nhật kết quả tiền kiểm
+            let refreshCount = 0;
+            const timer = setInterval(() => {
+                refreshCount++;
+                loadTickets(true, false);
+                if (refreshCount >= 5) clearInterval(timer);
+            }, 3000);
+        } else {
+            alert(data.message || "Không thể khởi chạy tiền kiểm toàn bộ tin nhắn.");
+        }
+    } catch (e) {
+        console.error("Lỗi khi tiền kiểm toàn bộ tin nhắn:", e);
+        alert("Lỗi kết nối máy chủ: " + e);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.innerHTML = `
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+                <span>Tiền kiểm toàn bộ tin nhắn</span>
+            `;
+        }
+    }
+}
+window.precheckAllSmsTickets = precheckAllSmsTickets;
 
 // Alias tương thích
 const runNowUnified = startUnifiedAutomation;

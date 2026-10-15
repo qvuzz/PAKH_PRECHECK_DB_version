@@ -767,12 +767,25 @@ async function initUserSession() {
 
 // KHỞI CHẠY HỆ THỐNG
 initUserSession();
-setInterval(fetchStatus, 4000);
-setInterval(() => loadTickets(false), 12000);
-fetchStatus();
 
-// Kích hoạt đúng tab theo URL hiện tại trên thanh địa chỉ trình duyệt
-handleSpaRoute(window.location.pathname);
+function startAppPolling() {
+    if (typeof fetchStatus === 'function') {
+        fetchStatus();
+        setInterval(fetchStatus, 4000);
+    }
+    if (typeof loadTickets === 'function') {
+        setInterval(() => loadTickets(false), 12000);
+    }
+    if (typeof handleSpaRoute === 'function') {
+        handleSpaRoute(window.location.pathname);
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startAppPolling);
+} else {
+    startAppPolling();
+}
 
 // [MODULE]: Logic Live Log Dropdown đã được tách sang static/js/modules/live_log.js
 

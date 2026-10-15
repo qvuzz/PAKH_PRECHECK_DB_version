@@ -52,6 +52,39 @@ function openSmscCdrModal(phone, event) {
         let cleanPhone = String(phone).trim().replace(/\D/g, '');
         if (cleanPhone.startsWith('0')) cleanPhone = '84' + cleanPhone.slice(1);
         input.value = cleanPhone;
+        const cached = (typeof window.smsCdrSummaryCache !== 'undefined') ? window.smsCdrSummaryCache[cleanPhone] : null;
+        let fromDateVal = (cached && cached.fromDate && !String(cached.fromDate).includes('undefined')) ? cached.fromDate : '';
+        let toDateVal = (cached && cached.toDate && !String(cached.toDate).includes('undefined')) ? cached.toDate : '';
+
+        if (!fromDateVal || !toDateVal) {
+            const tList = (typeof cachedTickets !== 'undefined' && Array.isArray(cachedTickets)) ? cachedTickets : [];
+            const tObj = tList.find(x => {
+                const xPhone = String(x.phone || '').trim().replace(/\D/g, '');
+                const cleanX = xPhone.startsWith('0') ? ('84' + xPhone.slice(1)) : ((!xPhone.startsWith('84') && xPhone.length === 9) ? ('84' + xPhone) : xPhone);
+                return cleanX === cleanPhone;
+            });
+            if (tObj && typeof window.extractSmsIncidentDetails === 'function') {
+                const parsed = window.extractSmsIncidentDetails(tObj.ticket_content || tObj.ai_summary || '', tObj.sms_incident_time || tObj.incident_time || '');
+                if (parsed.fromDate && parsed.toDate) {
+                    fromDateVal = parsed.fromDate;
+                    toDateVal = parsed.toDate;
+                }
+            }
+        }
+
+        if (fromDateVal && toDateVal) {
+            setCdrTimePreset('custom', document.querySelector('.cdr-time-btn[data-val="custom"]'));
+            const fromInp = document.getElementById('cdrFromDate');
+            const toInp = document.getElementById('cdrToDate');
+            if (fromInp) fromInp.value = fromDateVal.split(' ')[0] || fromDateVal;
+            if (toInp) toInp.value = toDateVal.split(' ')[0] || toDateVal;
+        }
+
+        const dirSelect = document.getElementById('cdrDirectionSelect');
+        if (dirSelect) dirSelect.value = 'both';
+        const limitSelect = document.getElementById('cdrLimitSelect');
+        if (limitSelect) limitSelect.value = 'all';
+
         executeSmscCdrQuery();
     } else if (input) {
         input.focus();
@@ -280,7 +313,7 @@ function renderCdrTable() {
         };
 
         const siteUpper = String(r.site || 'HCM').toUpperCase();
-        const siteBadge = siteUpper === 'HNI'
+        const siteBadge = (siteUpper === 'HNI' || siteUpper === 'HN' || siteUpper.includes('HN'))
             ? `<span style="background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; font-weight:800; font-size:9.5px; padding:1px 5px; border-radius:3px;">HNI</span>`
             : `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-weight:800; font-size:9.5px; padding:1px 5px; border-radius:3px;">HCM</span>`;
 
@@ -294,6 +327,12 @@ function renderCdrTable() {
             : `<span style="color:#334155;">${escapeHtml(attemptsPadded)}</span>`;
 
         const msgLen = padVal(r.message_length, 4);
+        const rawLen = parseInt(r.message_length, 10);
+        let msgLenHtml = `<span style="color:#334155;">${escapeHtml(msgLen)}</span>`;
+        if (!isNaN(rawLen) && rawLen > 70) {
+            const segs = Math.min(10, Math.ceil(rawLen / 67));
+            msgLenHtml = `<span style="color:#0f172a; font-weight:700;">${escapeHtml(msgLen)}</span> <span style="display:inline-block; padding:1px 4px; border-radius:3px; font-size:9.5px; font-weight:700; background:#fef3c7; color:#b45309; border:1px solid #fde68a;" title="Tin nhắn dài được tách thành ~${segs} phân đoạn cước">(~${segs} tin)</span>`;
+        }
 
         const netErr = String(r.mapped_network_err || '0').trim();
         const netErrHtml = (netErr !== '--' && netErr !== '0')
@@ -329,7 +368,7 @@ function renderCdrTable() {
                 <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; color:#475569;">${escapeHtml(r.destination_msc || '--')}</td>
                 <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; color:#334155;">${escapeHtml(r.submission_time || '--')}</td>
                 <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; color:#475569;">${escapeHtml(r.call_reference || '--')}</td>
-                <td style="padding:6px 10px; text-align:center; font-family:'JetBrains Mono', monospace; font-size:11px; color:#334155;">${escapeHtml(msgLen)}</td>
+                <td style="padding:6px 10px; text-align:center; font-family:'JetBrains Mono', monospace; font-size:11px;">${msgLenHtml}</td>
                 <td style="padding:6px 10px; text-align:center; font-family:'JetBrains Mono', monospace; font-size:11px;">${attemptsHtml}</td>
                 <td style="padding:6px 10px; text-align:center; font-family:'JetBrains Mono', monospace; font-size:11px;">${netErrHtml}</td>
                 <td style="padding:6px 10px; text-align:center; font-family:'JetBrains Mono', monospace; font-size:11px;">${statusHtml}</td>

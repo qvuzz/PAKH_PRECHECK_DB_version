@@ -1376,6 +1376,11 @@
             padding: 10px 12px;
             min-width: 0;
             overflow: hidden;
+            overflow-x: hidden;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            white-space: normal;
+            box-sizing: border-box;
         }
         .detail-card-title {
             font-size: 11.5px;
@@ -1393,9 +1398,12 @@
         /* TELECOM DIAGNOSTIC METRIC GRID (CARD 2) */
         .telecom-diag-grid {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 6px;
             margin-bottom: 8px;
+            min-width: 0;
+            width: 100%;
+            box-sizing: border-box;
         }
         .diag-metric-item {
             background: #ffffff;
@@ -1405,6 +1413,10 @@
             display: flex;
             flex-direction: column;
             gap: 2px;
+            min-width: 0;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            box-sizing: border-box;
         }
         .diag-metric-label {
             font-size: 9.5px;
@@ -1418,7 +1430,9 @@
             font-size: 11px;
             font-weight: 700;
             color: #0f172a;
-            word-break: break-all;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            white-space: normal;
         }
         .diag-metric-val.val-radio { color: #0284c7; }
         .diag-metric-val.val-hss { color: #0d9488; }
@@ -3276,4 +3290,237 @@
             background: #0d1117 !important;
             border-color: #30363d !important;
             color: #f0f6fc !important;
+        }
+
+        /* =========================================================================
+           KHUNG HIỂN THỊ NỘI DUNG PHẢN ÁNH GỐC (CHUẨN 5 DÒNG, CUỘN DỌC, CHẶN CUỘN NGANG)
+           ========================================================================= */
+        .raw-ticket-content-box {
+            display: block;
+            font-size: 11.5px;
+            line-height: 1.45em;
+            max-height: 7.25em; /* 1.45em * 5 = 7.25em chuẩn 5 dòng */
+            padding: 6px 10px;
+            margin-top: 4px;
+            border-radius: 6px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            color: #334155;
+            font-style: italic;
+            white-space: pre-wrap !important;
+            word-break: break-word !important;
+            overflow-wrap: break-word !important;
+            overflow-y: auto !important; /* Cuộn dọc lên xuống */
+            overflow-x: hidden !important; /* Triệt tiêu hoàn toàn cuộn ngang */
+            text-align: left !important;
+            box-sizing: border-box;
+        }
+
+        /* ĐỒNG BỘ CĂN LỀ TRÁI CHO CỘT TÓM TẮT TRÊN BẢNG & CHI TIẾT */
+        #thAiSummary {
+            text-align: left !important;
+            padding-left: 10px !important;
+        }
+        .compact-summary-text {
+            text-align: left !important;
+        }
+
+        /* =========================================================================
+           HIGH-CONTRAST DARK THEME OVERRIDES (DÀNH CHO KTV VIỄN THÔNG / TT SOC)
+           TRIỆT TIÊU TOÀN DIỆN CHỮ TỐI TRÊN NỀN TỐI (WCAG AAA CONTRAST)
+           ========================================================================= */
+        [data-theme="dark"] .raw-ticket-content-box {
+            background: #0d1117 !important;
+            border-color: #30363d !important;
+            color: #e6edf3 !important;
+        }
+
+        [data-theme="dark"] #thAiSummary {
+            color: #93c5fd !important;
+            text-align: left !important;
+        }
+
+        [data-theme="dark"] .compact-summary-text {
+            color: #e2e8f0 !important;
+            text-align: left !important;
+        }
+
+        [data-theme="dark"] .compact-ellipsis {
+            color: #94a3b8 !important;
+            text-align: left !important;
+        }
+
+        /* Chữ tối màu #0f172a, #1e293b, #334155, #475569, #64748b chuyển thành sáng rõ */
+        [data-theme="dark"] [style*="color:#0f172a"],
+        [data-theme="dark"] [style*="color: #0f172a"],
+        [data-theme="dark"] [style*="color:#1e293b"],
+        [data-theme="dark"] [style*="color: #1e293b"],
+        [data-theme="dark"] [style*="color:#000"],
+        [data-theme="dark"] [style*="color: #000"] {
+            color: #f0f6fc !important;
+        }
+
+        [data-theme="dark"] [style*="color:#334155"],
+        [data-theme="dark"] [style*="color: #334155"],
+        [data-theme="dark"] [style*="color:#475569"],
+        [data-theme="dark"] [style*="color: #475569"] {
+            color: #cbd5e1 !important;
+        }
+
+        [data-theme="dark"] [style*="color:#64748b"],
+        [data-theme="dark"] [style*="color: #64748b"] {
+            color: #94a3b8 !important;
+        }
+
+        [data-theme="dark"] [style*="color:#005baa"],
+        [data-theme="dark"] [style*="color: #005baa"],
+        [data-theme="dark"] [style*="color:#0284c7"],
+        [data-theme="dark"] [style*="color: #0284c7"],
+        [data-theme="dark"] [style*="color:#0369a1"],
+        [data-theme="dark"] [style*="color: #0369a1"] {
+            color: #38bdf8 !important;
+        }
+
+        [data-theme="dark"] [style*="color:#166534"],
+        [data-theme="dark"] [style*="color: #166534"],
+        [data-theme="dark"] [style*="color:#15803d"],
+        [data-theme="dark"] [style*="color: #15803d"],
+        [data-theme="dark"] [style*="color:#0f766e"],
+        [data-theme="dark"] [style*="color: #0f766e"] {
+            color: #4ade80 !important;
+        }
+
+        [data-theme="dark"] [style*="color:#b45309"],
+        [data-theme="dark"] [style*="color: #b45309"],
+        [data-theme="dark"] [style*="color:#c2410c"],
+        [data-theme="dark"] [style*="color: #c2410c"] {
+            color: #fbbf24 !important;
+        }
+
+        [data-theme="dark"] [style*="color:#dc2626"],
+        [data-theme="dark"] [style*="color: #dc2626"],
+        [data-theme="dark"] [style*="color:#b91c1c"],
+        [data-theme="dark"] [style*="color: #b91c1c"] {
+            color: #f87171 !important;
+        }
+
+        /* Nền thẻ xám sáng chuyển sang nền dark hi-tech */
+        [data-theme="dark"] [style*="background:#f8fafc"],
+        [data-theme="dark"] [style*="background: #f8fafc"],
+        [data-theme="dark"] [style*="background:#f1f5f9"],
+        [data-theme="dark"] [style*="background: #f1f5f9"] {
+            background: #161b22 !important;
+            border-color: #30363d !important;
+        }
+
+        [data-theme="dark"] [style*="background:#f0f9ff"],
+        [data-theme="dark"] [style*="background: #f0f9ff"],
+        [data-theme="dark"] [style*="background:#eff6ff"],
+        [data-theme="dark"] [style*="background: #eff6ff"] {
+            background: rgba(56, 189, 248, 0.12) !important;
+            border-color: rgba(56, 189, 248, 0.35) !important;
+        }
+
+        [data-theme="dark"] [style*="background:#f0fdf4"],
+        [data-theme="dark"] [style*="background: #f0fdf4"] {
+            background: rgba(74, 222, 128, 0.12) !important;
+            border-color: rgba(74, 222, 128, 0.35) !important;
+        }
+
+        [data-theme="dark"] [style*="background:#fef2f2"],
+        [data-theme="dark"] [style*="background: #fef2f2"] {
+            background: rgba(248, 113, 113, 0.15) !important;
+            border-color: rgba(248, 113, 113, 0.4) !important;
+        }
+
+        [data-theme="dark"] [style*="background:#fffbeb"],
+        [data-theme="dark"] [style*="background: #fffbeb"],
+        [data-theme="dark"] [style*="background:#fef3c7"],
+        [data-theme="dark"] [style*="background: #fef3c7"] {
+            background: rgba(251, 191, 36, 0.14) !important;
+            border-color: rgba(251, 191, 36, 0.4) !important;
+        }
+
+        /* Widgets Header: Khu vực, Tự đóng, Session */
+        [data-theme="dark"] #regionSelectWrapper {
+            background: #21262d !important;
+            border-color: #30363d !important;
+        }
+        [data-theme="dark"] #regionSelectWrapper span {
+            color: #94a3b8 !important;
+        }
+        [data-theme="dark"] #regionSelect {
+            background: #161b22 !important;
+            border-color: #30363d !important;
+            color: #f0f6fc !important;
+        }
+        [data-theme="dark"] #ctrlAutoCloseUnified {
+            border-color: #30363d !important;
+        }
+        [data-theme="dark"] #ctrlAutoCloseUnified:not([style*="background:#fef2f2"]) {
+            background: #21262d !important;
+            color: #94a3b8 !important;
+        }
+        [data-theme="dark"] #selectAiSummaryModel {
+            background: #161b22 !important;
+            border-color: #30363d !important;
+            color: #f0f6fc !important;
+        }
+        [data-theme="dark"] #unauthBtn {
+            background: #21262d !important;
+            border-color: #30363d !important;
+            color: #94a3b8 !important;
+        }
+        [data-theme="dark"] #authPill {
+            background: #161b22 !important;
+            border-color: #30363d !important;
+        }
+
+        /* Form Inputs & Modals */
+        [data-theme="dark"] input[type="text"],
+        [data-theme="dark"] input[type="email"],
+        [data-theme="dark"] input[type="password"],
+        [data-theme="dark"] textarea,
+        [data-theme="dark"] select {
+            background: #0d1117 !important;
+            border-color: #30363d !important;
+            color: #f0f6fc !important;
+        }
+        [data-theme="dark"] input::placeholder,
+        [data-theme="dark"] textarea::placeholder {
+            color: #64748b !important;
+        }
+
+        [data-theme="dark"] #modalAiTeach > div,
+        [data-theme="dark"] #modalEditWard > div,
+        [data-theme="dark"] #modalUserMgmt > div,
+        [data-theme="dark"] #modalAutoCloseConfirm > div {
+            background: #161b22 !important;
+            border: 1px solid #30363d !important;
+            color: #f0f6fc !important;
+        }
+
+        [data-theme="dark"] #aiTeachFormContainer,
+        [data-theme="dark"] #modalEditWard div[style*="background:#ffffff"],
+        [data-theme="dark"] #modalUserMgmt form {
+            background: #1c2128 !important;
+            border-color: #30363d !important;
+        }
+
+        [data-theme="dark"] #aiTeachRawContent,
+        [data-theme="dark"] #editWardRawContent {
+            background: #0d1117 !important;
+            border-color: #30363d !important;
+            color: #e6edf3 !important;
+        }
+
+        /* Bảng Quản trị nhân viên KTV */
+        [data-theme="dark"] #userMgmtTableBody tr {
+            border-bottom-color: #30363d !important;
+        }
+        [data-theme="dark"] #userMgmtTableBody tr:hover {
+            background: #21262d !important;
+        }
+        [data-theme="dark"] #userMgmtTableBody td {
+            color: #e6edf3 !important;
         }

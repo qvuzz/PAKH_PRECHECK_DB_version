@@ -113,34 +113,69 @@ def get_tickets_api(
         region=effective_region
     )
 
-    # Tự động bù tóm tắt 6 mục cho các phiếu Mobile Internet nếu chưa có hoặc đang là 'null'
-    try:
-        from db_manager import is_mobile_internet_ticket
-        from ai_interpreter import generate_ticket_summary
-        need_db_update = []
-        for t in tickets:
-            pkg = t.get("package_title") or ""
-            tc = t.get("ticket_content") or ""
-            ai_s = str(t.get("ai_summary") or "").strip()
-            if is_mobile_internet_ticket(pkg) and tc:
-                if not ai_s or ai_s == "null" or ai_s == "None" or not ai_s.startswith("1.") or ai_s == tc.strip():
-                    new_sum = generate_ticket_summary(pkg, tc, phone=t.get("phone", ""))
-                    if new_sum and new_sum.strip().startswith("1."):
-                        t["ai_summary"] = new_sum
-                        need_db_update.append((new_sum, t.get("ticket_code"), t.get("phone")))
+    # Tự động bù tóm tắt 6 mục cho các phiếu Mobile Internet nếu chưa có hoặc đang là 'null' (chỉ chạy khi xem dữ liệu data)
+    if srv_f in ("data", None, "", "all"):
+        try:
+            from db_manager import is_mobile_internet_ticket
+            from ai_interpreter import generate_ticket_summary
+            need_db_update = []
+            for t in tickets:
+                if len(need_db_update) >= 10:
+                    break
+                pkg = t.get("package_title") or ""
+                tc = t.get("ticket_content") or ""
+                ai_s = str(t.get("ai_summary") or "").strip()
+                if is_mobile_internet_ticket(pkg) and tc:
+                    if not ai_s or ai_s == "null" or ai_s == "None" or not ai_s.startswith("1.") or ai_s == tc.strip():
+                        new_sum = generate_ticket_summary(pkg, tc, phone=t.get("phone", ""))
+                        if new_sum and new_sum.strip().startswith("1."):
+                            t["ai_summary"] = new_sum
+                            need_db_update.append((new_sum, t.get("ticket_code"), t.get("phone")))
 
-        if need_db_update:
-            conn_u = get_db_connection()
-            with conn_u:
-                for sum_val, t_code, ph in need_db_update:
-                    if t_code:
-                        clean_c = str(t_code).split("\n")[0].strip()
-                        conn_u.execute("UPDATE tickets SET ai_summary = ? WHERE ticket_code = ? OR ticket_code LIKE ?", (sum_val, clean_c, f"{clean_c}%"))
-                    elif ph:
-                        conn_u.execute("UPDATE tickets SET ai_summary = ? WHERE phone = ?", (sum_val, ph))
-            conn_u.close()
-    except Exception:
-        pass
+            if need_db_update:
+                conn_u = get_db_connection()
+                with conn_u:
+                    for sum_val, t_code, ph in need_db_update:
+                        if t_code:
+                            clean_c = str(t_code).split("\n")[0].strip()
+                            conn_u.execute("UPDATE tickets SET ai_summary = ? WHERE ticket_code = ? OR ticket_code LIKE ?", (sum_val, clean_c, f"{clean_c}%"))
+                        elif ph:
+                            conn_u.execute("UPDATE tickets SET ai_summary = ? WHERE phone = ?", (sum_val, ph))
+                conn_u.close()
+        except Exception:
+            pass
+
+    # Tự động bù tóm tắt 6 mục cho các phiếu Tin nhắn (SMS) nếu chưa có hoặc đang là text trần
+    if srv_f in ("sms", None, "", "all"):
+        try:
+            from services.sms_analyzer import is_sms_ticket, generate_sms_ticket_summary
+            need_sms_db_update = []
+            for t in tickets:
+                if len(need_sms_db_update) >= 15:
+                    break
+                pkg = t.get("package_title") or ""
+                tc = t.get("ticket_content") or ""
+                ai_s = str(t.get("ai_summary") or "").strip()
+                if (srv_f == "sms" or is_sms_ticket(pkg, tc)) and tc:
+                    is_wrong_data_format = "gói cước sử dụng:" in ai_s.lower() or "tình trạng truy cập:" in ai_s.lower()
+                    if not ai_s or ai_s == "null" or ai_s == "None" or not ai_s.startswith("1.") or ai_s == tc.strip() or is_wrong_data_format:
+                        new_sms_sum = generate_sms_ticket_summary(tc, t.get("incident_time") or t.get("created_time") or "")
+                        if new_sms_sum and new_sms_sum.strip().startswith("1."):
+                            t["ai_summary"] = new_sms_sum
+                            need_sms_db_update.append((new_sms_sum, t.get("ticket_code"), t.get("phone")))
+
+            if need_sms_db_update:
+                conn_u = get_db_connection()
+                with conn_u:
+                    for sum_val, t_code, ph in need_sms_db_update:
+                        if t_code:
+                            clean_c = str(t_code).split("\n")[0].strip()
+                            conn_u.execute("UPDATE tickets SET ai_summary = ? WHERE ticket_code = ? OR ticket_code LIKE ?", (sum_val, clean_c, f"{clean_c}%"))
+                        elif ph:
+                            conn_u.execute("UPDATE tickets SET ai_summary = ? WHERE phone = ?", (sum_val, ph))
+                conn_u.close()
+        except Exception:
+            pass
 
     sys_counts = get_system_counts(region=effective_region)
     total_cnt, closed_cnt, active_cnt = get_ticket_counts(
@@ -532,7 +567,7 @@ def get_cell_info_api(phone: str):
         "latitude": coord_lat,
         "longitude": coord_lng,
         "map_url": map_url,
-        "cell_url": f"http://127.0.0.1:1708/cellid/{cell_name}" if cell_name else None
+        "cell_url": f"http://10.155.59.158:1708/cellid/{cell_name}" if cell_name else None
     }
     _CELL_INFO_CACHE[phone_84] = {"time": now_t, "data": result}
     return result
@@ -666,7 +701,7 @@ def get_cell_location_api(
         "latitude": coord_lat,
         "longitude": coord_lng,
         "location_str": loc_str,
-        "cell_url": f"http://127.0.0.1:1708/cellid/{cell_name}" if cell_name else None,
+        "cell_url": f"http://10.155.59.158:1708/cellid/{cell_name}" if cell_name else None,
         "map_url": f"https://www.google.com/maps?q={coord_lat},{coord_lng}" if (coord_lat and coord_lng) else None
     }
     _CELL_LOCATION_CACHE[clean_cell] = {"time": now_t, "data": result}
@@ -759,13 +794,14 @@ async def open_detail_ttsnew_api(request: Request):
         row = conn.execute("SELECT ticket_code, phone, ticket_id, flow_id, comment, action_plan, package_title FROM tickets WHERE phone = ? AND source = 'tts_new' ORDER BY updated_at DESC LIMIT 1", (phone,)).fetchone()
     conn.close()
 
-    ticket_id = row["ticket_id"] if (row and row["ticket_id"]) else None
-    flow_id = row["flow_id"] if (row and row["flow_id"]) else None
-    code = row["ticket_code"] if (row and row["ticket_code"]) else ticket_code
+    r_dict = dict(row) if row else {}
+    ticket_id = r_dict.get("ticket_id")
+    flow_id = r_dict.get("flow_id")
+    code = r_dict.get("ticket_code") or ticket_code
     clean_code = code.split("\n")[0].strip() if code else ""
-    comment_val = str(row["comment"] or "").strip() if (row and "comment" in row.keys()) else ""
-    action_plan_val = str(row["action_plan"] or "").strip() if (row and "action_plan" in row.keys()) else ""
-    pkg_title = (row["package_title"] if (row and "package_title" in row.keys()) else "") or ""
+    comment_val = str(r_dict.get("comment") or "").strip()
+    action_plan_val = str(r_dict.get("action_plan") or "").strip()
+    pkg_title = r_dict.get("package_title") or ""
     is_data_ticket = is_mobile_internet_ticket(pkg_title)
 
     if not ticket_id and clean_code and "/" in clean_code:
@@ -925,23 +961,24 @@ async def close_one_ttsnew_ticket(request: Request):
         row = conn.execute("SELECT * FROM tickets WHERE phone = ? AND source = 'tts_new' ORDER BY updated_at DESC LIMIT 1", (phone,)).fetchone()
     conn.close()
 
-    ticket_id = row["ticket_id"] if (row and row["ticket_id"]) else None
-    flow_id = row["flow_id"] if (row and row["flow_id"]) else None
-    code = row["ticket_code"] if (row and row["ticket_code"]) else ticket_code
+    r_dict = dict(row) if row else {}
+    ticket_id = r_dict.get("ticket_id")
+    flow_id = r_dict.get("flow_id")
+    code = r_dict.get("ticket_code") or ticket_code
     clean_code = code.split("\n")[0].strip() if code else ""
-    status_val = str(row["status"] or "") if row else ""
-    comment_val = comment_custom or (str(row["comment"] or "").strip() if (row and "comment" in row.keys()) else "")
-    action_plan_val = action_plan_custom or (str(row["action_plan"] or "").strip() if (row and "action_plan" in row.keys()) else "")
-    incident_cause_val = incident_cause_custom or (str(row["incident_cause"] or "").strip() if (row and "incident_cause" in row.keys() and row["incident_cause"]) else "")
+    status_val = str(r_dict.get("status") or "")
+    comment_val = comment_custom or str(r_dict.get("comment") or "").strip()
+    action_plan_val = action_plan_custom or str(r_dict.get("action_plan") or "").strip()
+    incident_cause_val = incident_cause_custom or str(r_dict.get("incident_cause") or "").strip()
     target_step = str(body.get("target_step") or "").strip()
 
     if incident_cause_custom and phone:
         try:
-            update_ticket_field(phone, "incident_cause", incident_cause_custom, incident_time=row["incident_time"] if row else None)
+            update_ticket_field(phone, "incident_cause", incident_cause_custom, incident_time=r_dict.get("incident_time"))
         except Exception:
             pass
 
-    reopen_cnt = int(row["reopen_count"] or 0) if (row and "reopen_count" in row.keys()) else 0
+    reopen_cnt = int(r_dict.get("reopen_count") or 0)
     force_close = body.get("force", False)
     if reopen_cnt > 0 and not force_close:
         return {
@@ -1060,38 +1097,42 @@ async def close_all_ttsnew_tickets(request: Request):
                 ticket_code = it.get("ticketCode")
                 row = conn.execute("SELECT * FROM tickets WHERE ticket_id = ? OR ticket_code = ? OR ticket_code LIKE ?", 
                                    (ticket_id, ticket_code, f"{ticket_code}%")).fetchone()
-                if row and row["status"]:
-                    rc = int(row["reopen_count"] or 0) if "reopen_count" in row.keys() else 0
-                    if rc > 0:
-                        state.log("WARN", f"   ↳ ⛔ Bỏ qua {ticket_code} ({row['phone']}): Đã mở lại {rc} lần (THÔNG TIN MỞ LẠI TTS) - KHÔNG ĐÓNG TỰ ĐỘNG!")
-                        continue
+                if row:
+                    r_dict = dict(row)
+                    row_status = r_dict.get("status")
+                    if row_status:
+                        rc = int(r_dict.get("reopen_count") or 0)
+                        row_phone = r_dict.get("phone") or ""
+                        if rc > 0:
+                            state.log("WARN", f"   ↳ ⛔ Bỏ qua {ticket_code} ({row_phone}): Đã mở lại {rc} lần (THÔNG TIN MỞ LẠI TTS) - KHÔNG ĐÓNG TỰ ĐỘNG!")
+                            continue
 
-                    from db_manager import check_ticket_can_close
-                    can_close, reason = check_ticket_can_close(dict(row))
-                    if not can_close:
-                        state.log("INFO", f"   ↳ ⏸️ Giữ nguyên {ticket_code} ({row['phone']}): Chưa đủ điều kiện đóng ({reason})")
-                        continue
+                        from db_manager import check_ticket_can_close
+                        can_close, reason = check_ticket_can_close(r_dict)
+                        if not can_close:
+                            state.log("INFO", f"   ↳ ⏸️ Giữ nguyên {ticket_code} ({row_phone}): Chưa đủ điều kiện đóng ({reason})")
+                            continue
 
-                    res = api_transfer_ttsnew_ticket(
-                        token=tok,
-                        ticket_flow_id=flow_id,
-                        ticket_id=ticket_id,
-                        phone=row["phone"],
-                        ticket_code=ticket_code,
-                        status=row["status"],
-                        closing_content=row["comment"] or "",
-                        assign_content=row["action_plan"] or "",
-                        incident_cause=(str(row["incident_cause"]).strip() if ("incident_cause" in row.keys() and row["incident_cause"]) else "")
-                    )
+                        res = api_transfer_ttsnew_ticket(
+                            token=tok,
+                            ticket_flow_id=flow_id,
+                            ticket_id=ticket_id,
+                            phone=row_phone,
+                            ticket_code=ticket_code,
+                            status=row_status,
+                            closing_content=r_dict.get("comment") or "",
+                            assign_content=r_dict.get("action_plan") or "",
+                            incident_cause=str(r_dict.get("incident_cause") or "").strip()
+                        )
                     if res.get("success"):
                         total_success += 1
                         state.log("SUCCESS", f"   ↳ [{total_success}] {res.get('message')}")
                     elif res.get("blocked_by_ward"):
-                        state.log("WARN", f"   ↳ ⛔ Bỏ qua {ticket_code} ({row['phone']}): Hướng 5.1 nhưng Phường/Xã chưa cập nhật hoặc sai khác - Giữ nguyên phiếu!")
+                        state.log("WARN", f"   ↳ ⛔ Bỏ qua {ticket_code} ({row_phone}): Hướng 5.1 nhưng Phường/Xã chưa cập nhật hoặc sai khác - Giữ nguyên phiếu!")
                     else:
                         state.log("WARN", f"   ↳ ⚠️ [Phiếu lỗi] {ticket_code}: {res.get('message')}")
                         try:
-                            t_id = row["ticket_id"] if ("ticket_id" in row.keys() and row["ticket_id"]) else None
+                            t_id = r_dict.get("ticket_id")
                             if t_id:
                                 conn.execute("""
                                     UPDATE tickets 
@@ -1104,12 +1145,12 @@ async def close_all_ttsnew_tickets(request: Request):
                                     SET ticket_status = 'Phiếu lỗi', updated_at = CURRENT_TIMESTAMP 
                                     WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new'
                                 """, (ticket_code, f"{ticket_code}%"))
-                            elif row["phone"]:
+                            elif row_phone:
                                 conn.execute("""
                                     UPDATE tickets 
                                     SET ticket_status = 'Phiếu lỗi', updated_at = CURRENT_TIMESTAMP 
                                     WHERE phone = ? AND source = 'tts_new'
-                                """, (row["phone"],))
+                                """, (row_phone,))
                             conn.commit()
                         except Exception:
                             pass
@@ -1120,6 +1161,126 @@ async def close_all_ttsnew_tickets(request: Request):
 
     threading.Thread(target=_run_close_all, daemon=True).start()
     return {"success": True, "message": "Đang tiến hành tự động chuyển bước/đóng hàng loạt phiếu TTS Mới..."}
+
+
+@router.post("/tickets/precheck_all_sms")
+async def precheck_all_sms_tickets_api(request: Request):
+    """
+    Tiền kiểm toàn bộ phiếu Tin nhắn (SMS) hiện có trong danh sách.
+    Tách biệt hoàn toàn với Mobile Data và Cuộc gọi, không ảnh hưởng đến thanh trạng thái / nút làm mới.
+    Áp dụng kiến trúc Controlled Concurrency (tối đa 2 worker, delay 0.5s) để chống nghẽn ElasticSearch SMSC và SQLite.
+    """
+    body = await request.json()
+    req_region = str(body.get("region") or "").strip().upper()
+    if req_region not in ("MB", "MN", "MT"):
+        req_region = None
+
+    from db_manager import get_all_tickets
+    sms_tickets = get_all_tickets(tab_filter="chua_dong", source="tts_new", service_type="sms", region=req_region)
+    if not sms_tickets:
+        return {"success": False, "message": "Không có phiếu tin nhắn nào trong danh sách cần xử lý."}
+
+    def _run_batch_sms_precheck():
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+        from services.sms_analyzer import analyze_sms_ticket_with_cdr
+
+        total = len(sms_tickets)
+        state.log("STEP", f"⚡ Bắt đầu tiền kiểm hàng loạt {total} phiếu Tin nhắn (SMS)...", region=req_region)
+        processed = 0
+
+        # Giới hạn 2 worker để bảo vệ Cluster ElasticSearch và SQLite khỏi bị nghẽn tải
+        def _worker(t_row):
+            nonlocal processed
+            p = str(t_row.get("phone") or "").strip()
+            if not p:
+                return
+            clean_digits = "".join(filter(str.isdigit, p))
+            p_84 = ("84" + clean_digits[1:]) if clean_digits.startswith("0") else (("84" + clean_digits) if len(clean_digits) == 9 else clean_digits)
+            inc_time = str(t_row.get("incident_time") or "").strip()
+
+            t_info = {
+                "title": t_row.get("package_title") or "Tin nhắn (SMS)",
+                "content": t_row.get("ticket_content") or "",
+                "incident_time": inc_time,
+                "reopen_count": t_row.get("reopen_count") or 0,
+                "ticket_code": t_row.get("ticket_code") or ""
+            }
+
+            try:
+                # Tiền kiểm: bóc tách AI + đối soát CDR SMSC
+                res = analyze_sms_ticket_with_cdr(p_84, t_info, force_cdr=True)
+
+                # Chuẩn bị dữ liệu SMS CDR
+                sms_cdr_str = ""
+                if res.get("sms_cdr_summary"):
+                    try:
+                        sms_cdr_str = json.dumps(res["sms_cdr_summary"], ensure_ascii=False) if isinstance(res["sms_cdr_summary"], dict) else str(res["sms_cdr_summary"])
+                    except Exception:
+                        sms_cdr_str = ""
+                sms_prob = res.get("entities", {}).get("problem_title") or ""
+                sms_inc_time = res.get("entities", {}).get("time_range_desc") or res.get("entities", {}).get("incident_time") or ""
+
+                # Cập nhật kết quả vào database tickets
+                now_str = datetime.now(ICT).strftime("%Y-%m-%d %H:%M:%S")
+                conn = get_db_connection()
+                with conn:
+                    if inc_time:
+                        conn.execute("""
+                            UPDATE tickets 
+                            SET real_packages = ?, rat_types = ?, cem_data = ?, status = ?, comment = ?, 
+                                action_plan = ?, ai_summary = COALESCE(NULLIF(?, ''), ai_summary), 
+                                app_usage = COALESCE(NULLIF(?, ''), app_usage), color = COALESCE(NULLIF(?, ''), color),
+                                sms_cdr_summary = COALESCE(NULLIF(?, ''), sms_cdr_summary),
+                                sms_problem = COALESCE(NULLIF(?, ''), sms_problem),
+                                sms_incident_time = COALESCE(NULLIF(?, ''), sms_incident_time),
+                                incident_cause = COALESCE(NULLIF(?, ''), incident_cause),
+                                prechecked_at = ?, updated_at = CURRENT_TIMESTAMP 
+                            WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?
+                        """, (
+                            res.get("formatted_pkg", ""), res.get("rat_types", ""), res.get("cem_data", ""),
+                            res.get("status", ""), res.get("comment", ""), res.get("action_plan", ""),
+                            res.get("ai_summary", ""), res.get("app_usage", ""), res.get("color", ""),
+                            sms_cdr_str, sms_prob, sms_inc_time,
+                            res.get("suggested_cause_name", ""),
+                            now_str, p, p_84, f"%{clean_digits[-9:]}%", inc_time
+                        ))
+                    else:
+                        conn.execute("""
+                            UPDATE tickets 
+                            SET real_packages = ?, rat_types = ?, cem_data = ?, status = ?, comment = ?, 
+                                action_plan = ?, ai_summary = COALESCE(NULLIF(?, ''), ai_summary), 
+                                app_usage = COALESCE(NULLIF(?, ''), app_usage), color = COALESCE(NULLIF(?, ''), color),
+                                sms_cdr_summary = COALESCE(NULLIF(?, ''), sms_cdr_summary),
+                                sms_problem = COALESCE(NULLIF(?, ''), sms_problem),
+                                sms_incident_time = COALESCE(NULLIF(?, ''), sms_incident_time),
+                                incident_cause = COALESCE(NULLIF(?, ''), incident_cause),
+                                prechecked_at = ?, updated_at = CURRENT_TIMESTAMP 
+                            WHERE rowid = (SELECT rowid FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1)
+                        """, (
+                            res.get("formatted_pkg", ""), res.get("rat_types", ""), res.get("cem_data", ""),
+                            res.get("status", ""), res.get("comment", ""), res.get("action_plan", ""),
+                            res.get("ai_summary", ""), res.get("app_usage", ""), res.get("color", ""),
+                            sms_cdr_str, sms_prob, sms_inc_time,
+                            res.get("suggested_cause_name", ""),
+                            now_str, p, p_84, f"%{clean_digits[-9:]}%"
+                        ))
+                conn.close()
+                processed += 1
+                state.log("SUCCESS", f"[{processed}/{total}] Tiền kiểm SMS xong: {p_84} -> {res.get('status')}", region=req_region)
+            except Exception as ex_t:
+                state.log("ERROR", f"Lỗi tiền kiểm SMS {p_84}: {ex_t}", region=req_region)
+            
+            # Delay 0.5s giữa các yêu cầu để tránh nghẽn SFTP / Elastic
+            time.sleep(0.5)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            list(executor.map(_worker, sms_tickets))
+
+        state.log("SUCCESS", f"🎉 Đã hoàn thành tiền kiểm toàn bộ {processed}/{total} phiếu Tin nhắn (SMS)!", region=req_region)
+
+    threading.Thread(target=_run_batch_sms_precheck, daemon=True).start()
+    return {"success": True, "total": len(sms_tickets), "message": f"Đã bắt đầu tiền kiểm có kiểm soát cho {len(sms_tickets)} phiếu tin nhắn."}
 
 
 @router.post("/tickets/precheck_one")
@@ -1138,7 +1299,28 @@ async def precheck_one_ticket(request: Request):
     clean_digits = "".join(filter(str.isdigit, str(phone).strip()))
     phone_84 = ("84" + clean_digits[1:]) if clean_digits.startswith("0") else (("84" + clean_digits) if len(clean_digits) == 9 else clean_digits)
 
-    state.log("STEP", f"⚡ Đang thực hiện tiền kiểm tra nhanh cho thuê bao {phone_84}...")
+    # Truy vấn thông tin phiếu sớm để xác định chính xác target_reg phục vụ phân luồng Live Log
+    conn = get_db_connection()
+    with conn:
+        if incident_time:
+            cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code FROM tickets WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?", (phone, phone_84, f"%{clean_digits[-9:]}%", incident_time))
+        else:
+            cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1", (phone, phone_84, f"%{clean_digits[-9:]}%"))
+        row = cur.fetchone()
+        pkg_title = (row[0] if row else "Thoại / SMS") or ""
+        t_content = row[1] if row else ""
+        reopen_cnt = row[2] if row and len(row) > 2 else 0
+        t_code = row[3] if row and len(row) > 3 else ""
+
+    from region_detector import detect_ticket_region
+    target_reg = req_region or detect_ticket_region({
+        "user_region": req_region,
+        "ticket_code": t_code,
+        "title": pkg_title,
+        "content": t_content
+    })
+
+    state.log("STEP", f"⚡ Đang thực hiện tiền kiểm tra nhanh cho thuê bao {phone_84}...", region=target_reg)
 
     try:
         SAPCCHECK_DIR = str(BASE_DIR / "sapccheck")
@@ -1153,26 +1335,6 @@ async def precheck_one_ticket(request: Request):
 
         from concurrent.futures import ThreadPoolExecutor
         from services.voice_precheck import is_voice_ticket, precheck_single_voice_ticket
-
-        conn = get_db_connection()
-        with conn:
-            if incident_time:
-                cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code FROM tickets WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?", (phone, phone_84, f"%{clean_digits[-9:]}%", incident_time))
-            else:
-                cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1", (phone, phone_84, f"%{clean_digits[-9:]}%"))
-            row = cur.fetchone()
-            pkg_title = (row[0] if row else "Thoại / SMS") or ""
-            t_content = row[1] if row else ""
-            reopen_cnt = row[2] if row and len(row) > 2 else 0
-            t_code = row[3] if row and len(row) > 3 else ""
-
-        from region_detector import detect_ticket_region
-        target_reg = req_region or detect_ticket_region({
-            "user_region": req_region,
-            "ticket_code": t_code,
-            "title": pkg_title,
-            "content": t_content
-        })
 
         if req_service_type in ("call", "sms", "spam_call", "voice", "voice_sms", "roaming", "cvqt", "sim", "sim_multisim"):
             is_voice = True
@@ -1220,11 +1382,11 @@ async def precheck_one_ticket(request: Request):
                     raw_sapc = sapc_client.query(phone)
                     sapc_res = convert_sapc_response(raw_sapc)
             except Exception as ex_sapc:
-                state.log("WARN", f"Lỗi tra cứu gói cước SAPC cho {phone}: {ex_sapc}")
+                state.log("WARN", f"Lỗi tra cứu gói cước SAPC cho {phone}: {ex_sapc}", region=target_reg)
             try:
                 info_res = tra_cell_tu_so_dien_thoai(phone, session=sapc_client.session if sapc_client else None)
             except Exception as ex_cell:
-                state.log("WARN", f"Lỗi tra cứu Cell/HLR cho {phone}: {ex_cell}")
+                state.log("WARN", f"Lỗi tra cứu Cell/HLR cho {phone}: {ex_cell}", region=target_reg)
 
         def _fetch_btools_task():
             nonlocal existing_clean_data
@@ -1244,7 +1406,7 @@ async def precheck_one_ticket(request: Request):
                             "data": existing_clean_data
                         }, nf, ensure_ascii=False, indent=2)
             except Exception as ex_bt_pre:
-                state.log("WARN", f"Lỗi cào BTools khi tiền kiểm {phone}: {ex_bt_pre}")
+                state.log("WARN", f"Lỗi cào BTools khi tiền kiểm {phone}: {ex_bt_pre}", region=target_reg)
 
         def _fetch_cem_task():
             nonlocal cem_recs, app_evs
@@ -1254,16 +1416,19 @@ async def precheck_one_ticket(request: Request):
                     app_evs = cem_client.get_subscriber_app_events(phone_84, days=5, use_cache=False, incident_time_str=incident_time)
                     save_cem_data_to_file(phone_84, cem_recs, app_evs, base_dir=BASE_DIR)
                 except Exception as ex_c:
-                    state.log("WARN", f"Lỗi tra cứu CEM khi tiền kiểm tra {phone_84}: {ex_c}")
+                    state.log("WARN", f"Lỗi tra cứu CEM khi tiền kiểm tra {phone_84}: {ex_c}", region=target_reg)
 
         def _fetch_voice_task():
             nonlocal v_res, ccos_json_str
             t_info = {
+                "title": pkg_title,
                 "package_title": pkg_title,
+                "content": t_content,
                 "ticket_content": t_content,
                 "incident_time": incident_time,
                 "reopen_count": reopen_cnt,
-                "ticket_code": t_code
+                "ticket_code": t_code,
+                "service_type": req_service_type
             }
             v_res = precheck_single_voice_ticket(phone_84, t_info, driver=driver)
             try:
@@ -1273,7 +1438,7 @@ async def precheck_one_ticket(request: Request):
                     ccos_json_str = json.dumps(ccos_info, ensure_ascii=False)
                     if ccos_info.get("has_file"):
                         f_names = ", ".join([f["name"] for f in ccos_info.get("files", [])])
-                        state.log("INFO", f"   📎 [CCOS] Thuê bao {phone_84} có file đính kèm: {f_names}")
+                        state.log("INFO", f"   📎 [CCOS] Thuê bao {phone_84} có file đính kèm: {f_names}", region=target_reg)
             except Exception:
                 pass
 
@@ -1306,8 +1471,18 @@ async def precheck_one_ticket(request: Request):
         conn = get_db_connection()
         with conn:
             if is_voice:
+                sms_cdr_str = ""
+                if v_res.get("sms_cdr_summary"):
+                    try:
+                        sms_cdr_str = json.dumps(v_res["sms_cdr_summary"], ensure_ascii=False) if isinstance(v_res["sms_cdr_summary"], dict) else str(v_res["sms_cdr_summary"])
+                    except Exception:
+                        sms_cdr_str = ""
+                sms_prob = v_res.get("sms_problem") or v_res.get("entities", {}).get("problem_title") or ""
+                sms_inc_time = v_res.get("sms_incident_time") or v_res.get("entities", {}).get("time_range_desc") or v_res.get("entities", {}).get("incident_time") or ""
+
+                up_cur = None
                 if incident_time:
-                    conn.execute("""
+                    up_cur = conn.execute("""
                         UPDATE tickets 
                         SET real_packages = ?, 
                             rat_types = ?,
@@ -1315,7 +1490,14 @@ async def precheck_one_ticket(request: Request):
                             status = ?,
                             comment = ?,
                             action_plan = ?,
+                            ai_summary = COALESCE(NULLIF(?, ''), ai_summary),
+                            app_usage = COALESCE(NULLIF(?, ''), app_usage),
+                            color = COALESCE(NULLIF(?, ''), color),
                             ccos_attachments = COALESCE(NULLIF(?, ''), ccos_attachments),
+                            sms_cdr_summary = COALESCE(NULLIF(?, ''), sms_cdr_summary),
+                            sms_problem = COALESCE(NULLIF(?, ''), sms_problem),
+                            sms_incident_time = COALESCE(NULLIF(?, ''), sms_incident_time),
+                            incident_cause = COALESCE(NULLIF(?, ''), incident_cause),
                             prechecked_at = ?,
                             region = CASE WHEN ? IN ('MB', 'MN', 'MT') THEN ? ELSE region END,
                             updated_at = CURRENT_TIMESTAMP 
@@ -1327,13 +1509,20 @@ async def precheck_one_ticket(request: Request):
                         v_res.get("status", ""),
                         v_res.get("comment", ""),
                         v_res.get("action_plan", ""),
+                        v_res.get("ai_summary", ""),
+                        v_res.get("app_usage", ""),
+                        v_res.get("color", ""),
                         ccos_json_str,
+                        sms_cdr_str,
+                        sms_prob,
+                        sms_inc_time,
+                        v_res.get("suggested_cause_name", ""),
                         now_precheck_str,
                         target_reg, target_reg,
                         phone, phone_84, f"%{clean_digits[-9:]}%", incident_time
                     ))
-                else:
-                    conn.execute("""
+                if not up_cur or up_cur.rowcount == 0:
+                    up_cur = conn.execute("""
                         UPDATE tickets 
                         SET real_packages = ?, 
                             rat_types = ?,
@@ -1341,7 +1530,14 @@ async def precheck_one_ticket(request: Request):
                             status = ?,
                             comment = ?,
                             action_plan = ?,
+                            ai_summary = COALESCE(NULLIF(?, ''), ai_summary),
+                            app_usage = COALESCE(NULLIF(?, ''), app_usage),
+                            color = COALESCE(NULLIF(?, ''), color),
                             ccos_attachments = COALESCE(NULLIF(?, ''), ccos_attachments),
+                            sms_cdr_summary = COALESCE(NULLIF(?, ''), sms_cdr_summary),
+                            sms_problem = COALESCE(NULLIF(?, ''), sms_problem),
+                            sms_incident_time = COALESCE(NULLIF(?, ''), sms_incident_time),
+                            incident_cause = COALESCE(NULLIF(?, ''), incident_cause),
                             prechecked_at = ?,
                             region = CASE WHEN ? IN ('MB', 'MN', 'MT') THEN ? ELSE region END,
                             updated_at = CURRENT_TIMESTAMP 
@@ -1353,13 +1549,48 @@ async def precheck_one_ticket(request: Request):
                         v_res.get("status", ""),
                         v_res.get("comment", ""),
                         v_res.get("action_plan", ""),
+                        v_res.get("ai_summary", ""),
+                        v_res.get("app_usage", ""),
+                        v_res.get("color", ""),
                         ccos_json_str,
+                        sms_cdr_str,
+                        sms_prob,
+                        sms_inc_time,
+                        v_res.get("suggested_cause_name", ""),
                         now_precheck_str,
                         target_reg, target_reg,
                         phone, phone_84, f"%{clean_digits[-9:]}%"
                     ))
+                if not up_cur or up_cur.rowcount == 0:
+                    # Chèn mới vào SQLite nếu chưa hề có bản ghi của số này
+                    conn.execute("""
+                        INSERT INTO tickets (
+                            phone, incident_time, package_title, ticket_content, status, comment, action_plan,
+                            real_packages, rat_types, cem_data, app_usage, ai_summary, color,
+                            ccos_attachments, sms_cdr_summary, sms_problem, sms_incident_time,
+                            incident_cause, prechecked_at, region, source, ticket_status, ticket_code
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'tts_new', 'Chưa đóng', ?)
+                    """, (
+                        phone_84, incident_time or "", pkg_title or "Thoại / SMS", t_content or "",
+                        v_res.get("status", "MẠNG LƯỚI ĐẢM BẢO"), v_res.get("comment", ""), v_res.get("action_plan", ""),
+                        v_res.get("formatted_pkg", ""), v_res.get("rat_types", ""), v_res.get("cem_data", ""),
+                        v_res.get("app_usage", "--"), v_res.get("ai_summary", t_content or ""), v_res.get("color", "green"),
+                        ccos_json_str, sms_cdr_str, sms_prob, sms_inc_time,
+                        v_res.get("suggested_cause_name", ""), now_precheck_str, target_reg, t_code or ""
+                    ))
                 state.log("SUCCESS", f"✅ Đã tiền kiểm Thoại / SMS / Gói xong cho {phone_84}: {v_res.get('status')}", region=target_reg)
-                return {"success": True, "formatted_pkg": v_res.get("formatted_pkg", ""), "info": info_res}
+                return {
+                    "success": True, 
+                    "formatted_pkg": v_res.get("formatted_pkg", ""), 
+                    "info": info_res, 
+                    "status": v_res.get("status"), 
+                    "comment": v_res.get("comment"), 
+                    "action_plan": v_res.get("action_plan"), 
+                    "ai_summary": v_res.get("ai_summary"),
+                    "sms_problem": sms_prob,
+                    "sms_cdr_summary": v_res.get("sms_cdr_summary"),
+                    "suggested_cause_name": v_res.get("suggested_cause_name", "")
+                }
 
             # Xử lý Mobile Data
             real_pkgs_str = extract_btools_packages_summary(existing_clean_data)
@@ -1916,5 +2147,31 @@ async def update_ticket_ward_api(request: Request):
         "sync_message": sync_msg,
         "message": "Đã lưu địa bàn thành công!" + (f" (Đồng bộ TTS Mới: {sync_msg})" if sync_msg else "")
     }
+
+
+@router.post("/tickets/save_sms_analysis")
+async def save_sms_analysis_api(request: Request):
+    """Lưu kết quả phân tích AI SMS (thời điểm sự cố & lỗi cụ thể) hàng loạt vào SQLite database."""
+    try:
+        body = await request.json()
+        items = body.get("items", [])
+        if items and isinstance(items, list):
+            state.log("STEP", f"🤖 Bắt đầu phân tích & bóc tách AI SMS cho {len(items)} phiếu tin nhắn...")
+            from db_manager import save_sms_analysis_bulk
+            save_sms_analysis_bulk(items)
+            for it in items[:8]:
+                p = it.get("phone") or ""
+                inc = it.get("sms_incident_time") or "--"
+                prob = it.get("sms_problem") or "Chưa rõ lỗi cụ thể"
+                state.log("INFO", f"   ↳ {p}: Sự cố [{inc}] | Nhận định: [{prob}]")
+            if len(items) > 8:
+                state.log("INFO", f"   ↳ ... và {len(items) - 8} phiếu tin nhắn khác.")
+            state.log("SUCCESS", f"✅ Đã phân tích và lưu vết thành công {len(items)} phiếu AI SMS vào Database!")
+            return {"success": True, "count": len(items)}
+        return {"success": False, "message": "Danh sách items rỗng"}
+    except Exception as e:
+        state.log("ERROR", f"❌ Lỗi lưu phân tích AI SMS: {e}")
+        return {"success": False, "error": str(e)}
+
 
 

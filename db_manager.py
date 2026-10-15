@@ -2,6 +2,7 @@
 import sqlite3
 import os
 import re
+import requests
 from datetime import datetime
 from pathlib import Path
 
@@ -228,10 +229,22 @@ def _run_init_schema(conn):
         except Exception:
             pass
         try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN sms_incident_time TEXT;")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN sms_problem TEXT;")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN sms_cdr_summary TEXT;")
+        except Exception:
+            pass
+        try:
             from region_detector import normalize_to_new_province
             # Tự động rà soát & nắn chỉnh lại các phiếu Miền Trung/Miền Bắc bị gán nhầm thành MN:
             rows_reg = conn.execute("""
-                SELECT rowid, ticket_code, title, package_title, ticket_content, ward, province_name 
+                SELECT rowid, ticket_code, package_title, ticket_content, ward, province_name, loaded_by 
                 FROM tickets 
                 WHERE (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%')
                    OR region IS NULL OR region = ''
@@ -239,7 +252,7 @@ def _run_init_schema(conn):
                    OR instr(ticket_code, 'SOC1') > 0 OR instr(ticket_code, 'SOC 1') > 0;
             """).fetchall()
             for r in rows_reg:
-                comb = f"{r['ticket_code'] or ''} {r['title'] or ''} {r['package_title'] or ''} {r['ticket_content'] or ''} {r['ward'] or ''} {r['province_name'] or ''}"
+                comb = f"{r['ticket_code'] or ''} {r['package_title'] or ''} {r['ticket_content'] or ''} {r['ward'] or ''} {r['province_name'] or ''} {r['loaded_by'] or ''}"
                 comb_u = comb.upper()
                 target_reg = None
                 if any(k in comb_u for k in ("SOC3", "SOC 3", "NET3", "NET 3", "MIỀN TRUNG", "MIEN TRUNG", "VHKT MT")):
@@ -252,6 +265,21 @@ def _run_init_schema(conn):
                         target_reg = det_reg
                 if target_reg:
                     conn.execute("UPDATE tickets SET region = ? WHERE rowid = ?", (target_reg, r["rowid"]))
+        except Exception:
+            pass
+
+        try:
+            conn.execute("UPDATE tickets SET ticket_status = 'Đã đóng 2.6' WHERE ticket_status = 'Đã đóng' OR ticket_status = 'Da dong';")
+            # Chuẩn hóa các bản ghi bị lưu giờ UTC (06:xx, 07:xx) thành giờ Việt Nam UTC+7
+            conn.execute("""
+                UPDATE tickets 
+                SET closed_at = datetime(closed_at, '+7 hours') 
+                WHERE (ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%')
+                  AND closed_at IS NOT NULL 
+                  AND closed_at != ''
+                  AND (closed_at LIKE '% 06:%' OR closed_at LIKE '% 07:%')
+                  AND updated_at = closed_at;
+            """)
         except Exception:
             pass
 
@@ -281,6 +309,32 @@ def _run_init_schema(conn):
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sms_cdr_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone TEXT NOT NULL,
+                ticket_code TEXT,
+                site TEXT,
+                calling_number TEXT,
+                called_number TEXT,
+                delivery_time TEXT,
+                submission_time TEXT,
+                direction TEXT,
+                status_code TEXT,
+                status_desc TEXT,
+                status_type TEXT,
+                termination_cause TEXT,
+                termination_cause_info TEXT,
+                message_length TEXT,
+                attempts INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(phone, direction, delivery_time, calling_number, called_number)
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_cdr_phone ON sms_cdr_records(phone);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_cdr_delivery ON sms_cdr_records(delivery_time);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_cdr_ticket_code ON sms_cdr_records(ticket_code);")
 
 
 def init_db():
@@ -646,14 +700,27 @@ def _save_or_update_ticket_internal(t):
                 if not loaded_by and existing and "loaded_by" in existing.keys() and existing["loaded_by"]:
                     loaded_by = str(existing["loaded_by"]).strip()
 
+                sms_incident_time = t.get("sms_incident_time")
+                if not sms_incident_time and existing and "sms_incident_time" in existing.keys() and existing["sms_incident_time"]:
+                    sms_incident_time = existing["sms_incident_time"]
+
+                sms_problem = t.get("sms_problem")
+                if not sms_problem and existing and "sms_problem" in existing.keys() and existing["sms_problem"]:
+                    sms_problem = existing["sms_problem"]
+
+                sms_cdr_summary = t.get("sms_cdr_summary")
+                if not sms_cdr_summary and existing and "sms_cdr_summary" in existing.keys() and existing["sms_cdr_summary"]:
+                    sms_cdr_summary = existing["sms_cdr_summary"]
+
                 conn.execute("""
                     INSERT INTO tickets (
                         phone, incident_time, package_title, real_packages, rat_types,
                         cem_data, app_usage, ticket_content, status, comment,
                         action_plan, color, ticket_status, created_time, ai_summary,
                         source, ticket_code, ticket_id, flow_id, reopen_count, last_reopened_date,
-                        phan_hoi_he_thong, id_he_thong, ccos_attachments, processing_content, prechecked_at, ward, region, loaded_by, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? NOT IN ('', 'CHƯA PHÂN LOẠI') THEN datetime('now', '+7 hours') ELSE NULL END, ?, ?, ?, CURRENT_TIMESTAMP)
+                        phan_hoi_he_thong, id_he_thong, ccos_attachments, processing_content, prechecked_at, ward, region, loaded_by,
+                        sms_incident_time, sms_problem, sms_cdr_summary, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? NOT IN ('', 'CHƯA PHÂN LOẠI') THEN datetime('now', '+7 hours') ELSE NULL END, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(phone, incident_time) DO UPDATE SET
                         package_title = excluded.package_title,
                         real_packages = excluded.real_packages,
@@ -685,6 +752,9 @@ def _save_or_update_ticket_internal(t):
                         ward = COALESCE(NULLIF(excluded.ward, ''), tickets.ward),
                         region = COALESCE(NULLIF(excluded.region, ''), tickets.region),
                         loaded_by = COALESCE(NULLIF(excluded.loaded_by, ''), tickets.loaded_by),
+                        sms_incident_time = COALESCE(NULLIF(excluded.sms_incident_time, ''), tickets.sms_incident_time),
+                        sms_problem = COALESCE(NULLIF(excluded.sms_problem, ''), tickets.sms_problem),
+                        sms_cdr_summary = COALESCE(NULLIF(excluded.sms_cdr_summary, ''), tickets.sms_cdr_summary),
                         updated_at = CURRENT_TIMESTAMP;
                 """, (
                     phone,
@@ -716,6 +786,9 @@ def _save_or_update_ticket_internal(t):
                     ward or "",
                     region or "MN",
                     loaded_by or "",
+                    sms_incident_time or "",
+                    sms_problem or "",
+                    sms_cdr_summary or "",
                 ))
             conn.close()
             conn = None
@@ -756,85 +829,171 @@ ROAMING_PKG_SQL = """(
     package_title LIKE '%CVQT%' 
     OR package_title LIKE '%Chuyển vùng quốc tế%' 
     OR package_title LIKE '%Roaming%'
+    OR package_title LIKE '%IDD 1714%'
 )"""
 
-SIM_PKG_SQL = """(
-    package_title LIKE '%SIM_%' 
-    OR package_title LIKE '%MultiSIM%' 
-    OR package_title LIKE '%eSIM%' 
-    OR package_title LIKE 'SIM %' 
-    OR package_title LIKE '%SIM khai báo%'
-)"""
-
-DATA_PKG_SQL = f"(package_title LIKE '%Mobile Internet%' AND package_title NOT LIKE '%Gói cước Mobile Internet%' AND package_title NOT LIKE '%Mobile Internet (M0/Gói Data)%' AND package_title NOT LIKE '%CVQT - DV Mobile Internet (Data)%' AND NOT {ROAMING_PKG_SQL})"
-
-CALL_PKG_SQL = f"""(
+SIM_PKG_SQL = f"""(
     (
-        package_title LIKE '%Gọi đi trong nước%' 
-        OR package_title LIKE '%Nhận cuộc gọi đến trong nước%' 
-        OR package_title LIKE '%Nhận cuộc gọi dến trong nước%'
-        OR package_title LIKE '%Cuộc gọi đi và đến%'
-        OR package_title LIKE '%Bị khóa Spam cuộc gọi%'
-        OR package_title LIKE '%Giữ cuộc gọi%'
-        OR package_title LIKE '%Gọi Quốc tế%'
-        OR package_title LIKE '%VoWifi%'
+        package_title LIKE '%SIM_%' 
+        OR package_title LIKE '%MultiSIM%' 
+        OR package_title LIKE '%eSIM%' 
+        OR package_title LIKE 'SIM %' 
+        OR package_title LIKE '%SIM khai báo%'
+    )
+    AND NOT {ROAMING_PKG_SQL}
+)"""
+
+DATA_PKG_SQL = f"""(
+    package_title LIKE '%Mobile Internet%' 
+    AND package_title NOT LIKE '%Gói cước Mobile Internet%' 
+    AND package_title NOT LIKE '%Mobile Internet (M0/Gói Data)%' 
+    AND NOT {ROAMING_PKG_SQL}
+)"""
+
+SPAM_CALL_RAW_PKG_SQL = """(
+    package_title LIKE '%Spam cuộc gọi%' 
+    OR package_title LIKE '%spam cuộc gọi%'
+    OR package_title LIKE '%Cuộc gọi rác%'
+    OR package_title LIKE '%cuộc gọi rác%'
+)"""
+
+SPAM_CALL_CONTENT_SQL = """(
+    ticket_content LIKE '%spam%' 
+    OR ticket_content LIKE '%khoá spam%' OR ticket_content LIKE '%khóa spam%' 
+    OR ticket_content LIKE '%chặn spam%' OR ticket_content LIKE '%chan spam%'
+    OR ticket_content LIKE '%khoá chiều%' OR ticket_content LIKE '%khóa chiều%'
+    OR ticket_content LIKE '%khoa chieu%'
+    OR ticket_content LIKE '%bản cam kết%' OR ticket_content LIKE '%ban cam ket%'
+    OR ticket_content LIKE '%ký cam kết%' OR ticket_content LIKE '%ky cam ket%'
+    OR ticket_content LIKE '%viết cam kết%' OR ticket_content LIKE '%viet cam ket%'
+    OR ticket_content LIKE '%mở chặn%' OR ticket_content LIKE '%mo chan%'
+    OR (
+        (ticket_content LIKE '%viettel%' OR ticket_content LIKE '%vettel%' OR ticket_content LIKE '%mobi%' OR ticket_content LIKE '%ngoại mạng%' OR ticket_content LIKE '%ngoai mang%' OR ticket_content LIKE '%liên mạng%' OR ticket_content LIKE '%lien mang%')
+        AND (
+            ticket_content LIKE '%chặn%' OR ticket_content LIKE '%chan%' 
+            OR ticket_content LIKE '%báo bận%' OR ticket_content LIKE '%bao ban%'
+            OR ticket_content LIKE '%tắt ngang%' OR ticket_content LIKE '%tat ngang%'
+            OR ticket_content LIKE '%tút tút%' OR ticket_content LIKE '%tut tut%'
+            OR ticket_content LIKE '%không gọi được%' OR ticket_content LIKE '%ko gọi được%' 
+            OR ticket_content LIKE '%k gọi được%' OR ticket_content LIKE '%chưa gọi được%'
+            OR ticket_content LIKE '%không gọi đi được%' OR ticket_content LIKE '%ko gọi đi được%'
+            OR ticket_content LIKE '%không gọi sang%' OR ticket_content LIKE '%ko gọi sang%'
+        )
+    )
+)"""
+
+CALL_RAW_PKG_SQL = f"""(
+    (
+        package_title LIKE '%Gọi đi%' 
+        OR package_title LIKE '%gọi đi%'
+        OR package_title LIKE '%Gọi đến%' 
+        OR package_title LIKE '%gọi đến%'
+        OR package_title LIKE '%Cuộc gọi%' 
+        OR package_title LIKE '%cuộc gọi%'
+        OR package_title LIKE '%Giữ cuộc gọi%' 
+        OR package_title LIKE '%giữ cuộc gọi%'
+        OR package_title LIKE '%Gọi Quốc tế%' 
+        OR package_title LIKE '%gọi quốc tế%'
+        OR package_title LIKE '%VoWifi%' 
+        OR package_title LIKE '%vowifi%'
+        OR package_title LIKE '%Volte%' 
+        OR package_title LIKE '%volte%'
+        OR package_title LIKE '%Thoại%' 
+        OR package_title LIKE '%thoại%'
+        OR package_title LIKE '%rớt cuộc%'
+        OR package_title LIKE '%nghe xen%'
     )
     AND NOT {ROAMING_PKG_SQL}
     AND NOT {SIM_PKG_SQL}
+    AND NOT {SPAM_CALL_RAW_PKG_SQL}
+)"""
+
+SPAM_CALL_PKG_SQL = f"""(
+    {SPAM_CALL_RAW_PKG_SQL}
+    OR ({CALL_RAW_PKG_SQL} AND {SPAM_CALL_CONTENT_SQL})
+)"""
+
+CALL_PKG_SQL = f"""(
+    {CALL_RAW_PKG_SQL}
+    AND NOT ({CALL_RAW_PKG_SQL} AND {SPAM_CALL_CONTENT_SQL})
 )"""
 
 SMS_PKG_SQL = f"""(
     (
-        package_title LIKE '%nhận tin nhắn%' 
-        OR package_title LIKE '%khóa spam tin nhắn%' 
-        OR package_title LIKE '%Tin nhắn (SMS)%' 
-        OR package_title LIKE '%Tin nhắn (sms)%' 
-        OR package_title LIKE '%gửi tin nhắn đi và đến%' 
-        OR package_title LIKE '%gửi tin nhắn đi%' 
-        OR package_title LIKE '%Tin nhắn rác%'
-        OR (package_title LIKE '%Tin nhắn%' AND package_title NOT LIKE '%CVQT%')
+        package_title LIKE '%Tin nhắn%' 
+        OR package_title LIKE '%tin nhắn%'
+        OR package_title LIKE '%SMS%' 
+        OR package_title LIKE '%sms%'
     )
     AND NOT {ROAMING_PKG_SQL}
     AND NOT {SIM_PKG_SQL}
 )"""
 
-SPAM_CALL_PKG_SQL = """(
-    (package_title LIKE '%Spam%' OR package_title LIKE '%Gọi đi%' OR package_title LIKE '%Nhận cuộc gọi%' OR package_title LIKE '%Cuộc gọi%' OR package_title LIKE '%tin nhắn%')
-    AND (
-        ticket_content LIKE '%viettel%' OR ticket_content LIKE '%vettel%' 
-        OR ticket_content LIKE '%mobi%' OR ticket_content LIKE '%vms%'
-        OR ticket_content LIKE '%ngoại mạng%' OR ticket_content LIKE '%ngoai mang%'
-        OR ticket_content LIKE '%liên mạng%' OR ticket_content LIKE '%lien mang%'
-        OR ticket_content LIKE '%spam%' OR ticket_content LIKE '%cam kết%' OR ticket_content LIKE '%cam ket%'
-        OR package_title LIKE '%Spam%'
-    )
-)"""
-
-OTHER_PKG_SQL = f"(NOT {DATA_PKG_SQL} AND NOT {CALL_PKG_SQL} AND NOT {SMS_PKG_SQL} AND NOT {ROAMING_PKG_SQL} AND NOT {SIM_PKG_SQL})"
+OTHER_PKG_SQL = f"(NOT {DATA_PKG_SQL} AND NOT {CALL_PKG_SQL} AND NOT {SPAM_CALL_PKG_SQL} AND NOT {SMS_PKG_SQL} AND NOT {ROAMING_PKG_SQL} AND NOT {SIM_PKG_SQL})"
 VOICE_PKG_SQL = f"(package_title IS NULL OR NOT {DATA_PKG_SQL})"
+
+def is_roaming_ticket(package_title: str) -> bool:
+    pkg = (package_title or "").strip().lower()
+    return "cvqt" in pkg or "chuyển vùng quốc tế" in pkg or "roaming" in pkg or "idd 1714" in pkg
+
+def is_sim_ticket(package_title: str) -> bool:
+    pkg = (package_title or "").strip().lower()
+    if is_roaming_ticket(package_title):
+        return False
+    return "sim_" in pkg or "multisim" in pkg or "esim" in pkg or pkg.startswith("sim ") or "sim khai báo" in pkg
 
 def is_mobile_internet_ticket(package_title: str) -> bool:
     pkg = (package_title or "").strip().lower()
     if not pkg:
         return False
-    if "mobile internet" in pkg or "data" in pkg:
-        if "(m0/gói data)" in pkg or "gói cước mobile internet" in pkg or "cvqt" in pkg:
+    if is_roaming_ticket(package_title):
+        return False
+    if "mobile internet" in pkg:
+        if "(m0/gói data)" in pkg or "gói cước mobile internet" in pkg:
             return False
         return True
     return False
 
-def is_call_ticket(package_title: str) -> bool:
+def is_spam_call_ticket(package_title: str, ticket_content: str = "") -> bool:
     pkg = (package_title or "").strip().lower()
+    if "spam cuộc gọi" in pkg or "cuộc gọi rác" in pkg:
+        return True
+    if any(k in pkg for k in [
+        "gọi đi", "gọi đến", "cuộc gọi", "giữ cuộc gọi", "gọi quốc tế", 
+        "vowifi", "volte", "thoại", "rớt cuộc", "nghe xen"
+    ]) and ticket_content:
+        from spam_call_analyzer import classify_call_ticket_with_qwen
+        if classify_call_ticket_with_qwen(package_title, ticket_content):
+            return True
+    return False
+
+def is_call_ticket(package_title: str, ticket_content: str = "") -> bool:
+    pkg = (package_title or "").strip().lower()
+    if is_roaming_ticket(package_title) or is_sim_ticket(package_title):
+        return False
+    if is_spam_call_ticket(package_title, ticket_content):
+        return False
     return any(k in pkg for k in [
-        "gọi đi trong nước", "nhận cuộc gọi đến trong nước", "nhận cuộc gọi dến trong nước",
-        "cuộc gọi đi và đến", "bị khóa spam cuộc gọi", "giữ cuộc gọi", "gọi quốc tế", "vowifi"
+        "gọi đi", "gọi đến", "cuộc gọi", "giữ cuộc gọi", "gọi quốc tế", 
+        "vowifi", "volte", "thoại", "rớt cuộc", "nghe xen"
     ])
 
 def is_sms_ticket(package_title: str) -> bool:
     pkg = (package_title or "").strip().lower()
-    return any(k in pkg for k in [
-        "nhận tin nhắn", "khóa spam tin nhắn", "tin nhắn (sms)", "gửi tin nhắn", "tin nhắn rác"
-    ]) or ("tin nhắn" in pkg and "cvqt" not in pkg)
+    if is_roaming_ticket(package_title) or is_sim_ticket(package_title):
+        return False
+    return "tin nhắn" in pkg or "sms" in pkg
+
+def is_other_ticket(package_title: str) -> bool:
+    return (
+        not is_mobile_internet_ticket(package_title)
+        and not is_call_ticket(package_title)
+        and not is_spam_call_ticket(package_title)
+        and not is_sms_ticket(package_title)
+        and not is_roaming_ticket(package_title)
+        and not is_sim_ticket(package_title)
+    )
+
 
 def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", service_type=None, region=None):
     """
@@ -878,9 +1037,9 @@ def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", s
             # Nếu trên TTS đã hết sạch phiếu chờ xử lý -> toàn bộ phiếu chưa đóng trong DB thuộc nguồn này đã đóng!
             conn.execute(f"""
                 UPDATE tickets 
-                SET ticket_status = 'Đã đóng', closed_at = COALESCE(closed_at, datetime('now', '+7 hours')), updated_at = CURRENT_TIMESTAMP 
+                SET ticket_status = 'Đã đóng 2.6', closed_at = COALESCE(closed_at, datetime('now', '+7 hours')), updated_at = CURRENT_TIMESTAMP 
                 WHERE {source_condition}
-                  AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+                  AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong' AND ticket_status NOT LIKE '%Đã đóng%')
                   {service_sql}
             """, source_params)
             return
@@ -890,18 +1049,18 @@ def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", s
             if not raw_active_keys:
                 conn.execute(f"""
                     UPDATE tickets 
-                    SET ticket_status = 'Đã đóng', closed_at = COALESCE(closed_at, datetime('now', '+7 hours')), updated_at = CURRENT_TIMESTAMP 
+                    SET ticket_status = 'Đã đóng 2.6', closed_at = COALESCE(closed_at, datetime('now', '+7 hours')), updated_at = CURRENT_TIMESTAMP 
                     WHERE {source_condition}
-                      AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+                      AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong' AND ticket_status NOT LIKE '%Đã đóng%')
                       {service_sql}
                 """, source_params)
             else:
                 placeholders = ",".join(["?"] * len(raw_active_keys))
                 conn.execute(f"""
                     UPDATE tickets 
-                    SET ticket_status = 'Đã đóng', closed_at = COALESCE(closed_at, datetime('now', '+7 hours')), updated_at = CURRENT_TIMESTAMP 
+                    SET ticket_status = 'Đã đóng 2.6', closed_at = COALESCE(closed_at, datetime('now', '+7 hours')), updated_at = CURRENT_TIMESTAMP 
                     WHERE {source_condition}
-                      AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+                      AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong' AND ticket_status NOT LIKE '%Đã đóng%')
                       {service_sql}
                       AND substr(ticket_code, 1, case when instr(ticket_code, char(10)) > 0 then instr(ticket_code, char(10)) - 1 else length(ticket_code) end) NOT IN ({placeholders})
                 """, source_params + list(raw_active_keys))
@@ -909,9 +1068,9 @@ def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", s
             placeholders = ",".join(["?"] * len(active_keys))
             conn.execute(f"""
                 UPDATE tickets 
-                SET ticket_status = 'Đã đóng', closed_at = COALESCE(closed_at, datetime('now', '+7 hours')), updated_at = CURRENT_TIMESTAMP 
+                SET ticket_status = 'Đã đóng 2.6', closed_at = COALESCE(closed_at, datetime('now', '+7 hours')), updated_at = CURRENT_TIMESTAMP 
                 WHERE {source_condition}
-                  AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
+                  AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong' AND ticket_status NOT LIKE '%Đã đóng%')
                   {service_sql}
                   AND phone NOT IN ({placeholders})
             """, source_params + list(active_keys))
@@ -928,7 +1087,6 @@ def get_system_counts(region=None):
     if reg_key in _system_counts_cache and (now_ts - _system_counts_cache_time.get(reg_key, 0) < 3.0):
         return dict(_system_counts_cache[reg_key])
 
-    init_db()
     conn = get_db_connection()
     counts = {
         "tts_old_data": 0,
@@ -945,7 +1103,10 @@ def get_system_counts(region=None):
         "tts_old_api_voice": 0,
         "total_active": 0,
         "total_closed": 0,
-        "total_all": 0
+        "total_all": 0,
+        "today_total": 0,
+        "today_closed": 0,
+        "today_active": 0
     }
     try:
         reg_cond = ""
@@ -954,163 +1115,53 @@ def get_system_counts(region=None):
             reg_cond = " AND region = ?"
             reg_params = [str(region).strip().upper()]
 
-        c1 = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE (source = 'tts_old' OR source IS NULL) 
-              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND {DATA_PKG_SQL}
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["tts_old_data"] = c1[0] if c1 else 0
-
-        c2 = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE (source = 'tts_old' OR source IS NULL) 
-              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND {VOICE_PKG_SQL}
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["tts_old_voice"] = c2[0] if c2 else 0
-
-        c3 = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE source = 'tts_new' 
-              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND {DATA_PKG_SQL}
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["tts_new_data"] = c3[0] if c3 else 0
-
-        c_call = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE source = 'tts_new' 
-              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND {CALL_PKG_SQL}
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["tts_new_call"] = c_call[0] if c_call else 0
-
-        c_sms = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE source = 'tts_new' 
-              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND {SMS_PKG_SQL}
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["tts_new_sms"] = c_sms[0] if c_sms else 0
-
-        c_other = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE source = 'tts_new' 
-              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND {OTHER_PKG_SQL}
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["tts_new_other"] = c_other[0] if c_other else 0
-
-        c_roaming = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE source = 'tts_new' 
-              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND {ROAMING_PKG_SQL}
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["tts_new_roaming"] = c_roaming[0] if c_roaming else 0
-
-        c_sim = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE source = 'tts_new' 
-              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND {SIM_PKG_SQL}
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["tts_new_sim"] = c_sim[0] if c_sim else 0
-
-        c_spam_call = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE source = 'tts_new' 
-              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND {SPAM_CALL_PKG_SQL}
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["tts_new_spam_call"] = c_spam_call[0] if c_spam_call else 0
-
-        c4 = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE source = 'tts_new' 
-              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND {VOICE_PKG_SQL}
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["tts_new_voice"] = c4[0] if c4 else 0
-
-        c5 = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE (source = 'tts_old_api' OR source = 'tts_old' OR source IS NULL) 
-              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND {DATA_PKG_SQL}
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["tts_old_api_data"] = c5[0] if c5 else 0
-
-        c6 = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE (source = 'tts_old_api' OR source = 'tts_old' OR source IS NULL) 
-              AND (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              AND {VOICE_PKG_SQL}
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["tts_old_api_voice"] = c6[0] if c6 else 0
-
-        ca = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong')
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["total_active"] = ca[0] if ca else 0
-
-        cc = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE (ticket_status = 'Đã đóng' OR ticket_status = 'Da dong')
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["total_closed"] = cc[0] if cc else 0
-
-        ct = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE 1=1
-              {reg_cond}
-        """, reg_params).fetchone()
-        counts["total_all"] = ct[0] if ct else 0
-
-        # Thống kê ngày hiện tại (Hôm nay)
         today_iso = datetime.now().strftime("%Y-%m-%d")
         today_dmy = datetime.now().strftime("%d/%m/%Y")
 
-        ctoday = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE (SUBSTR(updated_at, 1, 10) = ? 
-               OR updated_at LIKE ? 
-               OR incident_time LIKE ?)
-               {reg_cond}
-        """, [today_iso, f"{today_iso}%", f"{today_dmy}%"] + reg_params).fetchone()
-        counts["today_total"] = ctoday[0] if ctoday else 0
+        # ⚡ TỐI ƯU HÓA: 1 câu SELECT tổng hợp duy nhất thay thế 15 câu query quét tuần tự
+        # Sử dụng điều kiện chuẩn LIKE/NOT LIKE để nhận diện chính xác các phiếu 'Đã đóng 2.6' và 'Đã đóng 5.1'
+        active_cond = "(ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%' OR ticket_status IS NULL OR ticket_status = '')"
+        closed_cond = "(ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%')"
 
-        c_closed_today = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE (ticket_status = 'Đã đóng' OR ticket_status = 'Da dong') 
-              AND (SUBSTR(updated_at, 1, 10) = ? OR updated_at LIKE ?)
-              {reg_cond}
-        """, [today_iso, f"{today_iso}%"] + reg_params).fetchone()
-        counts["today_closed"] = c_closed_today[0] if c_closed_today else 0
+        agg_sql = f"""
+            SELECT 
+                COALESCE(SUM(CASE WHEN (source = 'tts_old' OR source IS NULL) AND {active_cond} AND {DATA_PKG_SQL} THEN 1 ELSE 0 END), 0) AS tts_old_data,
+                COALESCE(SUM(CASE WHEN (source = 'tts_old' OR source IS NULL) AND {active_cond} AND {VOICE_PKG_SQL} THEN 1 ELSE 0 END), 0) AS tts_old_voice,
+                COALESCE(SUM(CASE WHEN source = 'tts_new' AND {active_cond} AND {DATA_PKG_SQL} THEN 1 ELSE 0 END), 0) AS tts_new_data,
+                COALESCE(SUM(CASE WHEN source = 'tts_new' AND {active_cond} AND {CALL_PKG_SQL} THEN 1 ELSE 0 END), 0) AS tts_new_call,
+                COALESCE(SUM(CASE WHEN source = 'tts_new' AND {active_cond} AND {SMS_PKG_SQL} THEN 1 ELSE 0 END), 0) AS tts_new_sms,
+                COALESCE(SUM(CASE WHEN source = 'tts_new' AND {active_cond} AND {OTHER_PKG_SQL} THEN 1 ELSE 0 END), 0) AS tts_new_other,
+                COALESCE(SUM(CASE WHEN source = 'tts_new' AND {active_cond} AND {ROAMING_PKG_SQL} THEN 1 ELSE 0 END), 0) AS tts_new_roaming,
+                COALESCE(SUM(CASE WHEN source = 'tts_new' AND {active_cond} AND {SIM_PKG_SQL} THEN 1 ELSE 0 END), 0) AS tts_new_sim,
+                COALESCE(SUM(CASE WHEN source = 'tts_new' AND {active_cond} AND {SPAM_CALL_PKG_SQL} THEN 1 ELSE 0 END), 0) AS tts_new_spam_call,
+                COALESCE(SUM(CASE WHEN source = 'tts_new' AND {active_cond} AND {VOICE_PKG_SQL} THEN 1 ELSE 0 END), 0) AS tts_new_voice,
+                COALESCE(SUM(CASE WHEN (source = 'tts_old_api' OR source = 'tts_old' OR source IS NULL) AND {active_cond} AND {DATA_PKG_SQL} THEN 1 ELSE 0 END), 0) AS tts_old_api_data,
+                COALESCE(SUM(CASE WHEN (source = 'tts_old_api' OR source = 'tts_old' OR source IS NULL) AND {active_cond} AND {VOICE_PKG_SQL} THEN 1 ELSE 0 END), 0) AS tts_old_api_voice,
+                COALESCE(SUM(CASE WHEN {active_cond} THEN 1 ELSE 0 END), 0) AS total_active,
+                COALESCE(SUM(CASE WHEN {closed_cond} THEN 1 ELSE 0 END), 0) AS total_closed,
+                COUNT(*) AS total_all,
+                COALESCE(SUM(CASE WHEN (SUBSTR(updated_at, 1, 10) = ? OR updated_at LIKE ? OR incident_time LIKE ?) THEN 1 ELSE 0 END), 0) AS today_total,
+                COALESCE(SUM(CASE WHEN {closed_cond} AND (SUBSTR(updated_at, 1, 10) = ? OR updated_at LIKE ?) THEN 1 ELSE 0 END), 0) AS today_closed,
+                COALESCE(SUM(CASE WHEN {active_cond} AND (SUBSTR(updated_at, 1, 10) = ? OR updated_at LIKE ? OR incident_time LIKE ?) THEN 1 ELSE 0 END), 0) AS today_active
+            FROM tickets
+            WHERE 1=1 {reg_cond};
+        """
+        params = [
+            today_iso, f"{today_iso}%", f"{today_dmy}%",
+            today_iso, f"{today_iso}%",
+            today_iso, f"{today_iso}%", f"{today_dmy}%"
+        ] + reg_params
 
-        c_active_today = conn.execute(f"""
-            SELECT count(*) FROM tickets 
-            WHERE (ticket_status != 'Đã đóng' AND ticket_status != 'Da dong') 
-              AND (SUBSTR(updated_at, 1, 10) = ? OR updated_at LIKE ? OR incident_time LIKE ?)
-              {reg_cond}
-        """, [today_iso, f"{today_iso}%", f"{today_dmy}%"] + reg_params).fetchone()
-        counts["today_active"] = c_active_today[0] if c_active_today else 0
+        row = conn.execute(agg_sql, params).fetchone()
+        if row:
+            keys = [
+                "tts_old_data", "tts_old_voice", "tts_new_data", "tts_new_call", "tts_new_sms",
+                "tts_new_other", "tts_new_roaming", "tts_new_sim", "tts_new_spam_call", "tts_new_voice",
+                "tts_old_api_data", "tts_old_api_voice", "total_active", "total_closed", "total_all",
+                "today_total", "today_closed", "today_active"
+            ]
+            for idx, k in enumerate(keys):
+                counts[k] = row[idx]
     except Exception as e:
         print("Lỗi get_system_counts:", e)
     finally:
@@ -1179,7 +1230,6 @@ def get_ticket_counts(source=None, service_type=None, search=None, region=None):
         conn.close()
 
 def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=None, service_type=None, region=None):
-    init_db()
     conn = get_db_connection()
     query = "SELECT * FROM tickets WHERE 1=1"
     params = []
@@ -1319,12 +1369,26 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
             except Exception:
                 pass
 
+        # Tự động trích xuất thông tin Thời điểm sự cố & Lỗi cho phân hệ SMS nếu chưa có trong DB
+        if not is_closed:
+            pt_raw = str(item.get("package_title") or "").strip()
+            if is_sms_ticket(pt_raw) or service_type == "sms":
+                if not item.get("sms_incident_time"):
+                    try:
+                        from services.sms_analyzer import parse_sms_incident_details
+                        parsed_sms = parse_sms_incident_details(item.get("ticket_content", ""), item.get("incident_time", ""))
+                        item["sms_incident_time"] = parsed_sms.get("incident_time", "")
+                        if not item.get("sms_problem") and parsed_sms.get("problem"):
+                            item["sms_problem"] = parsed_sms.get("problem", "")
+                    except Exception:
+                        pass
+
         results.append(item)
     conn.close()
     return results
 
 def update_ticket_field(phone, field, value, incident_time=None):
-    valid_fields = ["comment", "action_plan", "ticket_status", "status", "ai_summary", "closed_by", "reopen_count", "last_reopened_date", "incident_cause", "closed_at", "prechecked_at", "ward"]
+    valid_fields = ["comment", "action_plan", "ticket_status", "status", "ai_summary", "closed_by", "reopen_count", "last_reopened_date", "incident_cause", "closed_at", "prechecked_at", "ward", "sms_incident_time", "sms_problem", "sms_cdr_summary"]
     if field not in valid_fields:
         return False
 
@@ -1754,7 +1818,183 @@ def validate_ttsnew_ward_for_51(ticket_id=None, phone=None, ticket_code=None, ti
     return True, "Hợp lệ"
 
 
+def save_sms_analysis_bulk(records: list):
+    """Lưu kết quả phân tích thời điểm sự cố và lỗi cụ thể cho danh sách phiếu SMS vào database."""
+    if not records:
+        return
+    init_db()
+    conn = get_db_connection()
+    with conn:
+        for r in records:
+            phone = str(r.get("phone") or "").strip()
+            inc_time = str(r.get("incident_time") or "").strip()
+            sms_inc_time = str(r.get("sms_incident_time") or "").strip()
+            sms_prob = str(r.get("sms_problem") or "").strip()
+            t_code = str(r.get("ticket_code") or "").strip()
+            clean_code = t_code.split("\n")[0].strip() if t_code else ""
+
+            if clean_code:
+                conn.execute("""
+                    UPDATE tickets 
+                    SET sms_incident_time = ?, sms_problem = ?, updated_at = CURRENT_TIMESTAMP 
+                    WHERE ticket_code = ? OR ticket_code LIKE ?
+                """, (sms_inc_time, sms_prob, clean_code, f"{clean_code}%"))
+            elif phone and inc_time:
+                conn.execute("""
+                    UPDATE tickets 
+                    SET sms_incident_time = ?, sms_problem = ?, updated_at = CURRENT_TIMESTAMP 
+                    WHERE phone = ? AND incident_time = ?
+                """, (sms_inc_time, sms_prob, phone, inc_time))
+            elif phone:
+                conn.execute("""
+                    UPDATE tickets 
+                    SET sms_incident_time = ?, sms_problem = ?, updated_at = CURRENT_TIMESTAMP 
+                    WHERE phone = ?
+                """, (sms_inc_time, sms_prob, phone))
+    conn.close()
+
+
+def save_sms_cdr_summary(phone: str, summary_json_str: str, incident_time: str = "", ticket_code: str = ""):
+    """Lưu tóm tắt CDR SMSC vào database tickets để lưu vết vĩnh viễn và load tức thì."""
+    if not phone and not ticket_code:
+        return
+    init_db()
+    conn = get_db_connection()
+    with conn:
+        clean_code = ticket_code.split("\n")[0].strip() if ticket_code else ""
+        clean_phone = phone.strip()
+        if clean_code:
+            conn.execute("""
+                UPDATE tickets 
+                SET sms_cdr_summary = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE ticket_code = ? OR ticket_code LIKE ?
+            """, (summary_json_str, clean_code, f"{clean_code}%"))
+        elif clean_phone and incident_time:
+            conn.execute("""
+                UPDATE tickets 
+                SET sms_cdr_summary = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE (phone = ? OR phone LIKE ?) AND incident_time = ?
+            """, (summary_json_str, clean_phone, f"%{clean_phone[-9:]}%", incident_time))
+        elif clean_phone:
+            conn.execute("""
+                UPDATE tickets 
+                SET sms_cdr_summary = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE phone = ? OR phone LIKE ?
+            """, (summary_json_str, clean_phone, f"%{clean_phone[-9:]}%"))
+    conn.close()
+
+
+def save_sms_cdr_records(phone: str, ticket_code: str, records: list) -> int:
+    """
+    Lưu danh sách bản ghi chi tiết CDR (tối đa 10.000 dòng) vào bảng sms_cdr_records.
+    Sử dụng batch executemany với INSERT OR IGNORE để chống trùng lặp và đạt tốc độ <0.1s.
+    """
+    if not phone or not records or not isinstance(records, list):
+        return 0
+
+    init_db()
+    clean_p = "".join(filter(str.isdigit, str(phone).strip()))
+    if len(clean_p) == 9:
+        clean_p = "84" + clean_p
+    elif clean_p.startswith("0") and len(clean_p) == 10:
+        clean_p = "84" + clean_p[1:]
+
+    clean_code = str(ticket_code or "").split("\n")[0].strip()
+
+    rows_to_insert = []
+    for r in records:
+        site = str(r.get("site") or "")
+        calling = str(r.get("calling_number") or "").strip()
+        called = str(r.get("called_number") or "").strip()
+        dt = str(r.get("delivery_time") or "").strip()
+        st = str(r.get("submission_time") or "").strip()
+        direction = str(r.get("direction") or "").strip()
+        status_code = str(r.get("status_code") or "")
+        status_desc = str(r.get("status_desc") or "")
+        status_type = str(r.get("status_type") or "")
+        cause = str(r.get("termination_cause") or "")
+        cause_info = str(r.get("termination_cause_info") or "")
+        msg_len = str(r.get("message_length") or "")
+        attempts = int(r.get("attempts") or 1)
+
+        rows_to_insert.append((
+            clean_p, clean_code, site, calling, called, dt, st,
+            direction, status_code, status_desc, status_type,
+            cause, cause_info, msg_len, attempts
+        ))
+
+    if not rows_to_insert:
+        return 0
+
+    conn = get_db_connection()
+    inserted_count = 0
+    try:
+        with conn:
+            cur = conn.executemany("""
+                INSERT OR IGNORE INTO sms_cdr_records (
+                    phone, ticket_code, site, calling_number, called_number,
+                    delivery_time, submission_time, direction, status_code,
+                    status_desc, status_type, termination_cause,
+                    termination_cause_info, message_length, attempts
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, rows_to_insert)
+            inserted_count = cur.rowcount
+    except Exception as ex:
+        print(f"⚠️ [DB SAVE SMS CDR] Lỗi lưu bản ghi CDR vào sqlite: {ex}")
+    finally:
+        conn.close()
+
+    return inserted_count
+
+
+def get_sms_cdr_records(phone: str, ticket_code: str = None, limit: int = 1000) -> list:
+    """Truy vấn các bản ghi CDR đã lưu trong database theo số điện thoại hoặc mã phiếu"""
+    if not phone and not ticket_code:
+        return []
+
+    init_db()
+    clean_p = "".join(filter(str.isdigit, str(phone or "").strip()))
+    if len(clean_p) == 9:
+        clean_p = "84" + clean_p
+    elif clean_p.startswith("0") and len(clean_p) == 10:
+        clean_p = "84" + clean_p[1:]
+
+    conn = get_db_connection()
+    try:
+        if clean_p and ticket_code:
+            clean_code = str(ticket_code).split("\n")[0].strip()
+            rows = conn.execute("""
+                SELECT * FROM sms_cdr_records
+                WHERE (phone = ? OR phone LIKE ?) AND (ticket_code = ? OR ticket_code LIKE ?)
+                ORDER BY delivery_time DESC
+                LIMIT ?
+            """, (clean_p, f"%{clean_p[-9:]}%", clean_code, f"{clean_code}%", limit)).fetchall()
+        elif clean_p:
+            rows = conn.execute("""
+                SELECT * FROM sms_cdr_records
+                WHERE phone = ? OR phone LIKE ?
+                ORDER BY delivery_time DESC
+                LIMIT ?
+            """, (clean_p, f"%{clean_p[-9:]}%", limit)).fetchall()
+        else:
+            clean_code = str(ticket_code).split("\n")[0].strip()
+            rows = conn.execute("""
+                SELECT * FROM sms_cdr_records
+                WHERE ticket_code = ? OR ticket_code LIKE ?
+                ORDER BY delivery_time DESC
+                LIMIT ?
+            """, (clean_code, f"{clean_code}%", limit)).fetchall()
+
+        return [dict(r) for r in rows]
+    except Exception as ex:
+        print(f"⚠️ [DB GET SMS CDR] Lỗi truy vấn bản ghi CDR: {ex}")
+        return []
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     init_db()
     print("✅ Database initialized successfully at:", DB_PATH)
+
 

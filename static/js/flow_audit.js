@@ -16,7 +16,7 @@ function selectFlowAuditModule(updateUrl = true) {
     const activeBtn = document.getElementById('nav-flow-audit');
     if (activeBtn) activeBtn.classList.add('active');
 
-    // 2. Ẩn các khu vực view khác
+    // 2. Ẩn tất cả các khu vực view khác
     const mainTabs = document.getElementById('mainTabsHeader');
     if (mainTabs) mainTabs.style.display = 'none';
 
@@ -28,6 +28,7 @@ function selectFlowAuditModule(updateUrl = true) {
 
     const userMgmtContainer = document.getElementById('userManagementContainer');
     if (userMgmtContainer) userMgmtContainer.style.display = 'none';
+    document.querySelectorAll('.user-management-container, #userManagementContainer').forEach(el => el.style.display = 'none');
     if (typeof isUserManagementView !== 'undefined') isUserManagementView = false;
 
     // 3. Hiện container module kiểm tra luồng

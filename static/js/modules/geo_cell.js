@@ -29,7 +29,10 @@ function formatRadioCellHtml(radioVal, cellName) {
         c = parts.slice(1).join(',').trim();
     }
     if (c) {
-        const cellUrl = `http://127.0.0.1:1708/cellid/${encodeURIComponent(c)}`;
+        const host1708 = (typeof window !== 'undefined' && window.location && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
+            ? window.location.hostname
+            : '10.155.59.158';
+        const cellUrl = `http://${host1708}:1708/cellid/${encodeURIComponent(c)}`;
         return `${escapeHtml(r)}, <a href="${cellUrl}" target="_blank" style="color:#0284c7; font-weight:700; text-decoration:underline;" title="Xem vị trí Cell ${escapeHtml(c)} trên bản đồ (CustomerPosition)">${escapeHtml(c)}</a>`;
     }
     return escapeHtml(r);
@@ -149,13 +152,15 @@ function extractAllCellsFromCem(text) {
 
 function normalizeVnLocation(text) {
     if (!text) return '';
-    return text.toLowerCase()
+    let s = text.toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
         .replace(/[đĐ]/g, 'd')
-        .replace(/\b(phuong|xa|thi tran|quan|huyen|tp|tp\.|thanh pho|tinh|p\.|x\.|q\.)\b/g, '')
-        .replace(/[^a-z0-9]/g, ' ')
+        .replace(/[^a-z0-9\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+    // Chỉ loại bỏ tiền tố ở đầu chuỗi
+    s = s.replace(/^(tinh|thanh pho|tp|phuong|xa|thi tran|thi xa|quan|huyen|p|x|q|tt)\s+/i, '').trim();
+    return s.replace(/y/g, 'i');
 }
 
 function renderCemIncidentLocation(ticketKey, rawCemIncident, phone = '', incidentTime = '') {
@@ -273,14 +278,17 @@ async function triggerAsyncTicketBoundaryLookup(ticketId, ticketKey) {
 
 function normalizeLocationString(str) {
     if (!str) return '';
-    return str.toString()
+    let s = str.toString()
         .toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-        .replace(/đ/g, 'd')
-        .replace(/\b(phuong|xa|thi tran|quan|huyen|thi xa|thanh pho|tinh|tp\.|tp|p\.|x\.|p\d+)\b/gi, '')
-        .replace(/[^a-z0-9]/g, ' ')
+        .replace(/[đĐ]/g, 'd')
+        .replace(/[^a-z0-9\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+    // Chỉ loại bỏ tiền tố ở đầu chuỗi (ví dụ: "tinh dong thap" -> "dong thap", "xa my qui" -> "my qui")
+    s = s.replace(/^(tinh|thanh pho|tp|phuong|xa|thi tran|thi xa|quan|huyen|p|x|tt)\s+/i, '').trim();
+    // Đồng nhất i ngắn và y dài (qui <-> quy, my <-> mi, ly <-> li)
+    return s.replace(/y/g, 'i');
 }
 
 function isLocationMatched(ttsWard, ttsProv, actualWard, actualProv) {
@@ -1039,16 +1047,23 @@ async function quickApplyWardFromCell(phone, incidentTime, ticketKey, rawWard, r
         let matchedProv = null;
         let matchedWard = null;
 
-        const provClean = provStr.toLowerCase().replace(/^(tỉnh|thành phố|tp\.|tp)\s+/i, '').trim();
+        const provClean = provStr.toLowerCase().trim();
         const provNorm = normalizeLocationString(provStr);
 
-        if (provinces && provinces.length > 0 && provNorm) {
-            matchedProv = provinces.find(p => {
-                if (p.code && p.code.toLowerCase() === provClean) return true;
-                const pNorm = normalizeLocationString(p.name);
-                return pNorm === provNorm || pNorm.includes(provNorm) || provNorm.includes(pNorm);
-            });
-            if (!matchedProv) {
+        if (provinces && provinces.length > 0) {
+            // 1. ƯU TIÊN SỐ 1: Khớp trực tiếp 100% nguyên văn tên tỉnh (Exact Match từ Google API)
+            matchedProv = provinces.find(p => (p.name || '').toLowerCase().trim() === provClean);
+
+            // 2. ƯU TIÊN SỐ 2: Khớp theo tên chuẩn hóa sau khi bỏ tiền tố đầu chuỗi và đồng nhất i/y
+            if (!matchedProv && provNorm) {
+                matchedProv = provinces.find(p => {
+                    const pNorm = normalizeLocationString(p.name);
+                    return pNorm === provNorm;
+                });
+            }
+
+            // 3. Khớp trường hợp đặc biệt TP.HCM / Hà Nội
+            if (!matchedProv && provNorm) {
                 if (provNorm.includes('ho chi minh') || provNorm.includes('hcm') || provNorm.includes('sai gon')) {
                     matchedProv = provinces.find(p => (p.name || '').toLowerCase().includes('hồ chí minh') || p.code === 'HCM');
                 } else if (provNorm.includes('ha noi') || provNorm.includes('hni')) {
@@ -1064,14 +1079,30 @@ async function quickApplyWardFromCell(phone, incidentTime, ticketKey, rawWard, r
             }
         }
 
+        // Tìm Phường/Xã từ danh mục của Tỉnh đã khớp
+        const wardClean = wardStr.toLowerCase().trim();
         const wardNorm = normalizeLocationString(wardStr);
-        if (matchedProv && wardNorm) {
+        if (matchedProv) {
             const wards = await loadTtsNewWards(matchedProv.id);
             if (wards && wards.length > 0) {
-                matchedWard = wards.find(w => {
-                    const wNorm = normalizeLocationString(w.name);
-                    return wNorm === wardNorm || wNorm.includes(wardNorm) || wardNorm.includes(wNorm);
-                });
+                // 1. ƯU TIÊN SỐ 1: Khớp trực tiếp 100% nguyên văn tên Phường/Xã (Exact Match từ Google API)
+                matchedWard = wards.find(w => (w.name || '').toLowerCase().trim() === wardClean);
+
+                // 2. ƯU TIÊN SỐ 2: Khớp theo tên chuẩn hóa (đã đồng nhất i ngắn và y dài: Mỹ Quí == Mỹ Quý)
+                if (!matchedWard && wardNorm) {
+                    matchedWard = wards.find(w => {
+                        const wNorm = normalizeLocationString(w.name);
+                        return wNorm === wardNorm;
+                    });
+                }
+
+                // 3. Fallback chỉ khi tên xã dài và có từ khóa hoàn chỉnh
+                if (!matchedWard && wardNorm && wardNorm.length >= 5) {
+                    matchedWard = wards.find(w => {
+                        const wNorm = normalizeLocationString(w.name);
+                        return wNorm.includes(wardNorm) || wardNorm.includes(wNorm);
+                    });
+                }
             }
         }
 
