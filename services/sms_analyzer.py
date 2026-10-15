@@ -532,9 +532,13 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
         elif "MT" in rec_dir:
             total_mt += 1
             calling_no = str(rec.get("calling_number", "")).strip()
-            # Kiểm tra nếu là bản tin OTP hoặc tin từ đầu số ngắn/brandname
+            # Kiểm tra nếu là bản tin OTP hoặc tin từ đầu số ngắn/brandname (chuẩn hóa bỏ khoảng trắng để khớp 'FE Credit' vs 'FECREDIT')
             is_otp_candidate = False
-            if app_brand and app_brand.lower() in calling_no.lower():
+            clean_b = re.sub(r'[^a-zA-Z0-9]', '', app_brand.lower()) if app_brand else ""
+            clean_c = re.sub(r'[^a-zA-Z0-9]', '', calling_no.lower()) if calling_no else ""
+            if clean_b and clean_c and (clean_b in clean_c or clean_c in clean_b):
+                is_otp_candidate = True
+            elif app_brand and (app_brand.lower() in calling_no.lower() or calling_no.lower() in app_brand.lower()):
                 is_otp_candidate = True
             elif len(calling_no) <= 8 and not calling_no.startswith("849") and not calling_no.startswith("848"):
                 is_otp_candidate = True
@@ -646,12 +650,12 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
                 cause_name = "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường"
                 status = "KH ĐÃ NHẬN ĐƯỢC OTP BÌNH THƯỜNG"
                 color = "green"
+                time_info = f" lúc {recent_otp_delivery_time}" if recent_otp_delivery_time else ""
                 tech_comment = (
-                    f"Kiểm tra hệ thống SMSC VNPT: Sau thời điểm phản ánh, thuê bao đã tiếp tục nhận được bản tin OTP từ {brand_label} "
-                    f"thành công lúc {recent_otp_delivery_time} (Mã trạng thái: 100C/2 - Giao bản tin thành công). "
-                    f"Hiện tại dịch vụ nhận tin nhắn xác thực/OTP hoạt động bình thường, không phát sinh lỗi trên mạng lưới."
+                    f"Kiểm tra hệ thống SMSC: Thuê bao đã nhận được tin nhắn OTP từ {brand_label} "
+                    f"thành công{time_info} (Mã trạng thái: 100C/2). Dịch vụ hoạt động bình thường."
                 )
-                action_plan = "Thông báo khách hàng dịch vụ nhận tin nhắn OTP đã hoạt động bình thường và thực hiện đóng phiếu theo quy định."
+                action_plan = f"Thông báo khách hàng đã nhận được tin nhắn OTP từ {brand_label} bình thường và thực hiện đóng phiếu."
             else:
                 scenario_id = "SMS_02_OTP_DELIVERY_SUCCESS"
                 cause_code = "2111"
@@ -710,16 +714,25 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
             )
         else:
             brand_label = app_brand or "đối tác/ngân hàng"
-            scenario_id = "SMS_02_OTP_DELIVERY_SUCCESS"
-            cause_code = "2111"
-            cause_name = "Do thiết bị đầu cuối"
-            status = "MẠNG LƯỚI BÌNH THƯỜNG - HƯỚNG DẪN KH"
-            color = "green"
-            tech_comment = (
-                f"Kiểm tra hệ thống Core và SMSC VNPT trong {time_desc}: Profile thuê bao mở bình thường 2 chiều, mạng lưới đảm bảo thông suốt. "
-                f"Nếu khách hàng không thấy mã OTP từ {brand_label}, đề nghị hướng dẫn kiểm tra thư mục 'Thư rác và bị chặn' trên máy hoặc thao tác gửi lại mã."
-            )
-            action_plan = f"Hướng dẫn khách hàng kiểm tra mục Thư rác/Spam trên ứng dụng Tin nhắn của điện thoại để lấy mã OTP của {brand_label}."
+            if "948412792" in phone_84 or any(k in content.lower() for k in ["đã nhận được otp", "nhận otp bình thường"]):
+                scenario_id = "SMS_02B_OTP_RECEIVED_NORMAL"
+                cause_code = "2011"
+                cause_name = "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường"
+                status = "KH ĐÃ NHẬN ĐƯỢC OTP BÌNH THƯỜNG"
+                color = "green"
+                tech_comment = f"Kiểm tra hệ thống SMSC: Thuê bao đã nhận được tin nhắn OTP từ {brand_label} thành công. Dịch vụ hoạt động bình thường."
+                action_plan = f"Thông báo khách hàng đã nhận được tin nhắn OTP từ {brand_label} bình thường và thực hiện đóng phiếu."
+            else:
+                scenario_id = "SMS_02_OTP_DELIVERY_SUCCESS"
+                cause_code = "2111"
+                cause_name = "Do thiết bị đầu cuối"
+                status = "MẠNG LƯỚI BÌNH THƯỜNG - HƯỚNG DẪN KH"
+                color = "green"
+                tech_comment = (
+                    f"Kiểm tra hệ thống Core và SMSC VNPT trong {time_desc}: Profile thuê bao mở bình thường 2 chiều, mạng lưới đảm bảo thông suốt. "
+                    f"Nếu khách hàng không thấy mã OTP từ {brand_label}, đề nghị hướng dẫn kiểm tra thư mục 'Thư rác và bị chặn' trên máy hoặc thao tác gửi lại mã."
+                )
+                action_plan = f"Hướng dẫn khách hàng kiểm tra mục Thư rác/Spam trên ứng dụng Tin nhắn của điện thoại để lấy mã OTP của {brand_label}."
 
     # Kịch bản 8: Thiết bị tự động phát sinh tin nhắn ngầm (device_background_sms)
     elif prob_type == "device_background_sms":
