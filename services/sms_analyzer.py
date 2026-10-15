@@ -495,6 +495,14 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
     long_sms_count = 0
     recent_otp_delivery_time = ""
     recent_otp_sender = ""
+    target_brand = app_brand or ""
+    target_brand_found = False
+    target_brand_deliv_time = ""
+    target_brand_sender = ""
+    target_brand_ok = False
+    target_brand_fail_cause = ""
+    generic_otp_delivery_time = ""
+    generic_otp_sender = ""
     recent_mo_time = ""
     recent_mo_destination = ""
     recent_mo_status = ""
@@ -532,29 +540,61 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
         elif "MT" in rec_dir:
             total_mt += 1
             calling_no = str(rec.get("calling_number", "")).strip()
-            # Kiểm tra nếu là bản tin OTP hoặc tin từ đầu số ngắn/brandname (chuẩn hóa bỏ khoảng trắng để khớp 'FE Credit' vs 'FECREDIT')
-            is_otp_candidate = False
-            clean_b = re.sub(r'[^a-zA-Z0-9]', '', app_brand.lower()) if app_brand else ""
-            clean_c = re.sub(r'[^a-zA-Z0-9]', '', calling_no.lower()) if calling_no else ""
-            if clean_b and clean_c and (clean_b in clean_c or clean_c in clean_b):
-                is_otp_candidate = True
-            elif app_brand and (app_brand.lower() in calling_no.lower() or calling_no.lower() in app_brand.lower()):
-                is_otp_candidate = True
-            elif len(calling_no) <= 8 and not calling_no.startswith("849") and not calling_no.startswith("848"):
-                is_otp_candidate = True
-            elif not calling_no.isdigit() and len(calling_no) > 0:
-                is_otp_candidate = True
+            st_type = rec.get("status_type", "")
+            st_code = str(rec.get("status_code", "")).strip()
+            t_cause = str(rec.get("termination_cause", "")).strip()
+            del_time = rec.get("delivery_time") or rec.get("submission_time") or ""
 
             is_mt_ok = (st_type == "success" or st_code in ("100C", "100c", "8", "0", "2") or t_cause in ("100C", "100c", "0", "0000", "2"))
             if is_mt_ok:
                 mt_success += 1
-                if (is_otp_candidate or not recent_otp_delivery_time) and not recent_otp_delivery_time:
-                    recent_otp_delivery_time = del_time
-                    recent_otp_sender = calling_no
             else:
                 mt_fail += 1
                 cause_key = f"{t_cause} ({st_code})" if t_cause and t_cause != "--" else st_code
                 mt_fail_causes[cause_key] = mt_fail_causes.get(cause_key, 0) + 1
+
+            # 1. So khớp CHÍNH XÁC theo biến đối tượng đích (Target Brand, ví dụ: FE Credit, ACB, Vietcombank...)
+            clean_c = re.sub(r'[^a-zA-Z0-9]', '', calling_no.lower()) if calling_no else ""
+            clean_t = re.sub(r'[^a-zA-Z0-9]', '', (target_brand or "").lower()) if target_brand else ""
+            system_generic = {"888", "900", "156", "999", "vinaphone", "vnpt", "quangcao", "qc", "cskh"}
+
+            is_matched_target = False
+            if clean_t and clean_c:
+                if clean_t in clean_c or clean_c in clean_t:
+                    is_matched_target = True
+                elif target_brand and (target_brand.lower() in calling_no.lower() or calling_no.lower() in target_brand.lower()):
+                    is_matched_target = True
+
+            if is_matched_target:
+                target_brand_found = True
+                if is_mt_ok:
+                    target_brand_ok = True
+                    if not target_brand_deliv_time:
+                        target_brand_deliv_time = del_time
+                        target_brand_sender = calling_no
+                else:
+                    if not target_brand_fail_cause:
+                        target_brand_fail_cause = t_cause or st_code
+
+            # 2. Nếu khách không chỉ định ngân hàng cụ thể: chỉ nhận diện OTP candidate không thuộc danh sách đầu số hệ thống (888, 900...)
+            elif not target_brand and clean_c not in system_generic:
+                is_otp_candidate = False
+                if len(calling_no) <= 8 and not calling_no.startswith("849") and not calling_no.startswith("848"):
+                    is_otp_candidate = True
+                elif not calling_no.isdigit() and len(calling_no) > 0:
+                    is_otp_candidate = True
+
+                if is_otp_candidate and is_mt_ok and not generic_otp_delivery_time:
+                    generic_otp_delivery_time = del_time
+                    generic_otp_sender = calling_no
+
+    # Gán mốc OTP và Brand đích nếu có
+    if target_brand:
+        recent_otp_delivery_time = target_brand_deliv_time
+        recent_otp_sender = target_brand_sender or target_brand
+    else:
+        recent_otp_delivery_time = generic_otp_delivery_time
+        recent_otp_sender = generic_otp_sender
 
     # 4. Xác định Kịch bản Chẩn đoán & Kết luận kỹ thuật
     has_cdr = len(cdr_records) > 0
@@ -614,7 +654,7 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
     # Kịch bản 2 & 3 & 3B: Lỗi OTP (otp)
     elif prob_type == "otp":
         if has_cdr and recent_otp_delivery_time:
-            brand_label = recent_otp_sender or app_brand or "đối tác/ngân hàng"
+            brand_label = target_brand or recent_otp_sender or "đối tác/ngân hàng"
             # Kiểm tra xem bản tin OTP thành công có phát sinh sau thời điểm phản ánh/sự cố không
             is_delivered_after_incident = False
             try:
@@ -674,6 +714,20 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
                     f"-> chọn mục 'Thư rác và bị chặn' (Spam & Blocked) hoặc 'Tin nhắn chưa biết & Rác' (Junk) để lấy mã OTP của {brand_label}. "
                     f"Đồng thời chọn 'Không phải thư rác' hoặc thêm vào danh bạ tin cậy để các bản tin OTP sau hiển thị thẳng vào Hộp thư chính."
                 )
+        elif has_cdr and target_brand and target_brand_found and not target_brand_ok:
+            # Đối tác có đẩy MT nhưng thất bại trên SMSC
+            scenario_id = "SMS_07_MT_RECEIVE_FAIL_GENERAL"
+            cause_code = "2111"
+            cause_name = "Do thiết bị đầu cuối"
+            status = "LỖI PHÁT OTP TỪ ĐỐI TÁC"
+            color = "red"
+            brand_label = target_brand
+            fail_info = f" (Mã lỗi SMSC: {target_brand_fail_cause})" if target_brand_fail_cause else ""
+            tech_comment = (
+                f"Kiểm tra hệ thống SMSC VNPT: Ghi nhận bản tin OTP từ {brand_label} đẩy về hệ thống nhưng "
+                f"chuyển phát tới máy thuê bao không thành công{fail_info}. Nguyên nhân: Thuê bao tắt máy, ngoài vùng phủ sóng hoặc bộ nhớ tin nhắn máy bị đầy."
+            )
+            action_plan = f"Hướng dẫn khách hàng bật máy, di chuyển đến nơi sóng tốt, dọn dẹp bộ nhớ tin nhắn và thao tác lấy lại OTP từ {brand_label}."
         elif has_cdr and mo_success > 0 and not recent_otp_delivery_time:
             # Kịch bản 3B: Xác thực 2 chiều (MO OK nhưng đối tác chưa đẩy bản tin MT OTP)
             scenario_id = "SMS_03B_2WAY_OTP_MO_OK_MT_MISSING"
@@ -681,7 +735,7 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
             cause_name = "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường"
             status = "MO THÀNH CÔNG - ĐỐI TÁC CHƯA TRẢ OTP"
             color = "orange"
-            brand_label = app_brand or "đối tác/ngân hàng"
+            brand_label = target_brand or app_brand or "đối tác/ngân hàng"
             dest_info = recent_mo_destination or "đầu số trung gian của đối tác"
             time_mo_info = f" lúc {recent_mo_time}" if recent_mo_time else ""
             st_info = recent_mo_status or "Thành công (100C/2)"
@@ -703,7 +757,7 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
             cause_name = "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường"
             status = "ĐỐI TÁC CHƯA ĐẨY BẢN TIN OTP"
             color = "orange"
-            brand_label = app_brand or "đối tác/ngân hàng"
+            brand_label = target_brand or app_brand or "đối tác/ngân hàng"
             tech_comment = (
                 f"Kiểm tra hệ thống SMSC VNPT trong {time_desc}: Không ghi nhận bản tin OTP nào từ phía {brand_label} "
                 f"gửi vào hệ thống SMSC VNPT để định tuyến đến thuê bao. Profile thuê bao nhận tin bình thường."
@@ -713,8 +767,8 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
                 f"để kiểm tra luồng phát tin OTP từ hệ thống của họ."
             )
         else:
-            brand_label = app_brand or "đối tác/ngân hàng"
-            if "948412792" in phone_84 or any(k in content.lower() for k in ["đã nhận được otp", "nhận otp bình thường"]):
+            brand_label = target_brand or app_brand or "đối tác/ngân hàng"
+            if any(k in content.lower() for k in ["đã nhận được otp", "nhận otp bình thường"]):
                 scenario_id = "SMS_02B_OTP_RECEIVED_NORMAL"
                 cause_code = "2011"
                 cause_name = "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường"
