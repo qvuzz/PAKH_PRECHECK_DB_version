@@ -457,7 +457,7 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
                 direction="both", 
                 from_time_str=from_date, 
                 to_time_str=to_date, 
-                limit=1000
+                limit=10000
             )
             if cdr_res and cdr_res.get("success"):
                 cdr_records = cdr_res.get("records", [])
@@ -476,10 +476,10 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
     if not cdr_records:
         try:
             from db_manager import get_sms_cdr_records
-            cached_db = get_sms_cdr_records(phone_84, ticket_code=code, limit=1000)
+            cached_db = get_sms_cdr_records(phone_84, ticket_code=code, limit=10000)
             if not cached_db:
                 # Tìm dự phòng theo riêng số điện thoại nếu ticket_code khác hoặc chưa gán
-                cached_db = get_sms_cdr_records(phone_84, limit=1000)
+                cached_db = get_sms_cdr_records(phone_84, limit=10000)
             if cached_db:
                 cdr_records = cached_db
                 cdr_error = None

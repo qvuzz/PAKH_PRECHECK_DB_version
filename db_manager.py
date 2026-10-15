@@ -1947,7 +1947,7 @@ def save_sms_cdr_records(phone: str, ticket_code: str, records: list) -> int:
     return inserted_count
 
 
-def get_sms_cdr_records(phone: str, ticket_code: str = None, limit: int = 1000) -> list:
+def get_sms_cdr_records(phone: str, ticket_code: str = None, limit: int = 10000) -> list:
     """Truy vấn các bản ghi CDR đã lưu trong database theo số điện thoại hoặc mã phiếu"""
     if not phone and not ticket_code:
         return []
