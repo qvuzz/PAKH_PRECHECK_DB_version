@@ -1,0 +1,425 @@
+{
+    "METADATA": {
+        "version": "1.0.0",
+        "last_updated": "2026-10-16",
+        "description": "Kịch bản tiền kiểm và đóng phiếu tự động cho phản ánh Tin nhắn SMS trên hệ thống SMSC CDR VNPT",
+        "references": [
+            "sms_code.json",
+            "sms_lib.json",
+            "3GPP TS 23.040",
+            "3GPP TS 29.002"
+        ]
+    },
+    "SCENARIOS": [
+        {
+            "id": "SMS_01_COST_DISPUTE_VALID_USAGE",
+            "name": "Khiếu nại cước - Cước phát sinh đúng lưu lượng gửi thực tế",
+            "conclusion": "CƯỚC PHÁT SINH ĐÚNG LƯU LƯỢNG",
+            "color": "green",
+            "suggested_cause_code": "2006",
+            "suggested_cause_name": "Cung cấp log file SMS theo yêu cầu",
+            "technical_analysis": "Tổng đài ghi nhận thuê bao có phát sinh các tin nhắn gửi đi trong khoảng thời gian phản ánh. Cước dịch vụ được tính khi thuê bao khởi tạo gửi tin nhắn thành công lên tổng đài, chính xác theo số lượng tin nhắn thực tế phát sinh từ máy của khách hàng.",
+            "action_plan": "Cung cấp chi tiết lịch sử gửi tin nhắn cho khách hàng đối chiếu. Giải thích tin nhắn dài hoặc có dấu tiếng Việt sẽ được tính từ 2 phân đoạn cước trở lên theo quy định."
+        },
+        {
+            "id": "SMS_02_OTP_DELIVERY_SUCCESS",
+            "name": "Lỗi OTP - Tổng đài đã phát tin thành công (Điện thoại lọc vào Thư rác/Junk)",
+            "conclusion": "TỔNG ĐÀI ĐÃ GIAO OTP VỀ MÁY THÀNH CÔNG",
+            "color": "green",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Kiểm tra hệ thống: Tin nhắn OTP từ đối tác đã được tổng đài VinaPhone chuyển phát thành công về máy của khách hàng. Nguyên nhân máy không hiện tin nhắn do ứng dụng Tin nhắn trên điện thoại tự động nhận diện đầu số OTP là tin rác/quảng cáo và đẩy vào mục ẩn.",
+            "action_plan": "Hướng dẫn khách hàng: Mở ứng dụng Tin nhắn trên điện thoại -> vào mục menu (dấu 3 chấm) -> chọn 'Thư rác và bị chặn' (hoặc 'Tin nhắn rác') để lấy mã OTP. Đồng thời bấm chọn 'Không phải thư rác' để các tin nhắn OTP sau hiển thị bình thường vào hộp thư đến."
+        },
+        {
+            "id": "SMS_02B_OTP_RECEIVED_NORMAL",
+            "name": "Lỗi OTP - Khách hàng đã nhận được OTP bình thường (sau mốc phản ánh)",
+            "conclusion": "KH ĐÃ NHẬN ĐƯỢC OTP BÌNH THƯỜNG",
+            "color": "green",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Kiểm tra hệ thống: Thuê bao đã nhận được tin nhắn OTP từ đối tác thành công. Dịch vụ nhận tin nhắn hoạt động bình thường.",
+            "action_plan": "Thông báo khách hàng dịch vụ nhận tin nhắn OTP đã hoạt động bình thường và thực hiện đóng phiếu."
+        },
+        {
+            "id": "SMS_03_MULTIPART_RETRY_OK",
+            "name": "Tin nhắn dài tự động ghép mảnh thành công",
+            "conclusion": "TIN NHẮN ĐÃ GIAO ĐẦY ĐỦ VỀ MÁY",
+            "color": "green",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Tin nhắn dài đã được hệ thống tự động ghép lại và chuyển phát đầy đủ, nguyên vẹn đến máy của khách hàng. Dịch vụ tin nhắn hoạt động bình thường.",
+            "action_plan": "Khẳng định mạng lưới chuyển phát tin nhắn thành công hoàn tất tới thuê bao. Khách hàng đã nhận đủ nội dung tin nhắn."
+        },
+        {
+            "id": "SMS_04_VAS_SYNTAX_ERROR",
+            "name": "Khách hàng soạn sai cú pháp gửi tổng đài dịch vụ",
+            "conclusion": "SAI CÚ PHÁP TỔNG ĐÀI DỊCH VỤ",
+            "color": "orange",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Khách hàng gửi tin nhắn đến đầu số dịch vụ không thành công do soạn sai cú pháp tin nhắn yêu cầu.",
+            "action_plan": "Hướng dẫn khách hàng kiểm tra lại tin nhắn hướng dẫn từ tổng đài dịch vụ để soạn đúng cú pháp yêu cầu."
+        },
+        {
+            "id": "SMS_05_DEVICE_SILENT_ACTIVATION",
+            "name": "Điện thoại tự gửi tin nhắn kích hoạt tài khoản hãng (HeyTap, Mi Account...)",
+            "conclusion": "ĐIỆN THOẠI TỰ GỬI TIN NHẮN KÍCH HOẠT HÃNG",
+            "color": "green",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Tổng đài ghi nhận điện thoại có phát sinh tin nhắn gửi đi đến đầu số kích hoạt dịch vụ của hãng sản xuất máy (như HeyTap/Oppo Cloud, Mi Account, sao lưu đám mây). Tính năng tự động đồng bộ ngầm của hệ điều hành trên máy tự phát sinh tin nhắn mà không hiện trong hộp thư gửi đi.",
+            "action_plan": "Giải thích cho khách hàng về cơ chế gửi tin nhắn kích hoạt/đồng bộ tự động của dòng máy. Hướng dẫn khách hàng vào Cài đặt máy -> Tài khoản dịch vụ của hãng -> Tắt tính năng Tự động sao lưu/Tìm thiết bị qua SMS nếu không có nhu cầu."
+        },
+        {
+            "id": "SMS_06_PHONE_OFF_OR_OUT_OF_COVERAGE",
+            "name": "Khách hàng tắt máy / Điện thoại ngoài vùng phủ sóng",
+            "conclusion": "ĐIỆN THOẠI TẮT NGUỒN / NGOÀI VÙNG PHỦ SÓNG",
+            "color": "orange",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Tại thời điểm gửi tin nhắn, điện thoại của khách hàng đang bắt sóng kém hoặc mất sóng tạm thời nên không nhận/gửi tin nhắn được.",
+            "action_plan": "Hướng dẫn khách hàng kiểm tra vạch sóng di động, bật/tắt chế độ máy bay để cập nhật lại mạng khi gặp hiện tượng tương tự, và thử lại sau đó."
+        },
+        {
+            "id": "SMS_07_DEVICE_MEMORY_FULL",
+            "name": "Điện thoại của khách hàng bị đầy bộ nhớ tin nhắn",
+            "conclusion": "ĐIỆN THOẠI ĐẦY BỘ NHỚ TIN NHẮN",
+            "color": "orange",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Tổng đài ghi nhận điện thoại của khách hàng đã bị đầy bộ nhớ tin nhắn nên không thể tiếp nhận thêm tin nhắn mới. Mạng lưới VinaPhone hoàn toàn bình thường.",
+            "action_plan": "Hướng dẫn khách hàng vào ứng dụng Tin nhắn xóa bớt các tin nhắn cũ/tin nhắn rác và khởi động lại điện thoại để nhận tin nhắn bình thường."
+        },
+        {
+            "id": "SMS_08_INTERNATIONAL_HUB_UNSENT",
+            "name": "Đối tác quốc tế / Mạng xã hội chưa gửi tin về VinaPhone",
+            "conclusion": "ĐỐI TÁC QUỐC TẾ CHƯA GỬI TIN VỀ VINAPHONE",
+            "color": "orange",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Hệ thống tin nhắn VinaPhone hoàn toàn không nhận được tin nhắn nào từ phía đối tác quốc tế {app_brand} gửi vào mạng VinaPhone để chuyển cho thuê bao trong khoảng thời gian phản ánh. Thuê bao hoạt động bình thường 2 chiều.",
+            "action_plan": "Hướng dẫn khách hàng kiểm tra lại thông tin tài khoản trên ứng dụng {app_brand}, chọn nhận mã qua cuộc gọi thoại/email hoặc liên hệ bộ phận hỗ trợ của dịch vụ đó."
+        },
+        {
+            "id": "SMS_09_OTP_NOT_SENT_BY_PARTNER",
+            "name": "Ngân hàng / Đối tác trong nước chưa gửi tin OTP vào VinaPhone",
+            "conclusion": "ĐỐI TÁC CHƯA GỬI TIN NHẮN OTP",
+            "color": "orange",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Hệ thống tin nhắn VinaPhone hoàn toàn không nhận được tin nhắn OTP nào từ phía ngân hàng/đối tác gửi vào hệ thống để chuyển cho khách hàng. Thuê bao nhận tin nhắn bình thường.",
+            "action_plan": "Thông báo khách hàng bấm yêu cầu gửi lại mã OTP trên ứng dụng hoặc liên hệ tổng đài của ngân hàng/đối tác để kiểm tra luồng phát tin từ hệ thống của họ."
+        },
+        {
+            "id": "SMS_10_2WAY_OTP_MO_OK_MT_MISSING",
+            "name": "Khách gửi tin xác thực thành công nhưng đối tác chưa gửi lại OTP",
+            "conclusion": "GỬI TIN THÀNH CÔNG - ĐỐI TÁC CHƯA TRẢ OTP",
+            "color": "orange",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Khách hàng đã gửi tin nhắn xác thực đến đầu số đối tác thành công, tuy nhiên hệ thống chưa nhận được tin nhắn phản hồi/mã OTP từ phía đối tác gửi lại cho khách hàng.",
+            "action_plan": "Mạng VinaPhone đã chuyển tiếp tin nhắn xác thực của khách hàng sang đối tác thành công. Hướng dẫn khách hàng thao tác yêu cầu gửi lại mã trên ứng dụng đối tác vào thời điểm khác."
+        },
+        {
+            "id": "SMS_11_PREMIUM_SMS_BLOCK",
+            "name": "Điện thoại bật tính năng chặn tin nhắn gửi đến đầu số dịch vụ",
+            "conclusion": "ĐIỆN THOẠI CHẶN GỬI TIN ĐẦU SỐ DỊCH VỤ",
+            "color": "orange",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Thuê bao gửi tin nhắn cho các số di động bình thường, chỉ không gửi được đến các đầu số ngắn dịch vụ. Nguyên nhân do điện thoại đã bật tính năng 'Chặn tin nhắn dịch vụ cước cao'.",
+            "action_plan": "Hướng dẫn khách hàng vào Cài đặt máy -> Ứng dụng -> Quyền truy cập đặc biệt -> Dịch vụ SMS cước cao -> Chọn ứng dụng Tin nhắn và chuyển sang 'Luôn cho phép'."
+        },
+        {
+            "id": "SMS_12_SPS_SPAM_BLOCK",
+            "name": "Khóa chặn tin nhắn spam (SMO)",
+            "conclusion": "BỊ KHÓA CHIỀU GỬI TIN NHẮN (KHÓA SPAM SMO)",
+            "color": "orange",
+            "suggested_cause_code": "2007",
+            "suggested_cause_name": "Đóng/Mở chặn spam",
+            "technical_analysis": "Hệ thống ghi nhận thuê bao đang bị khóa chặn chiều gửi tin nhắn (SMO) do nghi ngờ phát tán tin nhắn rác/spam.",
+            "action_plan": "KTV kiểm tra trạng thái khóa chặn trên hệ thống SPS/Core và xử lý theo quy định."
+        },
+        {
+            "id": "SMS_13_MT_RECEIVE_FAIL_GENERAL",
+            "name": "Không nhận được tin nhắn đến (Mạng lưới đảm bảo)",
+            "conclusion": "MẠNG LƯỚI ĐẢM BẢO - KIỂM TRA BỘ NHỚ/SIM",
+            "color": "green",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Thuê bao hoạt động bình thường cả 2 chiều.",
+            "action_plan": "Hướng dẫn khách hàng xóa bớt tin nhắn cũ để giải phóng bộ nhớ máy/SIM, tháo lắp lại SIM hoặc đổi SIM vật lý tại điểm giao dịch nếu SIM cũ lâu năm bị suy hao."
+        },
+        {
+            "id": "SMS_20_NO_MT_CDR_RECORD",
+            "name": "Chưa phát sinh tin nhắn đến trên CDR",
+            "conclusion": "CHƯA PHÁT SINH TIN ĐẾN (MT = 0)",
+            "color": "orange",
+            "suggested_cause_code": "2012",
+            "suggested_cause_name": "Thông tin đầu vào chưa chính xác, trùng lặp",
+            "technical_analysis": "Hệ thống SMSC không ghi nhận bản ghi tin nhắn đến (MT) nào gửi tới thuê bao trong khoảng thời gian đối soát.",
+            "action_plan": "Đầu số/người gửi chưa gửi tin nhắn đến hệ thống mạng VNPT. Đề nghị KTV liên hệ khách hàng xác minh lại thời điểm gửi hoặc hướng dẫn bên gửi phát lại tin nhắn."
+        },
+        {
+            "id": "SMS_14_OCS_CHARGING_REJECTED",
+            "name": "Tài khoản không đủ tiền để gửi tin nhắn",
+            "conclusion": "TÀI KHOẢN KHÔNG ĐỦ TIỀN ĐỂ GỬI SMS",
+            "color": "orange",
+            "suggested_cause_code": "2013",
+            "suggested_cause_name": "Do thuê bao chưa nạp tiền/hết tiền",
+            "technical_analysis": "Thuê bao không gửi được tin nhắn do tài khoản chính không đủ số dư để thanh toán cước gửi tin.",
+            "action_plan": "Hướng dẫn khách hàng kiểm tra lại số dư tài khoản (*101#) và nạp thêm tiền để tiếp tục sử dụng dịch vụ nhắn tin."
+        },
+        {
+            "id": "SMS_15_SMO_CORE_BARRED",
+            "name": "Thuê bao bị khóa chiều gửi tin nhắn trên hệ thống",
+            "conclusion": "TẠM KHÓA CHIỀU GỬI TIN TRÊN HỆ THỐNG",
+            "color": "red",
+            "suggested_cause_code": "2015",
+            "suggested_cause_name": "Thuê bao chưa mở dịch vụ, gói cước",
+            "technical_analysis": "Thuê bao đang bị tạm khóa chiều gửi tin nhắn trên hệ thống(do nợ cước hoặc quy định nghiệp vụ).",
+            "action_plan": "Nhờ VNP kiểm tra lý do khóa chiều gửi tin và thực hiện mở lại dịch vụ cho khách hàng."
+        },
+        {
+            "id": "SMS_16_SMT_CORE_BARRED",
+            "name": "Thuê bao bị khóa chiều nhận tin nhắn trên hệ thống",
+            "conclusion": "TẠM KHÓA CHIỀU NHẬN TIN TRÊN HỆ THỐNG",
+            "color": "red",
+            "suggested_cause_code": "2015",
+            "suggested_cause_name": "Thuê bao chưa mở dịch vụ, gói cước",
+            "technical_analysis": "Thuê bao đang bị tạm khóa chiều nhận tin nhắn trên hệ thống.",
+            "action_plan": "Kỹ thuật kiểm tra nguyên nhân khóa chiều nhận tin trên hệ thống và thực hiện mở lại dịch vụ cho thuê bao."
+        },
+        {
+            "id": "SMS_16B_BAIC_CUSTOMER_SELF_BARRED",
+            "name": "Khách hàng tự bật chặn tin nhắn đến trên thiết bị (BAIC = 1)",
+            "conclusion": "KH TỰ BẬT CHẶN TIN NHẮN ĐẾN (BAIC = 1)",
+            "color": "red",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Hồ sơ cổng GW ghi nhận cờ BAIC = 1 (Barring of All Incoming Calls/SMS): Khách hàng đã tự kích hoạt tính năng chặn tin nhắn đến trên thiết bị đầu cuối hoặc qua cú pháp USSD, dẫn đến toàn bộ tin nhắn gửi đến thuê bao đều bị hệ thống chặn lại.",
+            "action_plan": "VNP hướng dẫn KH ra cửa hàng gần nhất để thực hiện các cú pháp nhắn tin USSD hủy chặn riêng dịch vụ SMS đến. Hoặc có thể hướng dẫn khách hàng nhắn tin hủy (tuy nhiên sai USSD nhiều lần có khả năng bị khóa)."
+        },
+        {
+            "id": "SMS_17_SPS_COMMITMENT_PENDING_UNBLOCK",
+            "name": "Khóa chặn tin nhắn spam (SMO)",
+            "conclusion": "BỊ KHÓA CHIỀU GỬI TIN NHẮN (KHÓA SPAM SMO)",
+            "color": "orange",
+            "suggested_cause_code": "2007",
+            "suggested_cause_name": "Đóng/Mở chặn spam",
+            "technical_analysis": "Hệ thống ghi nhận thuê bao đang bị khóa chặn chiều gửi tin nhắn (SMO) do nghi ngờ phát tán tin nhắn rác/spam.",
+            "action_plan": "KTV kiểm tra trạng thái khóa chặn trên hệ thống SPS/Core và xử lý theo quy định."
+        },
+        {
+            "id": "SMS_18_ADVERTISING_SMS_REJECTED_DNC",
+            "name": "Tin nhắn quảng cáo bị chặn do thuê bao đăng ký Không nhận quảng cáo (DNC)",
+            "conclusion": "TIN QUẢNG CÁO BỊ CHẶN THEO ĐĂNG KÝ CỦA KHÁCH HÀNG",
+            "color": "green",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Tin nhắn quảng cáo không chuyển đến máy khách hàng do số thuê bao đã đăng ký Danh sách Không nhận quảng cáo Quốc gia (DNC) hoặc đã từ chối tin nhắn quảng cáo (soạn TC). Mạng VinaPhone tuân thủ đúng quy định bảo vệ người dùng.",
+            "action_plan": "Giải thích cho khách hàng về quy định chặn tin nhắn quảng cáo. Nếu khách hàng có nhu cầu nhận lại tin nhắn ưu đãi, hướng dẫn hủy từ chối theo cú pháp tương ứng."
+        },
+        {
+            "id": "SMS_MO_WRONG_SMSC_CENTER",
+            "name": "Không gửi được tin nhắn do cài đặt máy / sai TTTN / kẹt RCS / MMS (MO_total = 0)",
+            "conclusion": "CÀI ĐẶT MÁY / SAI TTTN / KẸT RCS / MMS",
+            "color": "orange",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Kiểm tra SMSC CDR không ghi nhận bất kỳ bản tin MO nào gửi lên hệ thống trong khung giờ phản ánh (MO_total = 0) mặc dù chiều gửi SMO trên hệ thống vẫn mở bình thường. Nguyên nhân do thiết bị đầu cuối chưa gửi thoát tin nhắn lên mạng: sai số Trung tâm tin nhắn (+8491020005), kẹt tính năng RCS/Google Chat (Android), chưa bật 'Gửi dưới dạng SMS' (iPhone), hoặc máy tự động chuyển sang tin nhắn đa phương tiện MMS (VNPT đã ngừng hỗ trợ MMS).",
+            "action_plan": "Hướng dẫn khách hàng: 1. Kiểm tra và cài đặt đúng số Trung tâm tin nhắn SMSC: +8491020005. 2. Tắt tính năng RCS/Chat trong Cài đặt tin nhắn (hoặc bật 'Gửi dưới dạng SMS' trên iPhone). 3. Kiểm tra độ dài và nội dung tin nhắn tránh bị máy tự chuyển sang MMS. 4. Khởi động lại máy hoặc lắp SIM sang máy khác kiểm tra."
+        },
+        {
+            "id": "SMS_19A_APPLE_ACTIVATION_LOOP",
+            "name": "iPhone kẹt gửi tin nhắn ngầm kích hoạt dịch vụ của Apple (iMessage/FaceTime)",
+            "conclusion": "KẸT KÍCH HOẠT IMESSAGE/FACETIME APPLE",
+            "color": "orange",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Tổng đài ghi nhận máy iPhone của khách hàng tự động gửi liên tục {total_mo} tin nhắn ngầm kích hoạt dịch vụ sang đầu số máy chủ của Apple (+44... Anh) trong {time_desc}. Nguyên nhân do tính năng iMessage/FaceTime trên máy bị lỗi kẹt kích hoạt.",
+            "action_plan": "Hướng dẫn khách hàng: 1. Vào Cài đặt -> Tin nhắn -> Tắt iMessage; Cài đặt -> FaceTime -> Tắt FaceTime. 2. Khởi động lại máy để ngắt dứt điểm việc máy tự gửi tin nhắn ngầm. 3. Chỉ bật lại tính năng khi điện thoại đã kết nối Wi-Fi ổn định."
+        },
+        {
+            "id": "SMS_19B_DEVICE_MALWARE_OR_LINK",
+            "name": "Điện thoại nhiễm mã độc hoặc bấm link lạ tự động gửi tin nhắn ngầm (nhiều số)",
+            "conclusion": "NGHI VẤN MÃ ĐỘC / LINK LẠ PHÁT TÁN SMS",
+            "color": "orange",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Tổng đài ghi nhận điện thoại của khách hàng đã tự động gửi đi {total_mo} tin nhắn đến nhiều số thuê bao khác nhau trong {time_desc}. Nghi ngờ điện thoại bị nhiễm mã độc hoặc khách hàng vô tình bấm vào đường link lạ trong tin nhắn khiến máy tự động kích hoạt tính năng gửi tin nhắn ngầm.",
+            "action_plan": "Hướng dẫn khách hàng: 1. Kiểm tra và gỡ bỏ ứng dụng lạ vừa cài đặt trên máy. 2. Vào Cài đặt điện thoại -> Quản lý ứng dụng -> Tắt quyền 'Gửi tin nhắn SMS' đối với ứng dụng không cần thiết. 3. Cài phần mềm diệt virus quét máy hoặc khôi phục cài đặt gốc để loại bỏ triệt để mã độc."
+        },
+        {
+            "id": "SMS_19C_APP_QUEUE_RETRY_LOOP",
+            "name": "Ứng dụng bên thứ ba (ngân hàng, OTT) bị lỗi kẹt gửi tin nhắn xác thực số điện thoại",
+            "conclusion": "KẸT GỬI TIN XÁC THỰC ỨNG DỤNG BÊN THỨ 3",
+            "color": "orange",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Tổng đài ghi nhận điện thoại tự động gửi liên tục {total_mo} tin nhắn đến duy nhất đầu số {recent_mo_destination} trong {time_desc}. Nguyên nhân do một ứng dụng trên điện thoại (như app ngân hàng, ví điện tử hoặc ứng dụng chat) bị lỗi kẹt tính năng tự động gửi tin nhắn xác thực số điện thoại.",
+            "action_plan": "Hướng dẫn khách hàng: 1. Vào Cài đặt điện thoại -> Quản lý ứng dụng -> Tìm ứng dụng vừa cài đặt/xác thực gần đây -> Chọn 'Buộc dừng' và 'Xóa bộ nhớ đệm'. 2. Khởi động lại điện thoại hoặc gỡ và cài đặt lại ứng dụng đó."
+        },
+        {
+            "id": "SMS_19D_DEVICE_LOOP_UNKNOWN_SUBSCRIBER_130C",
+            "name": "Thiết bị (IoT/Router/Điện thoại) kẹt vòng lặp gửi tin nhắn liên tục đến số đích không tồn tại (Cause 130C / MAP Error 1)",
+            "conclusion": "THIẾT BỊ KẸT VÒNG LẶP GỬI SMS (SỐ ĐÍCH KHÔNG TỒN TẠI)",
+            "color": "orange",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Kiểm tra SMSC CDR ({time_desc}): Hệ thống ghi nhận thiết bị của khách hàng tự động phát sinh hàng chục nghìn bản tin MO liên tục (tần suất 1-2 giây/bản tin, độ dài cố định 139 bytes ~ 3 tin/lần) gửi đến số thuê bao {dest_carrier} {recent_mo_destination}. Các bản tin hiện trả về mã lỗi Mapped Network Error = 1 / Cause 130C (Số đích {recent_mo_destination} không tồn tại/đã hủy trên mạng {dest_carrier_name}). Hiện tượng này do thiết bị lắp {sim_type} (điện thoại nhiễm mã độc/ứng dụng gửi tin tự động, hoặc thiết bị định vị/IoT/Router 4G) bị kẹt vòng lặp gửi tin nhắn cảnh báo liên tục tới số {recent_mo_destination}.",
+            "action_plan": "Qua kiểm tra nhật ký tổng đài, thiết bị đang lắp SIM {clean_phone} đã tự động phát sinh liên tục các bản tin (tần suất 1-2 giây/tin, độ dài ~3 tin/lần) gửi đến số {dest_carrier_name} {recent_mo_destination}. Đề nghị khách hàng: 1. Kiểm tra ngay thiết bị đang lắp {sim_type} (nếu lắp trên thiết bị định vị, camera, bộ phát WiFi hoặc báo động thì cần tắt tính năng gửi SMS cảnh báo về số {recent_mo_destination}; nếu lắp trên điện thoại cần gỡ bỏ ứng dụng lạ/khôi phục cài đặt gốc). 2. Tạm khóa chiều gửi tin nhắn đi (SMO) cho SIM nếu chỉ có nhu cầu sử dụng Data 4G để chặn đứng việc thiết bị tiếp tục phát sinh cước."
+        },
+        {
+            "id": "SMS_19E_BOTNET_TROJAN_SPAM_SPREAD_136C",
+            "name": "Thiết bị nhiễm mã độc (SMS Trojan/Botnet) chiếm quyền phát tán tin nhắn rác (Status 5 / Cause 136C)",
+            "conclusion": "THIẾT BỊ NHIỄM MÃ ĐỘC PHÁT TÁN SMS RÁC (136C)",
+            "color": "orange",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Kiểm tra SMSC CDR ({time_desc}): Hệ thống ghi nhận từ {start_time_desc}, thiết bị của khách hàng phát sinh liên tục các bản tin MO (độ dài 90 - 140 bytes ~ 2-3 tin) gửi rải thảm tới hàng loạt số thuê bao cá nhân khác nhau ({sample_dests}). Trong đó có {mo_success} bản tin phát thành công và {mo_fail} bản ghi lỗi Retry (Status 5 / Cause 136C, Mapped Network Error = 34, 59, 9 do hệ thống Anti-Spam của mạng đích chặn). Đây là dấu hiệu điển hình của thiết bị nhiễm mã độc (SMS Trojan/Botnet) chiếm quyền điều khiển ngầm để phát tán tin nhắn rác.",
+            "action_plan": "Qua kiểm tra nhật ký tổng đài từ {start_date_desc} đến {end_date_desc}, SIM {clean_phone} lắp trên thiết bị của khách hàng đã phát sinh {mo_success} lượt bản tin gửi thành công tới hàng loạt số điện thoại khác nhau và hàng nghìn lượt gửi lại do bị chặn spam (mã 136C). Nguyên nhân do điện thoại đã cài đặt ứng dụng lạ chứa mã độc (ẩn dưới dạng file .apk hoặc link lạ) chiếm quyền gửi SMS ngầm và tự xóa lịch sử trên máy. Mạng lưới VinaPhone ghi nhận và tính cước đúng theo lưu lượng thực tế phát sinh từ thiết bị. Khuyến nghị khách hàng khôi phục cài đặt gốc (Factory Reset) điện thoại để xóa triệt để mã độc, hoặc tạm khóa chiều gửi tin nhắn (SMO) để tránh tái phát sinh cước."
+        },
+        {
+            "id": "SMS_19F_INTERNATIONAL_TOLL_FRAUD_TROJAN",
+            "name": "Điện thoại nhiễm mã độc phát tán tin nhắn quốc tế cước cao (Đầu số 004... / Vệ tinh)",
+            "conclusion": "MÃ ĐỘC PHÁT TÁN SMS QUỐC TẾ (CƯỚC CAO)",
+            "color": "orange",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Kiểm tra SMSC CDR ({time_desc}): Hệ thống ghi nhận thiết bị của khách hàng phát sinh các bản tin MO gửi đi quốc tế tới các đầu số lạ ({intl_dests}) trong thời gian ngắn. Do điện thoại nhiễm mã độc gian lận cước viễn thông quốc tế (Toll Fraud Trojan) tự động gửi tin nhắn ngầm ra nước ngoài.",
+            "action_plan": "Hướng dẫn khách hàng: 1. Kiểm tra và gỡ bỏ ngay các ứng dụng lạ cài từ file .apk hoặc link lạ trên mạng. 2. Khôi phục cài đặt gốc (Factory Reset) điện thoại để xóa tận gốc mã độc. 3. Đề nghị khách hàng liên hệ tổng đài tạm khóa chiều gọi/nhắn tin quốc tế (IDD) nếu không có nhu cầu sử dụng để phòng ngừa phát sinh cước."
+        },
+        {
+            "id": "SMS_01B_DISPUTE_ACTUALLY_DATA_M0",
+            "name": "Khiếu nại nhầm nghiệp vụ: Cước phát sinh do dịch vụ Data M0, không phải cước SMS",
+            "conclusion": "CƯỚC PHÁT SINH DO DATA M0 (KHÔNG PHẢI SMS)",
+            "color": "blue",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Kiểm tra hệ thống trong {time_desc}: Thuê bao không phát sinh cước tin nhắn SMS. Cước phát sinh thực tế do thuê bao sử dụng dịch vụ truy cập Internet di động (Data M0 ngoài gói) khi gói cước Data chính hết dung lượng tốc độ cao hoặc hết hạn chu kỳ.",
+            "action_plan": "Giải thích cho khách hàng về chi tiết cước phát sinh là do dịch vụ Data Mobile Internet truy cập mạng khi hết gói. Hướng dẫn khách hàng đăng ký các gói cước Data chu kỳ dài phù hợp để tránh phát sinh cước M0."
+        },
+        {
+            "id": "SMS_20_VOLTE_IMS_PROFILE_MISCONFIG",
+            "name": "Lỗi HSS Profile 65 - Data Only không hỗ trợ VoLTE",
+            "conclusion": "LỖI HSS PROFILE 65 (DATA ONLY, KHÔNG HỖ TRỢ VOLTE)",
+            "color": "orange",
+            "suggested_cause_code": "2004",
+            "suggested_cause_name": "Lỗi cấu hình trên hệ thống",
+            "technical_analysis": "HSS Profile của khách hàng đang là data only và không hỗ trợ VoLTE, nên không nhắn tin được qua miền IMS.",
+            "action_plan": "Hướng dẫn khách hàng đăng ký VoLTE hoặc chuyển IT kiểm tra khai báo lại HSS Profile cho khách hàng."
+        },
+        {
+            "id": "SMS_21_VOLTE_NOT_REGISTERED",
+            "name": "Thuê bao chưa đăng ký / chưa mở dịch vụ VoLTE trên mạng 4G",
+            "conclusion": "THUÊ BAO CHƯA ĐĂNG KÝ / CHƯA MỞ DỊCH VỤ VOLTE",
+            "color": "orange",
+            "suggested_cause_code": "2015",
+            "suggested_cause_name": "Thuê bao chưa mở dịch vụ, gói cước",
+            "technical_analysis": "Thuê bao chưa được kích hoạt tính năng nhắn tin trên mạng 4G (VoLTE) nên khi dùng sóng 4G máy không gửi được tin nhắn trên miền IMS",
+            "action_plan": "Nhờ VNP kích hoạt VoLTE cho khách hàng."
+        },
+        {
+            "id": "SMS_22_VOLTE_PROVISIONING_ERROR",
+            "name": "Lỗi cấu hình dịch vụ VoLTE trên hệ thống mạng",
+            "conclusion": "LỖI CẤU HÌNH DỊCH VỤ VOLTE TRÊN HỆ THỐNG",
+            "color": "orange",
+            "suggested_cause_code": "2004",
+            "suggested_cause_name": "Lỗi cấu hình trên hệ thống",
+            "technical_analysis": "Profile VoLTE bị lỗi nên không thể nhắn/nhận tin trên miền IMS.",
+            "action_plan": "Nhờ VNP hủy, đăng ký lại VoLTE cho khách hàng hoặc chuyển IT xử lý."
+        },
+        {
+            "id": "SMS_MO_SUCCESS_NORMAL",
+            "name": "Khách hàng đã gửi được tin nhắn thành công bình thường",
+            "conclusion": "KH ĐÃ GỬI ĐƯỢC TIN NHẮN BÌNH THƯỜNG",
+            "color": "green",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Tổng đài ghi nhận thuê bao đã gửi tin nhắn thành công bình thường sang số máy người nhận. Dịch vụ nhắn tin hoạt động tốt.",
+            "action_plan": "Thông báo khách hàng dịch vụ nhắn tin đang hoạt động bình thường và thực hiện đóng phiếu."
+        },
+        {
+            "id": "SMS_MO_SUCCESS_AFTER_INCIDENT",
+            "name": "Khách hàng đã gửi tin nhắn thành công sau mốc phản ánh",
+            "conclusion": "ĐÃ GỬI BÌNH THƯỜNG",
+            "color": "green",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Kiểm tra hệ thống CDR sau thời gian phản ánh: Ghi nhận thuê bao đã gửi tin nhắn (MO) thành công. Dịch vụ gửi tin nhắn hoạt động bình thường.",
+            "action_plan": "Thuê bao đã gửi tin nhắn thành công bình thường sau thời điểm phản ánh. Đề xuất đóng phản ánh."
+        },
+        {
+            "id": "SMS_MT_SUCCESS_AFTER_INCIDENT",
+            "name": "Khách hàng đã nhận tin nhắn thành công sau mốc phản ánh",
+            "conclusion": "ĐÃ NHẬN BÌNH THƯỜNG",
+            "color": "green",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Kiểm tra hệ thống CDR sau thời gian phản ánh: Ghi nhận thuê bao đã nhận tin nhắn (MT) thành công. Dịch vụ nhận tin nhắn hoạt động bình thường.",
+            "action_plan": "Thuê bao đã nhận tin nhắn thành công bình thường sau thời điểm phản ánh. Đề xuất đóng phản ánh."
+        },
+        {
+            "id": "SMS_23_DEVICE_RCS_OR_APP_ERROR",
+            "name": "Không gửi được tin nhắn do cài đặt ứng dụng tin nhắn hoặc tính năng Trò chuyện RCS",
+            "conclusion": "KIỂM TRA CÀI ĐẶT GỬI SMS TRÊN MÁY",
+            "color": "orange",
+            "suggested_cause_code": "2111",
+            "suggested_cause_name": "Do thiết bị đầu cuối",
+            "technical_analysis": "Thuê bao hoạt động bình thường cả 2 chiều tin nhắn. Khách hàng không gửi được tin nhắn do cài đặt trên điện thoại: Máy iPhone đang tắt tính năng gửi SMS, hoặc máy Android đang bật tính năng Trò chuyện RCS / cài sai số tổng đài tin nhắn.",
+            "action_plan": "1. Với iPhone: Vào Cài đặt -> Tin nhắn -> Bật 'Gửi dưới dạng SMS'. 2. Với Android: Vào Tin nhắn -> Cài đặt -> Tính năng trò chuyện RCS -> Tắt tính năng trò chuyện RCS; đồng thời kiểm tra số Trung tâm tin nhắn (+8491020005). 3. Tháo SIM lau sạch vi mạch và khởi động lại máy."
+        },
+        {
+            "id": "SMS_24_OTP_DELAYED_BY_PARTNER",
+            "name": "Tổng đài đối tác / Ngân hàng trả mã OTP chậm (Mã hết hạn)",
+            "conclusion": "TỔNG ĐÀI ĐỐI TÁC TRẢ OTP CHẬM - MẠNG LƯỚI ĐẢM BẢO",
+            "color": "green",
+            "suggested_cause_code": "2011",
+            "suggested_cause_name": "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường",
+            "technical_analysis": "Thuê bao hoạt động bình thường. Khách hàng nhận mã OTP từ {app_brand} bị chậm (khi nhận được thì mã đã hết hạn) do tổng đài tin nhắn của phía ngân hàng/đối tác bị nghẽn mạng vào giờ cao điểm nên chuyển mã sang mạng VinaPhone chậm.",
+            "action_plan": "Giải thích cho khách hàng nguyên nhân do phía đối tác gửi tin chậm. Nhờ khách hàng theo dõi thêm và thao tác lấy lại mã OTP vào thời điểm khác."
+        },
+        {
+            "id": "SMS_30_RESTRICTED_AREA_3G_BARRED",
+            "name": "Thuê bao bị khóa sóng 3G / Vùng hạn chế sóng (Sub State = RESTRICTED AREA)",
+            "conclusion": "THUÊ BAO BỊ KHÓA SÓNG 3G",
+            "color": "orange",
+            "suggested_cause_code": "2015",
+            "suggested_cause_name": "Thuê bao chưa mở dịch vụ, gói cước",
+            "technical_analysis": "Kiểm tra hệ thống Core HLR/HSS: Trạng thái thuê bao ghi nhận Sub State = RESTRICTED AREA. Thuê bao đang bị khóa sóng 3G / thuộc vùng hạn chế sóng nên không thể thực hiện gửi hoặc nhận tin nhắn.",
+            "action_plan": "Chuyển IT/Khai thác mạng kiểm tra mở lại sóng 3G cho thuê bao trên hệ thống Core HLR/HSS, hoặc hướng dẫn khách hàng bật tính năng VoLTE trên máy 4G/LTE để nhắn tin qua miền IMS."
+        },
+        {
+            "id": "SMS_INTERCARRIER_ROUTING_ERROR",
+            "name": "Lỗi kết nối định tuyến chuyển tiếp liên mạng / Đối tác chặn (130C/135C/136C)",
+            "conclusion": "LỖI KẾT NỐI LIÊN MẠNG (130C/135C/136C)",
+            "color": "orange",
+            "suggested_cause_code": "2004",
+            "suggested_cause_name": "Lỗi cấu hình trên hệ thống",
+            "technical_analysis": "Kiểm tra SMSC CDR: Chiều gửi MO của thuê bao lên tổng đài SMSC VNPT và gửi sang các hướng mạng khác vẫn thành công bình thường 100% (Status 2 / Cause 100C). Tuy nhiên toàn bộ các bản tin gửi sang các số thuộc {carrier_name} ({dest_list}) sau khi SMSC tiếp nhận (199C) đều bị trả lỗi 130C/135C ở lần phát đầu tiên và lỗi 136C qua các lần Retry (002-004). Đây không phải lỗi VoLTE hay cài đặt trên máy khách hàng mà do lỗi chuyển tiếp bản tin liên mạng sang hướng {carrier_name} (khả năng thuê bao bị mạng {carrier_name} chặn chiều nhận tin nhắn rác / lọc liên mạng).",
+            "action_plan": "Chuyển bộ phận Khai thác SMSC / Đối soát liên mạng kiểm tra luồng chuyển tiếp tin nhắn từ thuê bao sang mạng {carrier_name} hoặc kiểm tra chặn SMS Firewall liên mạng."
+        },
+        {
+            "id": "SMS_SPS_SPAM_HARD_BLOCKED_175C",
+            "name": "Khóa chiều gửi tin nhắn do chặn Spam / SPS (Mã lỗi 175C cho cả đầu số miễn phí 888)",
+            "conclusion": "KHÓA SPAM TIN NHẮN (CHẶN CHIỀU GỬI 175C)",
+            "color": "red",
+            "suggested_cause_code": "2008",
+            "suggested_cause_name": "Thuê bao bị chặn dịch vụ do vi phạm quy định chống tin nhắn rác",
+            "technical_analysis": "Kiểm tra SMSC CDR ghi nhận thuê bao bị chặn chiều gửi MO với mã lỗi 8/175C (kể cả khi gửi tới các đầu số tổng đài nội mạng miễn phí như 888, 1414 hoặc mã lỗi mapped network 400). Thuê bao đang bị hệ thống chặn chiều gửi tin nhắn (khóa Spam / SPS / chính sách chặn cứng của mạng lưới).",
+            "action_plan": "1. Đề xuất kiểm tra gỡ chặn trên hệ thống SPS/OCS cho thuê bao. 2. Hướng dẫn khách hàng ra Điểm giao dịch VinaPhone làm bản cam kết mở khóa sử dụng dịch vụ tin nhắn theo quy định (Công văn 939)."
+        },
+        {
+            "id": "SMS_MT_ZOMBIE_PAGING_DESYNC_103C",
+            "name": "Kẹt phiên định tuyến ngầm / Mất đồng bộ kênh Paging (103C khi máy vẫn mở và có sóng)",
+            "conclusion": "KẸT PHIÊN ĐỊNH TUYẾN NGẦM (MẤT ĐỒNG BỘ PAGING 103C)",
+            "color": "orange",
+            "suggested_cause_code": "2004",
+            "suggested_cause_name": "Lỗi cấu hình trên hệ thống",
+            "technical_analysis": "Kiểm tra SMSC CDR ghi nhận toàn bộ bản tin MT chuyển phát đến thuê bao bị lỗi 103C (Absent Subscriber) qua nhiều lần Retry mặc dù hồ sơ HSS/Core ghi nhận thuê bao vẫn đang gắn mạng bình thường (In-service / Profile 67 / SMT Active). Hiện tượng này do thiết bị kẹt phiên định tuyến ngầm hoặc mất đồng bộ kênh Paging với trạm phát sóng.",
+            "action_plan": "1. Yêu cầu khách hàng bật Chế độ máy bay (Airplane Mode) trong 30 giây rồi tắt để tái đăng ký kênh Paging vô tuyến. 2. Khởi động lại máy hoặc thực hiện lệnh Reset SMT trên Core HSS/HLR để xả hàng đợi tin nhắn."
+        }
+    ]
+}

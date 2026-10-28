@@ -5,6 +5,7 @@ import os
 import re
 import json
 import time
+from datetime import datetime, timedelta
 import requests
 import urllib.request
 import urllib.parse
@@ -262,8 +263,22 @@ def extract_token_from_browser(driver=None, force_refresh: bool = False) -> str:
     return token
 
 
+_API_SESSION = None
+
+
+def _get_api_session():
+    global _API_SESSION
+    if _API_SESSION is None:
+        s = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(pool_connections=30, pool_maxsize=50, max_retries=2)
+        s.mount("https://", adapter)
+        s.mount("http://", adapter)
+        _API_SESSION = s
+    return _API_SESSION
+
+
 def make_api_request(url: str, token: str, timeout: int = 15) -> dict:
-    """Gửi request HTTP GET tới API gw-oneoss."""
+    """Gửi request HTTP GET tới API gw-oneoss sử dụng Connection Pool Session tối ưu tốc độ."""
     if not token.startswith("Bearer "):
         token = "Bearer " + token
 
@@ -274,18 +289,30 @@ def make_api_request(url: str, token: str, timeout: int = 15) -> dict:
         "Referer": "https://tts.vnptnet.vn/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     }
-    req = urllib.request.Request(url, headers=headers)
+    s = _get_api_session()
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as res:
-            return json.loads(res.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            # Token hết hạn -> xóa file cache để buộc trích xuất token mới ở lần tiếp theo
+        resp = s.get(url, headers=headers, timeout=timeout)
+        if resp.status_code == 401:
             if TOKEN_CACHE_FILE.exists():
                 try:
                     os.remove(TOKEN_CACHE_FILE)
                 except Exception:
                     pass
+            import urllib.error
+            raise urllib.error.HTTPError(url, 401, "Unauthorized", resp.headers, None)
+        resp.raise_for_status()
+        return resp.json()
+    except urllib.error.HTTPError:
+        raise
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 401:
+            if TOKEN_CACHE_FILE.exists():
+                try:
+                    os.remove(TOKEN_CACHE_FILE)
+                except Exception:
+                    pass
+            import urllib.error
+            raise urllib.error.HTTPError(url, 401, "Unauthorized", e.response.headers, None)
         raise
 
 
@@ -409,7 +436,7 @@ EXCLUDED_DATA_TITLES = [
 
 def is_roaming_ticket(it: dict) -> bool:
     title = str(it.get("title") or it.get("package_title") or "").strip().lower()
-    return "cvqt" in title or "chuyển vùng quốc tế" in title or "roaming" in title or "idd 1714" in title
+    return "cvqt" in title or "chuyển vùng quốc tế" in title or "roaming" in title or "idd 1714" in title or "(ir)" in title
 
 def is_sim_ticket(it: dict) -> bool:
     title = str(it.get("title") or it.get("package_title") or "").strip().lower()
@@ -538,7 +565,12 @@ def normalize_oneoss_date(raw_date: str, ticket_code: str = "") -> str:
         elif p2 > 12:
             day, month = p2, p1
         else:
-            if tc_month and p1 == tc_month and p2 != tc_month:
+            next_month = (tc_month % 12) + 1 if tc_month else 0
+            if tc_month and (p2 == tc_month or p2 == next_month) and (p1 != tc_month and p1 != next_month):
+                day, month = p1, p2
+            elif tc_month and (p1 == tc_month or p1 == next_month) and (p2 != tc_month and p2 != next_month):
+                day, month = p2, p1
+            elif tc_month and p1 == tc_month and p2 != tc_month:
                 day, month = p2, p1
             elif tc_month and p2 == tc_month and p1 != tc_month:
                 day, month = p1, p2
@@ -550,10 +582,13 @@ def normalize_oneoss_date(raw_date: str, ticket_code: str = "") -> str:
     return raw
 
 
-def enrich_ticket_customer(it: dict, token: str) -> dict:
+def enrich_ticket_customer(it: dict, token: str, assigned_region: str = None) -> dict:
     """
     Gọi API get-customer-by-ticketflowid để lấy SĐT, tên khách hàng và hạng hội viên.
     Tạm đưa chung 2 trường Tên quy trình và Tên bước vào ticket_code.
+    Quy tắc nghiệp vụ chuẩn:
+    - Phiếu cứ do user miền nào load về thì gắn nhãn miền đó (MN/MB/MT).
+    - Cứ phiếu nào xuất hiện thì mặc định là phiếu mới, chỉ khi có cờ đỏ 🚩 mới đánh dấu là phiếu mở lại.
     """
     u_reg = None
     u_name = ""
@@ -568,6 +603,11 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
     except Exception:
         pass
 
+    # Gán nhãn miền theo user hoặc phiên quét load phiếu về
+    ticket_reg = (assigned_region or u_reg or "MN").strip().upper()
+    if ticket_reg not in ("MB", "MN", "MT"):
+        ticket_reg = "MN"
+
     flow_id = it.get("id")
     proc_name = str(it.get("processDefinitionName") or it.get("processInstanceName") or "").strip()
     step_name = str(it.get("stepName") or it.get("processNodeName") or "").strip()
@@ -581,7 +621,23 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
 
     url_cust = f"{API_BASE_URL}/get-customer-by-ticketflowid/{flow_id}"
     url_info = f"{API_BASE_URL}/get-ticket-info?ticketTypeId=2&ticketFlowId={flow_id}"
-    reopen_count = int(it.get("reopenCount") or it.get("reOpenCount") or it.get("soLanMoLai") or it.get("reopen_count") or 0)
+
+    raw_title = str(it.get("title") or it.get("package_title") or "").strip()
+    raw_content = str(it.get("content") or it.get("ticket_content") or "").strip()
+    # Nhận diện cờ đỏ mở lại (🚩 hoặc \U0001f6a9 hoặc &#128681;) từ IT OneOSS / CCOS gắn trong tiêu đề, mã phiếu hoặc nội dung
+    import html as _html_mod
+    un_title = _html_mod.unescape(raw_title)
+    un_code = _html_mod.unescape(raw_code)
+    un_content = _html_mod.unescape(raw_content)
+    has_flag = (
+        ("🚩" in raw_title) or ("🚩" in raw_code) or ("🚩" in raw_content) 
+        or ("\U0001f6a9" in raw_title) or ("&#128681;" in raw_title) or ("&#128681;" in raw_code) or ("&#128681;" in raw_content)
+        or ("🚩" in un_title) or ("🚩" in un_code) or ("🚩" in un_content)
+    )
+    clean_title = raw_title  # Giữ nguyên tiêu đề kèm cờ để nhận diện trên toàn hệ thống
+
+    # Mặc định mọi phiếu xuất hiện là phiếu mới; CHỈ KHI CÓ CỜ ĐỎ THÌ ĐÁNH DẤU MỞ LẠI
+    reopen_count = 1 if has_flag else 0
     last_reopened_date = str(it.get("lastReopenedDate") or it.get("last_reopened_date") or "").strip()
 
     try:
@@ -598,15 +654,12 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
         # Chuẩn hóa SĐT về dạng 84xxxxxxxxx
         phone = normalize_phone_number(raw_phone)
 
-        # Lấy THÔNG TIN TICKET CHI TIẾT TỪ get-ticket-info (reopenCount, lastReopenedDate, processingContent)
+        # Lấy thông tin xử lý từ get-ticket-info nếu có
         processing_content = ""
         try:
             resp_info = make_api_request(url_info, token, timeout=8)
             info_data = resp_info.get("data") or {}
             if isinstance(info_data, dict):
-                rc = info_data.get("reopenCount") or info_data.get("reOpenCount") or info_data.get("soLanMoLai") or info_data.get("reopen_count")
-                if rc is not None:
-                    reopen_count = int(rc or 0)
                 lrd = info_data.get("lastReopenedDate") or info_data.get("last_reopened_date")
                 if lrd:
                     last_reopened_date = str(lrd).strip()
@@ -614,14 +667,10 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
         except Exception:
             pass
 
-        # Fallback nhận diện phiếu mở lại từ tiêu đề hoặc nội dung nếu hệ thống chưa gán trường số
-        if reopen_count == 0:
-            comb_text = f"{it.get('title', '')} {it.get('content', '')} {proc_name} {step_name}".lower()
-            if "mở lại" in comb_text or "phiếu mở lại" in comb_text:
-                reopen_count = 1
-
         raw_inc_date = it.get("incidentDate", "") or it.get("requestDate", "")
         raw_req_date = it.get("requestDate", "")
+        raw_dl_overall = it.get("deadlineOverall") or it.get("deadline_overall") or ""
+        raw_dl = it.get("deadline") or ""
 
         return {
             "flow_id": flow_id,
@@ -634,34 +683,26 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "raw_phone": raw_phone,
             "customer_name": cust.get("name", ""),
             "customer_level": cust.get("clMemberLevelName", ""),
-            "title": it.get("title", ""),
+            "title": clean_title,
             "content": it.get("content", ""),
             "incident_time": normalize_oneoss_date(raw_inc_date, raw_code),
             "created_time": normalize_oneoss_date(raw_req_date, raw_code),
+            "deadline_overall": normalize_oneoss_date(raw_dl_overall, raw_code) if raw_dl_overall else "",
+            "deadline": normalize_oneoss_date(raw_dl, raw_code) if raw_dl else "",
             "assigned_unit": it.get("assignedUnitName", ""),
             "source": "tts_new",
             "loaded_by": u_name,
             "reopen_count": reopen_count,
             "last_reopened_date": last_reopened_date,
             "processing_content": processing_content,
-            "region": detect_ticket_region({
-                "user_region": u_reg,
-                "ticket_code": combined_code,
-                "step_name": step_name,
-                "process_name": proc_name,
-                "processNodeName": step_name,
-                "processDefinitionName": proc_name,
-                "title": it.get("title", ""),
-                "content": it.get("content", ""),
-                "assigned_unit": it.get("assignedUnitName", ""),
-                "assignedUnitName": it.get("assignedUnitName", "")
-            }),
+            "region": ticket_reg,
         }
     except Exception as e:
         raw_fb = str(it.get("subscriberNumber") or it.get("customerPhone") or "").strip()
-        from region_detector import detect_ticket_region
         raw_inc_date = it.get("incidentDate", "") or it.get("requestDate", "")
         raw_req_date = it.get("requestDate", "")
+        raw_dl_overall = it.get("deadlineOverall") or it.get("deadline_overall") or ""
+        raw_dl = it.get("deadline") or ""
         return {
             "flow_id": flow_id,
             "ticket_id": it.get("ticketId"),
@@ -673,25 +714,19 @@ def enrich_ticket_customer(it: dict, token: str) -> dict:
             "raw_phone": raw_fb,
             "customer_name": "",
             "customer_level": "",
-            "title": it.get("title", ""),
+            "title": clean_title,
             "content": it.get("content", ""),
             "incident_time": normalize_oneoss_date(raw_inc_date, raw_code),
             "created_time": normalize_oneoss_date(raw_req_date, raw_code),
+            "deadline_overall": normalize_oneoss_date(raw_dl_overall, raw_code) if raw_dl_overall else "",
+            "deadline": normalize_oneoss_date(raw_dl, raw_code) if raw_dl else "",
             "assigned_unit": it.get("assignedUnitName", ""),
             "source": "tts_new",
             "loaded_by": u_name,
             "reopen_count": reopen_count,
             "last_reopened_date": last_reopened_date,
             "processing_content": "",
-            "region": detect_ticket_region({
-                "user_region": u_reg,
-                "ticket_code": combined_code,
-                "step_name": step_name,
-                "process_name": proc_name,
-                "title": it.get("title", ""),
-                "content": it.get("content", ""),
-                "assigned_unit": it.get("assignedUnitName", "")
-            }),
+            "region": ticket_reg,
             "error": str(e),
         }
 
@@ -780,7 +815,7 @@ def get_ttsnew_tickets_for_precheck(driver=None, max_workers: int = 8, service_t
     # Lấy thông tin khách hàng & SĐT song song
     enriched = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(enrich_ticket_customer, it, tok) for it in target_tickets]
+        futures = [executor.submit(enrich_ticket_customer, it, tok, target_region) for it in target_tickets]
         for f in futures:
             try:
                 res = f.result()
@@ -789,9 +824,27 @@ def get_ttsnew_tickets_for_precheck(driver=None, max_workers: int = 8, service_t
             except Exception:
                 pass
 
-    if target_region and str(target_region).strip().upper() in ("MB", "MN", "MT"):
-        target_reg_clean = str(target_region).strip().upper()
-        enriched = [t for t in enriched if t.get("region") == target_reg_clean]
+    # Sắp xếp ưu tiên: Quét các phiếu có ngày tiếp nhận cũ nhất trước (FIFO)
+    def _parse_ticket_date_sort_key(t: dict):
+        raw_val = t.get("created_time") or t.get("incident_time") or t.get("requestDate") or ""
+        s = str(raw_val).strip()
+        if not s or s in ("--", "null", "None"):
+            return datetime.max
+        for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(s, fmt)
+            except Exception:
+                pass
+        m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', s)
+        if m:
+            try:
+                d, mth, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                return datetime(y, mth, d)
+            except Exception:
+                pass
+        return datetime.max
+
+    enriched.sort(key=_parse_ticket_date_sort_key)
 
     return enriched, len(raw_tickets)
 
@@ -1247,24 +1300,40 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         clean_code = (ticket_code or "").split("\n")[0].strip()
         new_flow_id = None
         new_actual_step = next_step_name
-        try:
-            time.sleep(1.2)
-            raw_active = fetch_active_tickets(token, limit=1000)
-            for r_it in raw_active:
-                if (ticket_id and str(r_it.get("ticketId")) == str(ticket_id)) or \
-                   (clean_code and clean_code in str(r_it.get("ticketCode", ""))):
-                    new_flow_id = r_it.get("id")
-                    break
-            if new_flow_id and not is_step_5_1:
-                url_st = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={new_flow_id}"
-                r_st = requests.get(url_st, headers=headers, timeout=5).json()
-                c_nd = (r_st.get("data") or {}).get("currentNodes", [{}])[0]
-                if c_nd.get("name"):
-                    new_actual_step = c_nd["name"]
-        except Exception:
-            pass
-
         new_ticket_code_val = f"{clean_code}\n[Quy trình Chất lượng mạng & dịch vụ di động]\n{new_actual_step}" if not is_step_5_1 else ticket_code
+
+        # Tra cứu đồng bộ ngầm flow_id và bước mới để không làm nghẽn phản hồi API (<1s)
+        def _sync_transfer_flow_bg(tk_id, cl_code, is_5_1, n_step):
+            try:
+                time.sleep(1.2)
+                bg_flow_id = None
+                bg_actual_step = n_step
+                raw_active = fetch_active_tickets(token, limit=300)
+                for r_it in raw_active:
+                    if (tk_id and str(r_it.get("ticketId")) == str(tk_id)) or \
+                       (cl_code and cl_code in str(r_it.get("ticketCode", ""))):
+                        bg_flow_id = r_it.get("id")
+                        break
+                if bg_flow_id and not is_5_1:
+                    url_st = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={bg_flow_id}"
+                    r_st = requests.get(url_st, headers=headers, timeout=5).json()
+                    c_nd = (r_st.get("data") or {}).get("currentNodes", [{}])[0]
+                    if c_nd.get("name"):
+                        bg_actual_step = c_nd["name"]
+                
+                from db_manager import get_db_connection
+                c_bg = get_db_connection()
+                with c_bg:
+                    val_c = f"{cl_code}\n[Quy trình Chất lượng mạng & dịch vụ di động]\n{bg_actual_step}" if not is_5_1 else None
+                    if tk_id:
+                        c_bg.execute("UPDATE tickets SET flow_id = COALESCE(?, flow_id), ticket_code = COALESCE(?, ticket_code) WHERE ticket_id = ? AND source = 'tts_new'", (bg_flow_id, val_c, tk_id))
+                    elif cl_code:
+                        c_bg.execute("UPDATE tickets SET flow_id = COALESCE(?, flow_id), ticket_code = COALESCE(?, ticket_code) WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new'", (bg_flow_id, val_c, cl_code, f"{cl_code}%"))
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_sync_transfer_flow_bg, args=(ticket_id, clean_code, is_step_5_1, next_step_name), daemon=True).start()
         try:
             from db_manager import get_db_connection
             conn = get_db_connection()
@@ -1512,29 +1581,44 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
         if post_res.get("isError") or post_res_raw.status_code != 200:
             return {"success": False, "message": post_res.get("message", f"Lỗi từ hệ thống TTS khi chuyển sang bước {next_step_name}")}
 
-        # 4. Tra cứu ngay flow mới trên TTS Mới để cập nhật trực tiếp DB theo thời gian thực (Live)
+        # 4. Tra cứu ngay flow mới trên TTS Mới ngầm để không nghẽn phản hồi (<1s)
         clean_code = (ticket_code or "").split("\n")[0].strip()
         new_flow_id = None
         new_actual_step = next_step_name
-        try:
-            time.sleep(1.2)
-            raw_active = fetch_active_tickets(token, limit=300)
-            for r_it in raw_active:
-                if (ticket_id and str(r_it.get("ticketId")) == str(ticket_id)) or \
-                   (clean_code and clean_code in str(r_it.get("ticketCode", ""))):
-                    new_flow_id = r_it.get("id")
-                    break
-            if new_flow_id:
-                url_st = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={new_flow_id}"
-                r_st = requests.get(url_st, headers=headers, timeout=5).json()
-                c_nd = (r_st.get("data") or {}).get("currentNodes", [{}])[0]
-                if c_nd.get("name"):
-                    new_actual_step = c_nd["name"]
-        except Exception:
-            pass
-
         proc_label = (chosen_node.get("processData") or {}).get("processName") or chosen_node.get("processInstanceName") or "2.4_QT_CLM_02"
         new_ticket_code_val = f"{clean_code}\n[{proc_label}]\n{new_actual_step}"
+
+        def _sync_step_2_4_flow_bg(tk_id, cl_code, n_step, p_lbl):
+            try:
+                time.sleep(1.2)
+                bg_flow_id = None
+                bg_actual_step = n_step
+                raw_active = fetch_active_tickets(token, limit=300)
+                for r_it in raw_active:
+                    if (tk_id and str(r_it.get("ticketId")) == str(tk_id)) or \
+                       (cl_code and clean_code in str(r_it.get("ticketCode", ""))):
+                        bg_flow_id = r_it.get("id")
+                        break
+                if bg_flow_id:
+                    url_st = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/TicketProcessing/get-next-step?ticketFlowId={bg_flow_id}"
+                    r_st = requests.get(url_st, headers=headers, timeout=5).json()
+                    c_nd = (r_st.get("data") or {}).get("currentNodes", [{}])[0]
+                    if c_nd.get("name"):
+                        bg_actual_step = c_nd["name"]
+                
+                from db_manager import get_db_connection
+                c_bg = get_db_connection()
+                with c_bg:
+                    val_c = f"{cl_code}\n[{p_lbl}]\n{bg_actual_step}"
+                    if tk_id:
+                        c_bg.execute("UPDATE tickets SET flow_id = COALESCE(?, flow_id), ticket_code = COALESCE(?, ticket_code) WHERE ticket_id = ? AND source = 'tts_new'", (bg_flow_id, val_c, tk_id))
+                    elif cl_code:
+                        c_bg.execute("UPDATE tickets SET flow_id = COALESCE(?, flow_id), ticket_code = COALESCE(?, ticket_code) WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new'", (bg_flow_id, val_c, cl_code, f"{cl_code}%"))
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_sync_step_2_4_flow_bg, args=(ticket_id, clean_code, next_step_name, proc_label), daemon=True).start()
         try:
             from db_manager import get_db_connection
             conn = get_db_connection()
@@ -1771,7 +1855,7 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
             it_tid = str(it.get("ticketId") or "")
             it_code = str(it.get("ticketCode") or "").split("\n")[0].strip()
             try:
-                en_ticket = enrich_ticket_customer(it, token)
+                en_ticket = enrich_ticket_customer(it, token, sync_reg)
                 phone_val = normalize_phone_vn(en_ticket.get("phone") or "")
                 if phone_val:
                     inc_time = str(en_ticket.get("incident_time") or en_ticket.get("created_time") or "").strip()
@@ -1781,22 +1865,23 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
                     if c_text:
                         try:
                             from ai_interpreter import generate_ticket_summary
-                            rec_sum = generate_ticket_summary(pkg_t, c_text, phone=phone_val)
+                            c_time_val = str(it.get("requestDate") or en_ticket.get("created_time") or "").strip()
+                            rec_sum = generate_ticket_summary(pkg_t, c_text, phone=phone_val, incident_time=inc_time, created_time=c_time_val)
                         except Exception:
                             rec_sum = c_text
 
-                    # 🎯 Xác định Miền (MB, MN, MT) CHUẨN XÁC 100% từ chính Quy trình OneOSS (SOC1/SOC2/SOC3)
-                    t_reg = detect_ticket_region({
-                        "ticket_code": en_ticket.get("ticket_code") or it_code,
-                        "step_name": it.get("stepName") or it.get("processNodeName") or "",
-                        "process_name": it.get("processDefinitionName") or it.get("processInstanceName") or "",
-                        "assignedUnitName": it.get("assignedUnitName") or ""
-                    }, default_region=sync_reg or "MN")
+                    t_reg = (sync_reg or en_ticket.get("region") or "MN").strip().upper()
+
+                    sync_has_flag = ("🚩" in str(pkg_t or "")) or ("🚩" in str(it.get("title") or "")) or ("🚩" in str(c_text or ""))
+                    clean_pkg_t = pkg_t  # Giữ nguyên cờ đỏ để KTV nhận biết phiếu quay lại
+                    rec_rc = int(en_ticket.get("reopen_count") or it.get("reopenCount") or 0)
+                    if sync_has_flag:
+                        rec_rc = max(rec_rc, 1)
 
                     rec = {
                         "phone": phone_val,
                         "incident_time": inc_time,
-                        "package_title": pkg_t,
+                        "package_title": clean_pkg_t or pkg_t,
                         "ticket_content": c_text,
                         "status": "CHỜ TIỀN KIỂM",
                         "real_packages": "--",
@@ -1813,9 +1898,10 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
                         "ticket_code": en_ticket.get("ticket_code") or it_code,
                         "ticket_id": it.get("ticketId"),
                         "flow_id": it.get("id"),
-                        "reopen_count": int(en_ticket.get("reopen_count") or it.get("reopenCount") or 0),
+                        "reopen_count": rec_rc,
                         "last_reopened_date": str(en_ticket.get("last_reopened_date") or it.get("lastReopenedDate") or "").strip(),
-                        "region": t_reg
+                        "region": t_reg,
+                        "deadline_overall": en_ticket.get("deadline_overall", "")
                     }
                     save_or_update_ticket(rec)
                     updated_count += 1

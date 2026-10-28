@@ -66,9 +66,31 @@ def execute_tts_old_data_cycle():
             state.log("WARN", "Không tìm thấy phiếu nào trên trang TTS hiện tại.")
             return
 
+        # Sắp xếp ưu tiên: Quét những phiếu có ngày tiếp nhận cũ nhất trước (FIFO)
+        def _parse_ticket_date_sort_key(t: dict):
+            raw_val = t.get("created_time") or t.get("incident_time") or t.get("requestDate") or ""
+            s = str(raw_val).strip()
+            if not s or s in ("--", "null", "None"):
+                return datetime.max
+            for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    return datetime.strptime(s, fmt)
+                except Exception:
+                    pass
+            import re
+            m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', s)
+            if m:
+                try:
+                    d, mth, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                    return datetime(y, mth, d)
+                except Exception:
+                    pass
+            return datetime.max
+
+        raw_tickets.sort(key=_parse_ticket_date_sort_key)
         total_tickets = len(raw_tickets)
         state.total_scanned += total_tickets
-        state.log("SUCCESS", f"Thu được {total_tickets} thuê bao từ TTS. Bắt đầu tra cứu Core...")
+        state.log("SUCCESS", f"Thu được {total_tickets} thuê bao từ TTS (ưu tiên tiếp nhận cũ nhất trước). Bắt đầu tra cứu Core...")
 
         # Đồng bộ danh sách phiếu hiện hữu với thực tế trên web TTS
         scanned_phones = set()

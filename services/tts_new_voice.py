@@ -98,58 +98,156 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
         except Exception as ex_vdb:
             state.log("WARN", f"Lỗi nạp bổ sung phiếu từ DB khi tiền kiểm lại {lbl}: {ex_vdb}")
 
+        # Sắp xếp ưu tiên: Quét những phiếu có ngày tiếp nhận cũ nhất trước (FIFO)
+        def _parse_ticket_date_sort_key(t: dict):
+            raw_val = t.get("created_time") or t.get("incident_time") or t.get("requestDate") or ""
+            s = str(raw_val).strip()
+            if not s or s in ("--", "null", "None"):
+                return datetime.max
+            for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    return datetime.strptime(s, fmt)
+                except Exception:
+                    pass
+            import re
+            m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', s)
+            if m:
+                try:
+                    d, mth, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                    return datetime(y, mth, d)
+                except Exception:
+                    pass
+            return datetime.max
+
+        voice_tickets.sort(key=_parse_ticket_date_sort_key)
+
         if not voice_tickets:
+            is_admin_sync = True
+            if user_token:
+                from services.session_manager import decode_jwt
+                from region_detector import is_superadmin
+                is_admin_sync = is_superadmin(decode_jwt(user_token))
+
+            if is_admin_sync or t_reg:
+                sync_active_tickets_state([], source="tts_new", key_type="ticket_code", service_type=service_type, region=t_reg)
+
             state.log("WARN", f"ℹ️ Đã quét {total_scanned} phiếu trên TTS Mới nhưng không có phiếu {lbl} nào đang xử lý / cần tiền kiểm lại{f' tại {t_reg}' if t_reg else ''}.", region=t_reg)
             return 0
 
         state.log("SUCCESS", f"Thu được {len(voice_tickets)} phiếu {lbl} cần xử lý{f' [{t_reg}]' if t_reg else ''} (Quét TTS Mới: {total_scanned}). Đang nạp vào bảng...", region=t_reg)
 
-        # Bước 1: Nạp nhanh toàn bộ phiếu vào Database trước với status CHỜ TIỀN KIỂM
+        # Bước 1: Nạp nhanh toàn bộ phiếu vào Database trước (Bảo tồn kết quả cũ nếu đã có)
         active_codes = set()
-        for t in voice_tickets:
-            phone_84 = normalize_phone_vn(t.get("phone", ""))
-            code = str(t.get("ticket_code", "")).strip()
-            if code:
-                active_codes.add(code)
-            inc_time = str(t.get("incident_time") or t.get("created_time") or "").strip()
-            t_content = t.get("content", "")
-            t_title = t.get("title", "Thoại / SMS")
-            ai_sum_init = t_content
-            try:
-                from services.sms_analyzer import is_sms_ticket, generate_sms_ticket_summary
-                if service_type == "sms" or is_sms_ticket(t_title, t_content):
-                    ai_sum_init = generate_sms_ticket_summary(t_content, inc_time)
-            except Exception:
-                pass
+        conn_check_step1 = get_db_connection()
+        try:
+            for t in voice_tickets:
+                phone_84 = normalize_phone_vn(t.get("phone", ""))
+                code = str(t.get("ticket_code", "")).strip()
+                if code:
+                    active_codes.add(code)
+                inc_time = str(t.get("incident_time") or t.get("created_time") or "").strip()
+                t_content = t.get("content", "")
+                t_title = t.get("title", "Thoại / SMS")
+                clean_c = (code or "").split("\n")[0].strip()
+                t_id = t.get("ticket_id")
 
-            rec = {
-                "phone": phone_84,
-                "incident_time": inc_time,
-                "package_title": t_title,
-                "ticket_content": t_content,
-                "status": "CHỜ TIỀN KIỂM",
-                "real_packages": "--",
-                "rat_types": "--",
-                "cem_data": "--",
-                "app_usage": "--",
-                "ai_summary": ai_sum_init,
-                "comment": "",
-                "action_plan": "",
-                "ticket_status": "Chưa đóng",
-                "force_update_status": True,
-                "source": "tts_new",
-                "created_time": t.get("created_time", ""),
-                "ticket_code": code,
-                "ticket_id": t.get("ticket_id"),
-                "flow_id": t.get("flow_id", ""),
-                "reopen_count": int(t.get("reopen_count") or 0),
-                "last_reopened_date": str(t.get("last_reopened_date") or "").strip(),
-                "processing_content": t.get("processing_content", ""),
-                "region": t.get("region"),
-                "ward": t.get("ward", ""),
-                "loaded_by": t.get("loaded_by", "")
-            }
-            save_or_update_ticket(rec)
+                # Kiểm tra xem phiếu đã có đánh giá kỹ thuật hợp lệ trong DB chưa
+                old_row = None
+                if t_id:
+                    old_row = conn_check_step1.execute(
+                        "SELECT * FROM tickets WHERE ticket_id = ? AND source = 'tts_new' ORDER BY updated_at DESC LIMIT 1",
+                        (t_id,)
+                    ).fetchone()
+                if not old_row and clean_c:
+                    old_row = conn_check_step1.execute(
+                        "SELECT * FROM tickets WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new' ORDER BY updated_at DESC LIMIT 1",
+                        (clean_c, f"{clean_c}%")
+                    ).fetchone()
+                if not old_row and phone_84 and inc_time:
+                    old_row = conn_check_step1.execute(
+                        "SELECT * FROM tickets WHERE (phone = ? OR phone LIKE ?) AND incident_time = ? ORDER BY updated_at DESC LIMIT 1",
+                        (phone_84, f"%{phone_84[-9:]}%", inc_time)
+                    ).fetchone()
+
+                has_valid_eval = bool(
+                    old_row 
+                    and old_row["status"] 
+                    and _is_valid_technical_status(old_row["status"])
+                    and not force_recheck
+                )
+
+                if has_valid_eval:
+                    t["_already_evaluated"] = True
+                    # Giữ nguyên toàn bộ kết quả tiền kiểm đã có trong DB, không reset về CHỜ TIỀN KIỂM
+                    rec = {
+                        "phone": phone_84,
+                        "incident_time": inc_time or old_row["incident_time"],
+                        "package_title": t_title,
+                        "ticket_content": t_content,
+                        "status": old_row["status"],
+                        "real_packages": old_row["real_packages"] or "--",
+                        "rat_types": old_row["rat_types"] or "--",
+                        "cem_data": old_row["cem_data"] or "--",
+                        "app_usage": old_row["app_usage"] or "--",
+                        "ai_summary": old_row["ai_summary"] or t_content,
+                        "comment": old_row["comment"] or "",
+                        "action_plan": old_row["action_plan"] or "",
+                        "color": old_row["color"] or "green",
+                        "ticket_status": "Chưa đóng",
+                        "force_update_status": False,
+                        "source": "tts_new",
+                        "created_time": t.get("created_time", "") or old_row["created_time"],
+                        "ticket_code": code,
+                        "ticket_id": t_id or old_row["ticket_id"],
+                        "flow_id": t.get("flow_id", "") or old_row["flow_id"],
+                        "reopen_count": int(t.get("reopen_count") or old_row["reopen_count"] or 0),
+                        "last_reopened_date": str(t.get("last_reopened_date") or old_row["last_reopened_date"] or "").strip(),
+                        "processing_content": t.get("processing_content", "") or old_row["processing_content"],
+                        "region": t.get("region") or old_row["region"],
+                        "ward": t.get("ward", "") or old_row["ward"],
+                        "loaded_by": t.get("loaded_by", "") or old_row["loaded_by"]
+                    }
+                else:
+                    t["_already_evaluated"] = False
+                    ai_sum_init = t_content
+                    try:
+                        from services.sms_analyzer import is_sms_ticket, generate_sms_ticket_summary
+                        if service_type == "sms" or is_sms_ticket(t_title, t_content):
+                            ai_sum_init = generate_sms_ticket_summary(t_content, inc_time)
+                    except Exception:
+                        pass
+
+                    rec = {
+                        "phone": phone_84,
+                        "incident_time": inc_time,
+                        "package_title": t_title,
+                        "ticket_content": t_content,
+                        "status": "CHỜ TIỀN KIỂM",
+                        "real_packages": "--",
+                        "rat_types": "--",
+                        "cem_data": "--",
+                        "app_usage": "--",
+                        "ai_summary": ai_sum_init,
+                        "comment": "",
+                        "action_plan": "",
+                        "ticket_status": "Chưa đóng",
+                        "force_update_status": True,
+                        "source": "tts_new",
+                        "created_time": t.get("created_time", ""),
+                        "ticket_code": code,
+                        "ticket_id": t_id,
+                        "flow_id": t.get("flow_id", ""),
+                        "reopen_count": int(t.get("reopen_count") or 0),
+                        "last_reopened_date": str(t.get("last_reopened_date") or "").strip(),
+                        "processing_content": t.get("processing_content", ""),
+                        "region": t.get("region"),
+                        "ward": t.get("ward", ""),
+                        "loaded_by": t.get("loaded_by", ""),
+                        "deadline_overall": t.get("deadline_overall", "")
+                    }
+                save_or_update_ticket(rec)
+        finally:
+            conn_check_step1.close()
 
         is_admin_sync = True
         if user_token:
@@ -157,21 +255,32 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
             from region_detector import is_superadmin
             is_admin_sync = is_superadmin(decode_jwt(user_token))
 
-        if active_codes and is_admin_sync:
+        if is_admin_sync or t_reg:
             scanned_regs = {t.get("region") for t in voice_tickets if t.get("region")}
             if scanned_regs:
                 for s_reg in scanned_regs:
                     sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type=service_type, region=s_reg)
             else:
-                sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type=service_type)
+                sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type=service_type, region=t_reg)
 
         # Đối với Cuộc gọi (call): Hoàn tất ngay sau khi nạp danh sách phiếu (tiền kiểm On-Demand từng số).
-        # Đối với Tin nhắn (sms): Chạy tiếp xuống Bước 2 để tự động bóc tách thực thể và tra cứu CDR SMSC.
         if service_type in ("call", "spam_call"):
             state.log("SUCCESS", f"✅ Đã nạp xong {len(voice_tickets)} phiếu {lbl} lên bảng (Chế độ Tiền kiểm On-Demand từng số).", region=t_reg)
             return len(voice_tickets)
 
-        state.log("INFO", f"✅ Đã nạp xong {len(voice_tickets)} phiếu lên bảng. Đang tiến hành tra cứu Core...")
+        # 🎯 LỌC DANH SÁCH PHIẾU CẦN TIỀN KIỂM:
+        # Nếu không force_recheck: CHỈ TIỀN KIỂM NHỮNG PHIẾU MỚI VỪA NHẬN (chưa có nhận định hợp lệ trong DB).
+        # Tất cả các phiếu đã có nhận định được giữ nguyên 100%, không cào lại CDR/Core/CCOS.
+        if not force_recheck:
+            tickets_to_precheck = [t for t in voice_tickets if not t.get("_already_evaluated")]
+        else:
+            tickets_to_precheck = list(voice_tickets)
+
+        if not tickets_to_precheck:
+            state.log("SUCCESS", f"✅ Đã đồng bộ {len(voice_tickets)} phiếu {lbl}{f' [{t_reg}]' if t_reg else ''} (Tất cả đã có nhận định hợp lệ). Không có phiếu mới cần tiền kiểm.", region=t_reg)
+            return len(voice_tickets)
+
+        state.log("INFO", f"⚡ Phát hiện {len(tickets_to_precheck)}/{len(voice_tickets)} phiếu {lbl} mới vừa nhận cần tiền kiểm{f' [{t_reg}]' if t_reg else ''}. Đang tra cứu Core...")
 
         SAPCCHECK_DIR = str(BASE_DIR / "sapccheck")
         if SAPCCHECK_DIR not in sys.path:
@@ -188,7 +297,7 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
 
         from services.voice_precheck import precheck_single_voice_ticket
 
-        # Bước 2: Tra cứu Core & Profile song song để xử lý nhanh toàn bộ danh sách phiếu
+        # Bước 2: Tra cứu Core & Profile song song để xử lý các phiếu mới vừa nhận
         import concurrent.futures
 
         def _process_single_voice_ticket(item_tuple):
@@ -199,7 +308,7 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
             code = t.get("ticket_code", "")
             inc_time = str(t.get("incident_time") or t.get("created_time") or "").strip()
 
-            state.current_step = f"Tiền kiểm {lbl} {idx}/{len(voice_tickets)}: {phone_84}"
+            state.current_step = f"Tiền kiểm {lbl} {idx}/{len(tickets_to_precheck)}: {phone_84}"
             try:
                 step_name_raw = str(t.get("step_name") or "")
                 raw_code_step = f"{step_name_raw} {code}".lower()
@@ -228,6 +337,13 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
                             WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new'
                             ORDER BY updated_at DESC LIMIT 1
                         """, (clean_c, f"{clean_c}%")).fetchone()
+                    if not existing_db_row and phone_84 and inc_time:
+                        existing_db_row = conn_chk.execute("""
+                            SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary, ccos_attachments
+                            FROM tickets 
+                            WHERE (phone = ? OR phone LIKE ?) AND incident_time = ? AND source = 'tts_new'
+                            ORDER BY updated_at DESC LIMIT 1
+                        """, (phone_84, f"%{phone_84[-9:]}%", inc_time)).fetchone()
                     conn_chk.close()
                 except Exception:
                     pass
@@ -241,13 +357,11 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
                     return True
 
                 is_sms_target = (service_type == "sms" or any(k in str(t.get("title", "")).lower() for k in ["sms", "tin nhắn", "lỗi gửi tin", "otp"]))
-                has_stale_data_pkg = existing_db_row and ("SAPC:" in str(existing_db_row["real_packages"] or "") or "MI_" in str(existing_db_row["real_packages"] or "") or existing_db_row["comment"] == "Chuyển 2.4")
 
                 can_reuse_db = (
                     not force_recheck
                     and existing_db_row 
                     and _is_valid_technical_status(existing_db_row["status"])
-                    and not (is_sms_target and has_stale_data_pkg)
                 )
 
                 ccos_json_str = ""
@@ -337,18 +451,19 @@ def execute_ttsnew_voice_cycle(service_type: str = "voice_sms", force_recheck: b
                     "sms_incident_time": sms_inc_time,
                     "sms_cdr_summary": sms_cdr_str,
                     "incident_cause": eval_res.get("suggested_cause_code") or eval_res.get("incident_cause") or "",
-                    "processing_content": eval_res.get("suggested_conclusion") or eval_res.get("processing_content") or ""
+                    "processing_content": eval_res.get("suggested_conclusion") or eval_res.get("processing_content") or "",
+                    "deadline_overall": t.get("deadline_overall", "")
                 }
                 save_or_update_ticket(rec_update)
                 if not can_reuse_db:
-                    state.log("SUCCESS", f"[{idx}/{len(voice_tickets)}] Đã tiền kiểm mới {lbl}: {phone_84} -> {eval_res.get('status')}")
+                    state.log("SUCCESS", f"[{idx}/{len(tickets_to_precheck)}] Đã tiền kiểm mới {lbl}: {phone_84} -> {eval_res.get('status')}")
                 return True
             except Exception as e:
                 state.log("ERROR", f"Lỗi tiền kiểm {phone_84}: {e}")
                 return False
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            items = list(enumerate(voice_tickets, 1))
+            items = list(enumerate(tickets_to_precheck, 1))
             futures = [executor.submit(_process_single_voice_ticket, it) for it in items]
             for future in concurrent.futures.as_completed(futures):
                 if state.stop_requested:

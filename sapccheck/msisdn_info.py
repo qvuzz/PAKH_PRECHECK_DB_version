@@ -88,35 +88,41 @@ def _parse_loc_response(data):
         nam_val = sud.get('NAM')
     result["NAM"] = str(nam_val).strip() if nam_val is not None else ""
 
-    # Sub State: MS PURGED, LOCATED, v.v.
-    # 🎯 ƯU TIÊN KIỂM TRA MS PURGED / PURGED TỪ TẤT CẢ CÁC NGUỒN CỦA API
+    # Sub State: MS PURGED, RESTRICTED AREA, LOCATED, v.v.
+    # 🎯 ƯU TIÊN KIỂM TRA MS PURGED & RESTRICTED AREA TỪ TẤT CẢ CÁC NGUỒN CỦA API
     is_purged = False
+    is_restricted = False
     hlr_sslo_sub = data.get('hlrSslo', {}).get('hlrSsloSub', {}) if isinstance(data.get('hlrSslo'), dict) else {}
-    if "PURGED" in str(loc.get('subState', '')).upper():
-        is_purged = True
-    elif "PURGED" in str(hlr_sslo_sub.get('substate', '')).upper():
-        is_purged = True
-    elif str(location_data.get('msPurgedInVlr', '')).lower() == 'true':
-        is_purged = True
-    elif "PURGED" in str(hlr_sub.get('subState', '')).upper() or "PURGED" in str(hlr_sub.get('sub_state', '')).upper():
+    
+    candidates = [
+        loc.get('subState'),
+        hlr_sslo_sub.get('substate'),
+        hlr_sub.get('subState'),
+        hlr_sub.get('sub_state'),
+        hlr_sub.get('subscriberState'),
+        location_data.get('subState'),
+        location_data.get('subscriberState'),
+        hss_sub.get('epsLocationState'),
+        hlr_sub.get('state'),
+        data.get('subState'),
+        data.get('Sub State')
+    ]
+
+    for val_check in candidates:
+        v_upper = str(val_check or '').strip().upper()
+        if "PURGED" in v_upper:
+            is_purged = True
+        if "RESTRICTED" in v_upper:
+            is_restricted = True
+
+    if str(location_data.get('msPurgedInVlr', '')).lower() == 'true':
         is_purged = True
 
     if is_purged:
         sub_state_val = "MS PURGED"
+    elif is_restricted:
+        sub_state_val = "RESTRICTED AREA"
     else:
-        candidates = [
-            loc.get('subState'),
-            hlr_sslo_sub.get('substate'),
-            hlr_sub.get('subState'),
-            hlr_sub.get('sub_state'),
-            hlr_sub.get('subscriberState'),
-            location_data.get('subState'),
-            location_data.get('subscriberState'),
-            hss_sub.get('epsLocationState'),
-            hlr_sub.get('state'),
-            data.get('subState'),
-            data.get('Sub State')
-        ]
         sub_state_val = next(
             (str(c).strip() for c in candidates if c and str(c).strip().upper() not in ['', 'UNKNOWN', 'NONE', 'NULL']),
             hss_sub.get('epsLocationState') or hlr_sub.get('state') or 'UNKNOWN'

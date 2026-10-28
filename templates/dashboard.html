@@ -645,6 +645,110 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- GW: Nút bấm & Popup KẾT NỐI VNPT-GW (10.165.15.29:8080) -->
+                <div id="wrapperGw" style="position:relative; display:inline-block;">
+                    <button type="button" id="svcPillGw" class="svc-status-pill" onclick="toggleGwPopup(event)"
+                        title="GW: Click để xem kết nối / dán JSESSIONID">
+                        <span id="dotGw" class="svc-status-dot inactive"></span>
+                        <span class="svc-name">GW</span>
+                    </button>
+
+                    <!-- POPUP GW KẾT NỐI -->
+                    <div id="modalGwSync"
+                        style="display:none; position:absolute; top:calc(100% + 8px); left:50%; transform:translateX(-50%); width:330px; background:#ffffff; border:1px solid #b8cde0; border-radius:10px; box-shadow:0 12px 32px rgba(15, 23, 42, 0.22); z-index:99999; padding:14px; text-align:left;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #e2e8f0; padding-bottom:6px;">
+                            <span style="font-size:12px; font-weight:800; color:#0f172a; letter-spacing:0.3px;">KẾT NỐI VNPT-GW (10.165.15.29:8080)</span>
+                            <span onclick="closeGwModal()" style="cursor:pointer; color:#94a3b8; font-size:16px; font-weight:bold; line-height:1;">&times;</span>
+                        </div>
+
+                        <!-- Khối trạng thái khi đã kết nối -->
+                        <div id="boxGwLoggedInState" style="display:none; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px; margin-bottom:10px; flex-direction:column; gap:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <div>
+                                    <div style="font-size:12px; font-weight:700; color:#15803d;">Đã kết nối VNPT-GW</div>
+                                    <div id="lblGwUser" style="font-size:11px; color:#166534; margin-top:2px;">Phiên làm việc đang hoạt động</div>
+                                </div>
+                                <button type="button" onclick="logoutGwSession()"
+                                    style="background:#dc2626; color:#ffffff; border:none; border-radius:4px; padding:5px 10px; font-size:11px; font-weight:700; cursor:pointer;">
+                                    Thoát
+                                </button>
+                            </div>
+                            <div style="border-top:1px dashed #bbf7d0; padding-top:6px; text-align:right;">
+                                <a href="javascript:void(0)" onclick="toggleGwReAuth()" style="font-size:10.5px; color:#0284c7; text-decoration:none;">
+                                    Đăng nhập tài khoản khác &darr;
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- BƯỚC 1: FORM NHẬP TÀI KHOẢN GW -->
+                        <div id="boxStep1GwLogin">
+                            <form id="directGwLoginForm" onsubmit="handleDirectGwLoginSubmit(event)" style="display:flex; flex-direction:column; gap:8px;">
+                                <input type="text" id="loginGwUsername" class="control-input"
+                                    style="width:100%; box-sizing:border-box; height:36px; padding:6px 12px; font-size:12.5px; font-weight:600; color:#1e293b; background:#ffffff; border:1px solid #b8cde0; border-radius:6px; outline:none;"
+                                    placeholder="Tên truy nhập CAS (ví dụ: quangvu)" autocomplete="username" required>
+                                <input type="password" id="loginGwPassword" class="control-input"
+                                    style="width:100%; box-sizing:border-box; height:36px; padding:6px 12px; font-size:12.5px; color:#1e293b; background:#ffffff; border:1px solid #b8cde0; border-radius:6px; outline:none;"
+                                    placeholder="Mật khẩu" autocomplete="current-password" required>
+                                <div id="gwLoginStatusMsg" style="display:none; padding:6px 8px; border-radius:6px; font-size:11px; line-height:1.3;"></div>
+                                <button type="submit" id="btnDirectGwLoginSubmit"
+                                    style="width:100%; height:36px; background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; font-size:12px; font-weight:800; text-transform:uppercase; border:none; border-radius:6px; cursor:pointer;">
+                                    ĐĂNG NHẬP GW
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- BƯỚC 2: FORM XÁC THỰC OTP GW -->
+                        <div id="boxStep2GwOtp" style="display:none;">
+                            <div style="text-align:center; margin-bottom:8px;">
+                                <div style="font-size:12px; color:#334155;">Tài khoản: <b id="otpGwUserLabel" style="color:#0f172a;">--</b></div>
+                                <div style="font-size:11.5px; font-weight:600; color:#1e293b; margin-top:2px;">Nhập mã xác thực OTP từ điện thoại</div>
+                            </div>
+                            <form id="directGwOtpForm" onsubmit="handleDirectGwOtpSubmit(event)" style="display:flex; flex-direction:column; gap:8px;">
+                                <input type="text" id="loginGwOtp" class="control-input"
+                                    style="width:100%; box-sizing:border-box; height:36px; padding:6px 12px; font-size:15px; font-weight:700; color:#005baa; text-align:center; letter-spacing:3px; background:#ffffff; border:1px solid #94a3b8; border-radius:6px; outline:none;"
+                                    placeholder="MÃ OTP" autocomplete="one-time-code">
+                                <div id="gwOtpStatusMsg" style="display:none; padding:6px 8px; border-radius:6px; font-size:11px; line-height:1.3;"></div>
+                                <button type="submit" id="btnDirectGwOtpSubmit"
+                                    style="width:100%; height:36px; background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; font-size:12px; font-weight:800; text-transform:uppercase; border:none; border-radius:6px; cursor:pointer;">
+                                    XÁC NHẬN OTP
+                                </button>
+                            </form>
+                            <div style="text-align:center; margin-top:8px;">
+                                <a href="javascript:void(0)" onclick="backToStep1GwLogin()" style="font-size:11px; color:#64748b; text-decoration:none;">&larr; Quay lại nhập tài khoản</a>
+                            </div>
+                        </div>
+
+                        <!-- MỤC DỰ PHÒNG: DÁN JSESSIONID THỦ CÔNG -->
+                        <div style="margin-top:10px; border-top:1px solid #f1f5f9; padding-top:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <a href="javascript:void(0)" onclick="toggleGwManualSection()" style="font-size:11px; color:#64748b; text-decoration:none;">
+                                    Hoặc dán Cookie thủ công &darr;
+                                </a>
+                                <a href="http://10.165.15.29:8080/VNPT-GW/client/search" target="_blank" style="font-size:11px; font-weight:700; color:#0284c7; text-decoration:none;">
+                                    Mở VNPT-GW &rarr;
+                                </a>
+                            </div>
+                            <div id="sectionGwManual" style="display:none; margin-top:8px;">
+                                <form id="directGwForm" onsubmit="handleDirectGwCookieSubmit(event)" style="display:flex; flex-direction:column; gap:6px;">
+                                    <label style="font-size:11px; color:#475569; font-weight:600;">Dán Cookie / JSESSIONID:</label>
+                                    <input type="text" id="gwCookieInput" class="control-input"
+                                        style="width:100%; box-sizing:border-box; height:32px; padding:4px 8px; font-size:11.5px; color:#1e293b; background:#ffffff; border:1px solid #cbd5e1; border-radius:4px; outline:none;"
+                                        placeholder="Dán JSESSIONID hoặc Cookie chuỗi...">
+                                    <label style="font-size:11px; color:#475569; font-weight:600; margin-top:4px;">ViewState (tùy chọn):</label>
+                                    <input type="text" id="gwViewStateInput" class="control-input"
+                                        style="width:100%; box-sizing:border-box; height:32px; padding:4px 8px; font-size:11.5px; color:#1e293b; background:#ffffff; border:1px solid #cbd5e1; border-radius:4px; outline:none;"
+                                        placeholder="javax.faces.ViewState (nếu có)...">
+                                    <div id="gwStatusMsg" style="display:none; padding:4px 6px; border-radius:4px; font-size:10.5px; line-height:1.3;"></div>
+                                    <button type="submit" id="btnSaveGwCookie"
+                                        style="width:100%; height:32px; background:#475569; color:#ffffff; font-size:11px; font-weight:700; text-transform:uppercase; border:none; border-radius:4px; cursor:pointer; margin-top:4px;">
+                                        LƯU PHIÊN GW THỦ CÔNG
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- NÚT LÀM MỚI QUÉT TIỀN KIỂM -->
@@ -891,6 +995,25 @@
                 </button>
             </div>
 
+            <!-- NHÓM CÔNG CỤ TÍCH HỢP -->
+            <div class="nav-section">
+                <div class="nav-section-title">CÔNG CỤ TÍCH HỢP</div>
+                <button class="nav-item" id="nav-integrated-tools" onclick="selectIntegratedToolsModule()" title="Tool Tích Hợp: Tra cứu vị trí thuê bao & Bản đồ Cell BTS (Port 1234)">
+                    <div class="nav-item-left">
+                        <div class="nav-item-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+                            </svg>
+                        </div>
+                        <div class="nav-item-text">
+                            <span class="nav-item-title">Vị Trí & Bản Đồ BTS</span>
+                            <span class="nav-item-sub">Tool tích hợp nội bộ</span>
+                        </div>
+                    </div>
+                </button>
+            </div>
+
             <!-- NHÓM 5: QUẢN TRỊ HỆ THỐNG (CHỈ DÀNH RIÊNG CHO SUPER ADMIN) -->
             <div class="nav-section" id="navAdminSection" style="display:none;">
                 <div class="nav-section-title">QUẢN TRỊ HỆ THỐNG</div>
@@ -1019,8 +1142,7 @@
                         </div>
                         <div class="ca-card-val" id="caValTotal">--</div>
                         <div class="ca-card-sub" id="caSubTotal">
-                            TTS Mới: <b id="caValTtsNew" style="color:#0284c7;">0</b> &bull; TTS Cũ: <b id="caValTtsOld"
-                                style="color:#2563eb;">0</b>
+                            Tổng tiếp nhận TTS hôm nay: <b id="caValTodayReceived" style="color:#0284c7;">0</b>
                         </div>
                     </div>
 
@@ -1375,6 +1497,11 @@
             <!-- MODULE QUẢN TRỊ: QUẢN LÝ PHÂN VÙNG NHÂN VIÊN & MÔ HÌNH AI -->
             <!-- DÀNH RIÊNG CHO QUẢN TRỊ VIÊN (SUPERADMIN) -->
             <!-- ============================================================= -->
+                        <!-- MODULE TÍCH HỢP: TRA CỨU VỊ TRÍ THUÊ BAO & BẢN ĐỒ CELL BTS -->
+            <div id="integratedToolsContainer" style="display:none; width:100%; height:calc(100vh - 75px); min-height:650px; border-radius:10px; overflow:hidden; border:1px solid #cbd5e1; box-shadow:0 1px 3px rgba(0,0,0,0.06); background:#ffffff;">
+                <iframe id="integratedToolsIframe" src="/vitri/" style="width:100%; height:100%; border:none; display:block;" title="Tra cứu Vị trí Thuê bao & Bản đồ BTS"></iframe>
+            </div>
+
             <div id="userManagementContainer" class="user-management-container" style="display:none; padding:16px 20px;">
                 <!-- KHỐI 1: CẤU HÌNH MÔ HÌNH AI & PHÂN TÍCH NỘI DUNG -->
                 <div style="background:#ffffff; border:1px solid #cbd5e1; border-radius:10px; padding:14px 18px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.05); display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;">
@@ -1395,7 +1522,7 @@
                         <select id="selectAiSummaryModel" class="control-input" onchange="handleAiSummaryModelChange(this.value)"
                             style="height:32px; font-size:12px; font-weight:700; border-radius:6px; padding:0 10px; border:1px solid #94a3b8; background:#ffffff; color:#0f172a; cursor:pointer;">
                             <option value="regex" selected>Regex (Quy tắc mẫu viễn thông)</option>
-                            <option value="qwen">Qwen 2.5 (Offline AI On-Premise)</option>
+                            <option value="qwen">Qwen AI (Offline On-Premise: Qwen3 / Qwen2.5)</option>
                         </select>
                     </div>
                 </div>
@@ -1602,8 +1729,8 @@
                     </div>
                     <div style="display:flex; gap:8px; align-items:center;">
                         <div class="search-box">
-                            <input type="text" id="searchInput" placeholder="Tìm số thuê bao, nội dung..."
-                                oninput="loadTickets(false, true)">
+                            <input type="text" id="searchInput" placeholder="Tìm mã phiếu, SĐT, nhận định, nội dung..."
+                                oninput="onSearchInput()" onkeydown="if(event.key==='Enter'){clearTimeout(window.searchDebounceTimer); loadTickets(true, true);}">
                         </div>
                         <select id="filterSourceSelect" class="control-input"
                             style="display:none; width:auto; min-width:130px; padding:6px 10px; font-size:12px; font-weight:600;"
@@ -1630,7 +1757,7 @@
                             <option value="THIET_BI">Lỗi thiết bị / VPN</option>
                             <option value="THEO_DOI">Cần theo dõi thêm</option>
                         </select>
-                        <button class="btn btn-icon btn-outline-primary" onclick="exportExcel()" title="Tải file Excel báo cáo phân tích 12 cột chuẩn" style="padding:6px 10px; display:inline-flex; align-items:center; justify-content:center;">
+                        <button class="btn btn-icon btn-outline-primary" onclick="exportExcel()" title="Tải file Excel báo cáo phân tích 16 cột chuẩn" style="padding:6px 10px; display:inline-flex; align-items:center; justify-content:center;">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                                 <polyline points="7 10 12 15 17 10" />
@@ -1645,8 +1772,28 @@
                         <thead>
                             <tr>
                                 <th class="col-stt-header" style="width:36px; min-width:36px; max-width:36px; text-align:center; padding:6px 2px;">STT</th>
-                                <th id="thTicketCode" style="width:11%; min-width:145px;">Mã Phiếu</th>
-                                <th id="thStatus" style="width:6.5%; min-width:85px; text-align:center;">Nhận Định</th>
+                                <th id="thTicketCode" class="sortable-th" style="width:11%; min-width:145px;" onclick="toggleTicketCodeSort()" title="Bấm để sắp xếp theo mã phiếu">
+                                    <div style="display:inline-flex; align-items:center; gap:4px;">
+                                        <span id="thTicketCodeText">Mã Phiếu</span>
+                                        <span id="sortTicketCodeIcon" class="sort-icon">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M7 15l5 5 5-5"/>
+                                                <path d="M7 9l5-5 5 5"/>
+                                            </svg>
+                                        </span>
+                                    </div>
+                                </th>
+                                <th id="thStatus" class="sortable-th" style="width:6.5%; min-width:85px; text-align:center;" onclick="toggleStatusSort()" title="Bấm để sắp xếp theo nhận định">
+                                    <div style="display:inline-flex; align-items:center; justify-content:center; gap:4px;">
+                                        <span id="thStatusText">Nhận Định</span>
+                                        <span id="sortStatusIcon" class="sort-icon">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M7 15l5 5 5-5"/>
+                                                <path d="M7 9l5-5 5 5"/>
+                                            </svg>
+                                        </span>
+                                    </div>
+                                </th>
                                 <th style="width:7%; min-width:92px; text-align:center;">Số Thuê Bao</th>
                                 <th id="thCategory" style="width:6.5%; min-width:90px; text-align:center;">Loại PAKH</th>
                                 <th id="thIncidentTime" class="sortable-th" style="width:6%; min-width:85px; text-align:center;" onclick="toggleIncidentTimeSort()" title="Thứ tự mặc định (Bấm để sắp xếp theo ngày tiếp nhận)">
@@ -1999,10 +2146,84 @@
                     </div>
                 </div>
 
+                <!-- FORM 6 MỤC CHUẨN SMS (DROPDOWN / INPUT) -->
+                <div id="aiTeachSmsFormContainer" style="display:none; background:#ffffff; border:1px solid #cbd5e1; border-radius:8px; padding:12px 14px; margin-bottom:12px;">
+                    <!-- Mục 1: Vấn đề phản ánh -->
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block; font-size:11.5px; font-weight:700; color:#1e293b; margin-bottom:3px;">
+                            1. Vấn đề phản ánh:
+                        </label>
+                        <select id="aiTeachSmsProblem" onchange="updateAiTeachPreview()" style="width:100%; height:30px; font-size:12px; font-weight:600; border:1px solid #cbd5e1; border-radius:5px; padding:2px 8px; outline:none; background:#ffffff; color:#0f172a;">
+                            <option value="Không nhận được mã OTP">Không nhận được mã OTP</option>
+                            <option value="Lỗi không gửi được tin nhắn đi (MO Fail)">Lỗi không gửi được tin nhắn đi (MO Fail)</option>
+                            <option value="Lỗi không nhận được tin nhắn đến (MT Fail)">Lỗi không nhận được tin nhắn đến (MT Fail)</option>
+                            <option value="Khiếu nại phát sinh cước SMS">Khiếu nại phát sinh cước SMS</option>
+                            <option value="Thiết bị tự phát sinh tin nhắn ngầm">Thiết bị tự phát sinh tin nhắn ngầm</option>
+                            <option value="Tin nhắn rác / Quấy rối / Chặn spam">Tin nhắn rác / Quấy rối / Chặn spam</option>
+                            <option value="Sự cố tin nhắn SMS khác">Sự cố tin nhắn SMS khác</option>
+                        </select>
+                    </div>
+
+                    <!-- Mục 2: Mốc thời gian xảy ra -->
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block; font-size:11.5px; font-weight:700; color:#1e293b; margin-bottom:3px;">
+                            2. Mốc thời gian xảy ra:
+                        </label>
+                        <input type="text" id="aiTeachSmsTime" oninput="updateAiTeachPreview()" placeholder="Ví dụ: 02/10/2026 14:30 (3 ngày gần nhất), Không rõ..." style="width:100%; box-sizing:border-box; height:30px; font-size:12px; border:1px solid #cbd5e1; border-radius:5px; padding:2px 8px; outline:none;">
+                    </div>
+
+                    <!-- Mục 3: Số gọi/nhận lỗi -->
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block; font-size:11.5px; font-weight:700; color:#1e293b; margin-bottom:3px;">
+                            3. Số gọi/nhận lỗi:
+                        </label>
+                        <input type="text" id="aiTeachSmsTargetParty" oninput="updateAiTeachPreview()" placeholder="Ví dụ: Tất cả các số, Vietcombank, 1414, 0912xxxxxx..." style="width:100%; box-sizing:border-box; height:30px; font-size:12px; border:1px solid #cbd5e1; border-radius:5px; padding:2px 8px; outline:none;">
+                    </div>
+
+                    <!-- Mục 4: Ứng dụng / Đầu số -->
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block; font-size:11.5px; font-weight:700; color:#1e293b; margin-bottom:3px;">
+                            4. Ứng dụng / Đầu số:
+                        </label>
+                        <input type="text" id="aiTeachSmsBrand" oninput="updateAiTeachPreview()" placeholder="Ví dụ: PayPal, FE Credit, Vietcombank, Telegram, SMS thông thường..." style="width:100%; box-sizing:border-box; height:30px; font-size:12px; border:1px solid #cbd5e1; border-radius:5px; padding:2px 8px; outline:none;">
+                    </div>
+
+                    <!-- Mục 5: Thiết bị & Thao tác -->
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block; font-size:11.5px; font-weight:700; color:#1e293b; margin-bottom:3px;">
+                            5. Thiết bị & Thao tác:
+                        </label>
+                        <input type="text" id="aiTeachSmsDevice" oninput="updateAiTeachPreview()" placeholder="Ví dụ: Máy iPhone (Đã làm: Đã khởi động lại máy, Đã kiểm tra/cài số TTNT)..." style="width:100%; box-sizing:border-box; height:30px; font-size:12px; border:1px solid #cbd5e1; border-radius:5px; padding:2px 8px; outline:none;">
+                    </div>
+
+                    <!-- Mục 6: Cước phí khiếu nại -->
+                    <div style="margin-bottom:8px;">
+                        <label style="display:block; font-size:11.5px; font-weight:700; color:#1e293b; margin-bottom:3px;">
+                            6. Cước phí khiếu nại:
+                        </label>
+                        <input type="text" id="aiTeachSmsCost" oninput="updateAiTeachPreview()" placeholder="Ví dụ: Không đề cập, 50.000đ, 2500 đồng..." style="width:100%; box-sizing:border-box; height:30px; font-size:12px; border:1px solid #cbd5e1; border-radius:5px; padding:2px 8px; outline:none;">
+                    </div>
+
+                    <!-- Mục 7: Cảnh báo / Dấu hiệu -->
+                    <div>
+                        <label style="display:block; font-size:11.5px; font-weight:700; color:#1e293b; margin-bottom:3px;">
+                            7. Cảnh báo / Dấu hiệu:
+                        </label>
+                        <select id="aiTeachSmsAnomaly" onchange="updateAiTeachPreview()" style="width:100%; height:30px; font-size:12px; border:1px solid #cbd5e1; border-radius:5px; padding:2px 8px; outline:none; background:#ffffff; color:#0f172a;">
+                            <option value="Không có dấu hiệu bất thường">Không có dấu hiệu bất thường</option>
+                            <option value="Đã kiểm tra TTNT đúng / reset SMO nhưng vẫn không gửi được: Nghi vấn lỗi cài đặt thiết bị (Chat RCS / iMessage) hoặc lỗi SIM">Đã kiểm tra TTNT đúng / reset SMO nhưng vẫn không gửi được: Nghi vấn lỗi cài đặt thiết bị (Chat RCS / iMessage) hoặc lỗi SIM</option>
+                            <option value="KH khẳng định không gửi: Nghi vấn click vào link lạ hoặc cài app có chứa mã độc kích hoạt tính năng nhắn tin ngầm">KH khẳng định không gửi: Nghi vấn click vào link lạ hoặc cài app có chứa mã độc kích hoạt tính năng nhắn tin ngầm</option>
+                            <option value="Gửi tin nhắn liên tục vài giây/tin - Dấu hiệu mã độc / Botnet tự động phát tán">Gửi tin nhắn liên tục vài giây/tin - Dấu hiệu mã độc / Botnet tự động phát tán</option>
+                            <option value="Phát sinh tin nhắn gửi đi quốc tế lạ (004...) - Dấu hiệu mã độc chiếm quyền SMS">Phát sinh tin nhắn gửi đi quốc tế lạ (004...) - Dấu hiệu mã độc chiếm quyền SMS</option>
+                            <option value="Chỉ gửi được nội mạng, không gửi được ngoại mạng: Nghi vấn chặn chiều ngoại mạng">Chỉ gửi được nội mạng, không gửi được ngoại mạng: Nghi vấn chặn chiều ngoại mạng</option>
+                        </select>
+                    </div>
+                </div>
+
                 <!-- TEXTAREA TRỰC TIẾP (CHẾ ĐỘ NÂNG CAO) -->
                 <div id="aiTeachTextContainer" style="display:none; margin-bottom:12px;">
                     <label style="display:block; font-size:11.5px; font-weight:700; color:#1e293b; margin-bottom:4px;">
-                        Chỉnh sửa trực tiếp 6 dòng chuẩn:
+                        Chỉnh sửa trực tiếp 6-7 dòng chuẩn:
                     </label>
                     <textarea id="aiTeachSummaryInput" oninput="parseAiTeachTextToForm()" rows="7" style="width:100%; box-sizing:border-box; font-family:'JetBrains Mono', Consolas, monospace; font-size:11.5px; line-height:1.45; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; outline:none; resize:vertical;"></textarea>
                 </div>
@@ -2027,10 +2248,68 @@
     </div>
 
     <!-- ============================================================================== -->
+    <!-- MODAL ĐIỀU CHỈNH MỐC THỜI GIAN SỰ CỐ (MỤC 2 & CỘT THỜI ĐIỂM SỰ CỐ) -->
+    <!-- ============================================================================== -->
+    <div id="modalEditIncidentTime" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(15, 23, 42, 0.6); backdrop-filter:blur(2px); align-items:center; justify-content:center; padding:16px;">
+        <div style="background:#ffffff; border-radius:10px; width:100%; max-width:480px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.2); overflow:hidden; border:1px solid #cbd5e1; display:flex; flex-direction:column;">
+            <div style="padding:12px 16px; background:#f8fafc; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; justify-content:space-between;">
+                <div>
+                    <div style="font-size:13.5px; font-weight:800; color:#0f172a; letter-spacing:0.2px;">
+                        ĐIỀU CHỈNH MỐC THỜI GIAN SỰ CỐ
+                    </div>
+                    <div style="font-size:11px; color:#64748b; margin-top:2px;">
+                        Thuê bao: <span id="editTimePhoneDisplay" style="font-weight:700; color:#0284c7;">--</span>
+                    </div>
+                </div>
+                <button type="button" onclick="closeEditIncidentTimeModal()" style="border:none; background:transparent; font-size:16px; color:#94a3b8; cursor:pointer; padding:4px 6px; line-height:1;" title="Đóng">✕</button>
+            </div>
+            
+            <div style="padding:16px;">
+                <input type="hidden" id="editTimePhone" value="">
+                <input type="hidden" id="editTimeTicketId" value="">
+                <input type="hidden" id="editTimeOrigIncidentTime" value="">
+
+                <label style="display:block; font-size:11.5px; font-weight:700; color:#1e293b; margin-bottom:5px;">
+                    Mốc thời gian xảy ra (Mục 2):
+                </label>
+                <input type="text" id="editTimeInput" placeholder="Ví dụ: 15/10/2026, 11/10/2026 → 15/10/2026, 24h qua..." style="width:100%; box-sizing:border-box; height:34px; font-size:12.5px; font-weight:600; border:1px solid #cbd5e1; border-radius:6px; padding:4px 10px; outline:none; color:#0f172a;">
+
+                <!-- Nút chọn nhanh mốc thời gian -->
+                <div style="margin-top:10px;">
+                    <span style="font-size:11px; font-weight:600; color:#64748b; margin-right:4px;">Chọn nhanh:</span>
+                    <div style="display:inline-flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
+                        <button type="button" class="btn-time-preset" onclick="setEditTimePreset('today')" style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; padding:2px 7px; font-size:11px; font-weight:600; color:#334155; cursor:pointer;">Hôm nay</button>
+                        <button type="button" class="btn-time-preset" onclick="setEditTimePreset('24h')" style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; padding:2px 7px; font-size:11px; font-weight:600; color:#334155; cursor:pointer;">24h qua</button>
+                        <button type="button" class="btn-time-preset" onclick="setEditTimePreset('3days')" style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; padding:2px 7px; font-size:11px; font-weight:600; color:#334155; cursor:pointer;">3 ngày qua</button>
+                        <button type="button" class="btn-time-preset" onclick="setEditTimePreset('7days')" style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; padding:2px 7px; font-size:11px; font-weight:600; color:#334155; cursor:pointer;">7 ngày qua</button>
+                        <button type="button" class="btn-time-preset" onclick="setEditTimePreset('month')" style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; padding:2px 7px; font-size:11px; font-weight:600; color:#334155; cursor:pointer;">Tháng này</button>
+                    </div>
+                </div>
+
+                <div style="margin-top:12px; font-size:11px; color:#64748b; line-height:1.4; background:#f8fafc; border-left:3px solid #0284c7; padding:6px 10px; border-radius:0 4px 4px 0;">
+                    Khi bấm <b>Lưu & Tiền kiểm ngay</b>, hệ thống sẽ cập nhật lên cột Thời điểm sự cố và tự động tra cứu lại CDR SMSC theo đúng dải ngày này để đưa ra nhận định chuẩn xác.
+                </div>
+            </div>
+
+            <div style="padding:10px 16px; background:#f8fafc; border-top:1px solid #e2e8f0; display:flex; align-items:center; justify-content:flex-end; gap:8px;">
+                <button type="button" onclick="closeEditIncidentTimeModal()" style="padding:6px 14px; border-radius:5px; font-size:12px; font-weight:600; background:#ffffff; color:#475569; border:1px solid #cbd5e1; cursor:pointer;">
+                    Hủy
+                </button>
+                <button type="button" id="btnSaveIncidentTimeOnly" onclick="saveIncidentTimeAdjustment(false)" style="padding:6px 14px; border-radius:5px; font-size:12px; font-weight:700; background:#f1f5f9; color:#0f172a; border:1px solid #cbd5e1; cursor:pointer;">
+                    Lưu
+                </button>
+                <button type="button" id="btnSaveAndPrecheckNow" onclick="saveIncidentTimeAdjustment(true)" style="padding:6px 16px; border-radius:5px; font-size:12px; font-weight:700; background:#0284c7; color:#ffffff; border:none; cursor:pointer; box-shadow:0 2px 4px rgba(2,132,199,0.3);">
+                    Lưu & Tiền kiểm ngay
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================================== -->
     <!-- MODAL TRA CỨU NHẬT KÝ BẢN TIN SMSC (CDR) THEO SỐ THUÊ BAO -->
     <!-- ============================================================================== -->
     <div id="modalSmscCdr" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.65); backdrop-filter:blur(3px); z-index:9999; align-items:center; justify-content:center; padding:16px;">
-        <div id="modalSmscCdrInner" style="background:#ffffff; border-radius:12px; width:96vw; max-width:1850px; max-height:92vh; display:flex; flex-direction:column; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25); overflow:hidden; border:1px solid #cbd5e1;">
+        <div id="modalSmscCdrInner" style="background:#ffffff; border-radius:12px; width:96vw; max-width:1850px; height:92vh; max-height:92vh; min-height:0; display:flex; flex-direction:column; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25); overflow:hidden; border:1px solid #cbd5e1;">
             
             <!-- HEADER -->
             <div style="padding:12px 18px; background:#f8fafc; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
@@ -2105,26 +2384,64 @@
                     </select>
                 </div>
 
+                <!-- Nguồn dữ liệu & Tùy chọn cào mới -->
+                <label style="font-size:11.5px; font-weight:600; color:#334155; display:inline-flex; align-items:center; gap:5px; cursor:pointer;" title="Bật để ép cào trực tiếp từ mạng tổng đài SMSC thay vì lấy dữ liệu cũ trong Database">
+                    <input type="checkbox" id="cdrForceRefreshCheck" style="cursor:pointer; accent-color:#0d9488; width:14px; height:14px;">
+                    <span>Quét mới từ hệ thống</span>
+                </label>
+
                 <!-- Nút Tra cứu -->
                 <button type="button" id="btnExecuteCdrQuery" onclick="executeSmscCdrQuery()"
-                    style="height:32px; font-size:12px; font-weight:700; background:#0d9488; color:#ffffff; border:none; border-radius:6px; padding:0 16px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(13,148,136,0.3);">
+                    style="height:32px; font-size:12px; font-weight:700; background:#0d9488; color:#ffffff; border:none; border-radius:6px; padding:0 14px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(13,148,136,0.3);">
                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="11" cy="11" r="8"></circle>
                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                     </svg>
                     <span>Tra cứu</span>
                 </button>
+
+                <!-- Nút Xuất Excel -->
+                <button type="button" id="btnExportSmscCdrExcel" onclick="exportSmscCdrToExcel()"
+                    style="height:32px; font-size:12px; font-weight:700; background:#107c41; color:#ffffff; border:none; border-radius:6px; padding:0 13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(16,124,65,0.3);"
+                    title="Xuất danh sách nhật ký SMSC CDR ra file Excel">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <span>Xuất Excel</span>
+                </button>
             </div>
 
-            <!-- THANH THỐNG KÊ KPI & THÔNG BÁO TÓM TẮT TRÊN 1 DÒNG DUY NHẤT -->
+            <!-- THANH THỐNG KÊ KPI & BỘ LỌC CHIỀU TIN NHẮN (MO/MT) -->
             <div id="cdrKpiSection" style="display:none; flex-direction:row; flex-wrap:nowrap; align-items:center; gap:8px; padding:6px 18px; background:#f8fafc; border-bottom:1px solid #e2e8f0; flex-shrink:0; overflow-x:auto;">
-                <div style="background:#ffffff; border:1px solid #cbd5e1; border-radius:5px; padding:3px 8px; font-size:11.5px; white-space:nowrap; display:inline-flex; align-items:center; gap:4px;">
+                <!-- Filter Pills: Tất cả / MO / MT -->
+                <div style="display:inline-flex; align-items:center; background:#e2e8f0; padding:2px; border-radius:6px; flex-shrink:0;">
+                    <button type="button" id="btnFilterCdrAll" onclick="setSmscCdrDirectionFilter('all')"
+                        style="height:25px; font-size:11px; font-weight:700; border:none; border-radius:4px; padding:0 10px; cursor:pointer; background:#0f172a; color:#ffffff; transition:all 0.15s ease;" title="Xem tất cả bản tin (cả MO và MT)">
+                        Tất cả
+                    </button>
+                    <button type="button" id="btnFilterCdrMo" onclick="setSmscCdrDirectionFilter('mo')"
+                        style="height:25px; font-size:11px; font-weight:700; border:none; border-radius:4px; padding:0 10px; cursor:pointer; background:transparent; color:#475569; transition:all 0.15s ease;" title="Chỉ lọc bản tin gửi đi (MO)">
+                        Gửi đi (MO)
+                    </button>
+                    <button type="button" id="btnFilterCdrMt" onclick="setSmscCdrDirectionFilter('mt')"
+                        style="height:25px; font-size:11px; font-weight:700; border:none; border-radius:4px; padding:0 10px; cursor:pointer; background:transparent; color:#475569; transition:all 0.15s ease;" title="Chỉ lọc bản tin nhận đến (MT)">
+                        Nhận đến (MT)
+                    </button>
+                </div>
+
+                <!-- Thống kê chi tiết có thể click để lọc -->
+                <div id="kpiTotalCdrBox" onclick="setSmscCdrDirectionFilter('all')"
+                    style="background:#ffffff; border:1px solid #cbd5e1; border-radius:5px; padding:3px 8px; font-size:11.5px; white-space:nowrap; display:inline-flex; align-items:center; gap:4px; cursor:pointer;" title="Bấm để xem tất cả bản tin">
                     <span style="color:#64748b;">Tổng:</span> <strong id="kpiTotalCdr" style="color:#0f172a; font-size:12px;">0</strong>
                 </div>
-                <div style="background:#ffffff; border:1px solid #cbd5e1; border-radius:5px; padding:3px 8px; font-size:11.5px; white-space:nowrap; display:inline-flex; align-items:center; gap:4px;">
+                <div id="kpiMoCdrBox" onclick="setSmscCdrDirectionFilter('mo')"
+                    style="background:#ffffff; border:1px solid #cbd5e1; border-radius:5px; padding:3px 8px; font-size:11.5px; white-space:nowrap; display:inline-flex; align-items:center; gap:4px; cursor:pointer;" title="Bấm để lọc bản tin Gửi đi (MO)">
                     <span style="color:#64748b;">Gửi đi (MO):</span> <strong id="kpiMoCdr" style="color:#0369a1; font-size:12px;">0</strong>
                 </div>
-                <div style="background:#ffffff; border:1px solid #cbd5e1; border-radius:5px; padding:3px 8px; font-size:11.5px; white-space:nowrap; display:inline-flex; align-items:center; gap:4px;">
+                <div id="kpiMtCdrBox" onclick="setSmscCdrDirectionFilter('mt')"
+                    style="background:#ffffff; border:1px solid #cbd5e1; border-radius:5px; padding:3px 8px; font-size:11.5px; white-space:nowrap; display:inline-flex; align-items:center; gap:4px; cursor:pointer;" title="Bấm để lọc bản tin Nhận đến (MT)">
                     <span style="color:#64748b;">Nhận đến (MT):</span> <strong id="kpiMtCdr" style="color:#0d9488; font-size:12px;">0</strong>
                 </div>
                 <div style="background:#ffffff; border:1px solid #cbd5e1; border-radius:5px; padding:3px 8px; font-size:11.5px; white-space:nowrap; display:inline-flex; align-items:center; gap:4px;">
@@ -2139,13 +2456,20 @@
                         <span>Chỉ xem tin lỗi:</span> <span id="badgeFailedCount" style="background:#dc2626; color:#ffffff; padding:0 5px; border-radius:10px; font-size:10px; font-weight:800;">0</span>
                     </button>
                 </div>
+                <div style="display:inline-flex;">
+                    <button type="button" id="btnToggleMscColumns" onclick="toggleMscColumns(this)"
+                        style="height:25px; font-size:11px; font-weight:700; background:#f8fafc; border:1px solid #cbd5e1; color:#475569; border-radius:4px; padding:0 8px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; white-space:nowrap;"
+                        title="Bấm để ẩn/hiện 2 cột Originating MSC và Destination MSC (thường để trống)">
+                        <span id="btnToggleMscText">Hiện cột MSC (2)</span>
+                    </button>
+                </div>
                 <div style="margin-left:auto; font-size:11px; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-left:12px;">
                     <span id="cdrQuerySummaryText">Nhập số thuê bao và chọn điều kiện để bắt đầu tra cứu.</span>
                 </div>
             </div>
 
-            <!-- VÙNG BẢNG DỮ LIỆU KẾT QUẢ -->
-            <div style="flex:1; overflow:auto; padding:12px 18px; background:#ffffff; min-height:220px;">
+            <!-- VÙNG BẢNG DỮ LIỆU KẾT QUẢ (STICKY HEADER CHUẨN) -->
+            <div style="flex:1; min-height:0; overflow:hidden; padding:8px 18px 4px 18px; background:#ffffff; display:flex; flex-direction:column;">
                 <!-- Spinner Loading -->
                 <div id="cdrLoadingSpinner" style="display:none; text-align:center; padding:50px 20px;">
                     <div class="spinner" style="margin:0 auto 12px auto; width:32px; height:32px; border:3px solid #e2e8f0; border-top-color:#0d9488; border-radius:50%; animation:spin 0.8s linear infinite;"></div>
@@ -2159,9 +2483,14 @@
                     <div style="font-size:11.5px; margin-top:4px;">Nhập số điện thoại vào ô tìm kiếm ở trên và bấm "Tra cứu"</div>
                 </div>
 
-                <!-- Table -->
-                <div style="overflow-x:auto;">
-                    <table id="cdrResultsTable" style="display:none; width:100%; border-collapse:collapse; min-width:1600px; font-size:11.5px;">
+                <!-- THANH CUỘN NGANG ĐỒNG BỘ Ở ĐỈNH (TOP HORIZONTAL SCROLLBAR CỐ ĐỊNH) -->
+                <div id="cdrTopScrollWrapper" style="display:none; overflow-x:auto; overflow-y:hidden; height:12px; margin-bottom:6px; background:#f1f5f9; border-radius:6px; border:1px solid #cbd5e1; flex-shrink:0;" title="Kéo thanh cuộn ngang để xem các cột thông tin bên phải">
+                    <div id="cdrTopScrollInner" style="height:12px; min-width:1780px;"></div>
+                </div>
+
+                <!-- Table Container with scrolling (Cố định chiều cao theo khung modal, thanh cuộn ngang luôn ở đáy cửa sổ) -->
+                <div id="cdrTableScrollWrapper" style="flex:1; min-height:0; overflow:auto; border:1px solid #e2e8f0; border-radius:6px; position:relative;">
+                    <table id="cdrResultsTable" style="display:none; width:100%; border-collapse:separate; border-spacing:0; min-width:1780px; font-size:11.5px;">
                         <thead></thead>
                         <tbody id="cdrTableBody"></tbody>
                     </table>
@@ -2185,6 +2514,14 @@
                         <option value="100">100 dòng/trang</option>
                         <option value="all">Xem tất cả</option>
                     </select>
+                    <button type="button" onclick="exportSmscCdrToExcel()" style="height:26px; font-size:11.5px; font-weight:700; padding:0 12px; border-radius:4px; border:1px solid #107c41; background:#107c41; color:#ffffff; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" title="Xuất dữ liệu CDR ra file Excel">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        <span>Xuất Excel</span>
+                    </button>
                     <button type="button" onclick="closeSmscCdrModal()" style="height:26px; font-size:11.5px; font-weight:600; padding:0 12px; border-radius:4px; border:1px solid #cbd5e1; background:#ffffff; color:#475569; cursor:pointer;">
                         Đóng
                     </button>

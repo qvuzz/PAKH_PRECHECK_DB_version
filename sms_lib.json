@@ -1,0 +1,804 @@
+{
+    "metadata": {
+        "version": "2.0",
+        "last_updated": "2026-10-16",
+        "description": "Thư viện tra cứu và phân loại đầu số SMS/Brandname phục vụ tiền kiểm tự động SMSC CDR VNPT"
+    },
+    "vinaphone_internal": {
+        "smsc_gateways": [
+            {
+                "code": "8491020005",
+                "name": "Trung tâm tin nhắn VinaPhone (Mặc định)",
+                "direction": "MO/MT",
+                "note": "Cấu hình chuẩn trên thiết bị"
+            },
+            {
+                "code": "8491020040",
+                "name": "Trung tâm tin nhắn VinaPhone (Dự phòng 1)",
+                "direction": "MO/MT",
+                "note": "SMSC phụ"
+            },
+            {
+                "code": "8491020091",
+                "name": "Trung tâm tin nhắn VinaPhone (Dự phòng 2)",
+                "direction": "MO/MT",
+                "note": "SMSC phụ"
+            },
+            {
+                "code": "8491020121",
+                "name": "Trung tâm tin nhắn VinaPhone (Hệ thống VAS/OTP)",
+                "direction": "MT",
+                "note": "Chuyên đẩy tin hệ thống"
+            },
+            {
+                "code": "8491020205",
+                "name": "Trung tâm tin nhắn VinaPhone (A2P/Brandname)",
+                "direction": "MT",
+                "note": "Cổng đối tác"
+            }
+        ],
+        "core_shortcodes": [
+            {
+                "code": "VinaPhone",
+                "name": "Brandname chính thức của nhà mạng VinaPhone",
+                "type": "Brandname",
+                "direction": "MT",
+                "category": "CSKH_QuangCao"
+            },
+            {
+                "code": "888",
+                "name": "Tổng đài đăng ký/hủy/kiểm tra gói cước Mobile Internet (Data)",
+                "type": "Shortcode",
+                "direction": "MO/MT",
+                "category": "VAS_Data",
+                "is_free": true
+            },
+            {
+                "code": "900",
+                "name": "Tổng đài dịch vụ tài khoản trả trước, kích hoạt SIM, thông báo nạp thẻ",
+                "type": "Shortcode",
+                "direction": "MO/MT",
+                "category": "Core_Account",
+                "is_free": true
+            },
+            {
+                "code": "1414",
+                "name": "Tổng đài tra cứu thông tin thuê bao chính chủ (TTTB)",
+                "type": "Shortcode",
+                "direction": "MO/MT",
+                "category": "Regulatory",
+                "is_free": true
+            },
+            {
+                "code": "1576",
+                "name": "Hệ thống thông báo cước, nhắc nợ, cảnh báo lưu lượng và dịch vụ GTGT",
+                "type": "Shortcode",
+                "direction": "MT",
+                "category": "Billing_Notify",
+                "is_free": true
+            },
+            {
+                "code": "1098",
+                "name": "Tổng đài thông tin chăm sóc khách hàng, tra cứu ưu đãi",
+                "type": "Shortcode",
+                "direction": "MT",
+                "category": "CSKH",
+                "is_free": true
+            },
+            {
+                "code": "1357",
+                "name": "Hệ thống gửi mã OTP nội mạng (MyVNPT, đổi eSIM, xác thực dịch vụ VNPT)",
+                "type": "Shortcode",
+                "direction": "MT",
+                "category": "Internal_OTP",
+                "is_free": true
+            },
+            {
+                "code": "9345",
+                "name": "Tổng đài tương tác tiện ích, giới thiệu gói cước cá nhân hóa",
+                "type": "Shortcode",
+                "direction": "MO/MT",
+                "category": "VAS_Marketing",
+                "is_free": true
+            },
+            {
+                "code": "18001091",
+                "name": "Tổng đài CSKH Di động VinaPhone",
+                "type": "Shortcode",
+                "direction": "MT",
+                "category": "CSKH",
+                "is_free": true
+            },
+            {
+                "code": "18001166",
+                "name": "Tổng đài CSKH Internet Cáp quang FiberVNN & MyTV",
+                "type": "Shortcode",
+                "direction": "MT",
+                "category": "CSKH",
+                "is_free": true
+            },
+            {
+                "code": "1543",
+                "name": "Tổng đài xác nhận đăng ký gói cước dịch vụ GTGT qua kênh đại lý",
+                "type": "Shortcode",
+                "direction": "MO/MT",
+                "category": "VAS_Confirm",
+                "is_free": true
+            },
+            {
+                "code": "1551",
+                "name": "Tổng đài hỗ trợ chuyển mạng giữ số (MNP)",
+                "type": "Shortcode",
+                "direction": "MO/MT",
+                "category": "MNP",
+                "is_free": true
+            },
+            {
+                "code": "1565",
+                "name": "Tổng đài ứng tiền nhanh VinaPhone",
+                "type": "Shortcode",
+                "direction": "MO/MT",
+                "category": "Airtime_Credit",
+                "is_free": true
+            },
+            {
+                "code": "9336",
+                "name": "Dịch vụ thông báo cuộc gọi nhỡ (MCA)",
+                "type": "Shortcode",
+                "direction": "MO/MT",
+                "category": "VAS",
+                "is_free": false
+            },
+            {
+                "code": "9244",
+                "name": "Dịch vụ nhạc chờ RingTunes",
+                "type": "Shortcode",
+                "direction": "MO/MT",
+                "category": "VAS",
+                "is_free": false
+            },
+            {
+                "code": "9123",
+                "name": "Hệ thống cảnh báo và gia hạn gói cước tự động",
+                "type": "Shortcode",
+                "direction": "MO/MT",
+                "category": "VAS_Renewal",
+                "is_free": true
+            },
+            {
+                "code": "9898",
+                "name": "Tổng đài chương trình khuyến mãi, tích điểm VinaPhone Plus",
+                "type": "Shortcode",
+                "direction": "MO/MT",
+                "category": "Loyalty",
+                "is_free": true
+            }
+        ]
+    },
+    "government_and_regulatory": [
+        {
+            "code": "5656",
+            "name": "Tổng đài tiếp nhận phản ánh tin nhắn rác, cuộc gọi rác (Cục ATTT - VNCERT)",
+            "type": "Shortcode",
+            "direction": "MO/MT",
+            "category": "Anti_Spam",
+            "is_free": true
+        },
+        {
+            "code": "156",
+            "name": "Đầu số tiếp nhận phản ánh cuộc gọi rác, cuộc gọi có dấu hiệu lừa đảo",
+            "type": "Shortcode",
+            "direction": "MO/MT",
+            "category": "Anti_Spam",
+            "is_free": true
+        },
+        {
+            "code": "1400",
+            "name": "Cổng thông tin nhân đạo Quốc gia (Ủng hộ từ thiện)",
+            "type": "Shortcode",
+            "direction": "MO/MT",
+            "category": "Charity",
+            "is_free": false
+        },
+        {
+            "code": "VNeID",
+            "name": "Hệ thống Định danh điện tử Quốc gia - Bộ Công An",
+            "type": "Brandname",
+            "direction": "MT",
+            "category": "Gov_OTP"
+        },
+        {
+            "code": "DVCQG",
+            "name": "Cổng Dịch vụ công Quốc gia",
+            "type": "Brandname",
+            "direction": "MT",
+            "category": "Gov_OTP"
+        },
+        {
+            "code": "DVC_CQDANG",
+            "name": "Cổng Dịch vụ công / Hệ thống Sổ tay Đảng viên điện tử",
+            "type": "Brandname",
+            "direction": "MT",
+            "category": "Gov_OTP"
+        },
+        {
+            "code": "BHXHVN",
+            "name": "Bảo hiểm Xã hội Việt Nam (Ứng dụng VssID)",
+            "type": "Brandname",
+            "direction": "MT",
+            "category": "Gov_OTP"
+        },
+        {
+            "code": "TCT",
+            "name": "Tổng cục Thuế (Ứng dụng eTax Mobile)",
+            "type": "Brandname",
+            "direction": "MT",
+            "category": "Gov_OTP"
+        },
+        {
+            "code": "BO CONG AN",
+            "name": "Thông báo tuyên truyền, cảnh báo từ Bộ Công An",
+            "type": "Brandname",
+            "direction": "MT",
+            "category": "Gov_Alert"
+        }
+    ],
+    "device_silent_sms_and_activation": {
+        "description": "Các đầu số thường xuất hiện ở chiều MO do hệ điều hành điện thoại tự động gửi ngầm (Silent SMS) để kích hoạt dịch vụ hãng, đồng bộ đám mây mà không hiện trong hộp thư đi của máy.",
+        "shortcodes_and_gateways": [
+            {
+                "code": "129",
+                "name": "Cổng kích hoạt dịch vụ ngầm thiết bị (Oppo Cloud, HeyTap, Find My Device, bảo hành điện tử)",
+                "vendor": "Oppo / Realme / OnePlus",
+                "direction": "MO",
+                "behavior": "Tự động gửi MO ngầm khi lắp SIM mới, khởi động lại máy hoặc bật đồng bộ đám mây."
+            },
+            {
+                "code": "84333322271",
+                "name": "Số trung gian (SIM Hosting/Local Gateway) nhận SMS xác thực hai chiều",
+                "vendor": "DingTalk / Alibaba / Ứng dụng quốc tế",
+                "direction": "MO",
+                "behavior": "Khi nghẽn đường truyền MT quốc tế, App yêu cầu thiết bị gửi MO chứa chuỗi token mã hóa về số nội địa này để xác thực."
+            },
+            {
+                "code": "+447786205094",
+                "name": "Cổng kích hoạt Apple iMessage & FaceTime quốc tế (UK Gateway)",
+                "vendor": "Apple (iPhone/iPad)",
+                "direction": "MO",
+                "behavior": "Gửi SMS quốc tế ngầm (cước 2.500đ/tin) khi bật iMessage/FaceTime hoặc tháo lắp SIM."
+            },
+            {
+                "code": "+447537410257",
+                "name": "Cổng kích hoạt Xiaomi Mi Message & Mi Cloud (UK Gateway)",
+                "vendor": "Xiaomi / Redmi / POCO",
+                "direction": "MO",
+                "behavior": "Gửi SMS quốc tế ngầm để định danh số điện thoại với tài khoản Mi Account và dịch vụ Find Device."
+            },
+            {
+                "code": "6089",
+                "name": "Đầu số kích hoạt bảo hành điện tử hoặc dịch vụ giá trị gia tăng trên thiết bị",
+                "vendor": "Đa hãng (Samsung, Vivo, Oppo...)",
+                "direction": "MO",
+                "behavior": "Tự động gửi tin kích hoạt khi thiết bị kết nối mạng lần đầu."
+            },
+            {
+                "code": "8077",
+                "name": "Đầu số xác thực dịch vụ ứng dụng qua cổng trung gian nội địa",
+                "vendor": "FPT / Zalo / Đối tác nội địa",
+                "direction": "MO",
+                "behavior": "Người dùng hoặc ứng dụng gửi MO chứa mã xác nhận để lấy OTP."
+            },
+            {
+                "code": "7039",
+                "name": "Đầu số xác thực tài khoản / kích hoạt dịch vụ ứng dụng",
+                "vendor": "Cổng thanh toán / App nội địa",
+                "direction": "MO",
+                "behavior": "Gửi tin nhắn xác thực theo cú pháp định sẵn."
+            }
+        ]
+    },
+    "international_otp_and_ott_hubs": {
+        "description": "Các Brandname dùng chung (Generic Sender ID) của các đối tác SMS Aggregator quốc tế (Infobip, Twilio, Vonage, Sinch...) để đẩy OTP về Việt Nam.",
+        "senders": [
+            {
+                "code": "AUTHMSG",
+                "services": [
+                    "PayPal",
+                    "Google",
+                    "Steam",
+                    "Discord",
+                    "Amazon",
+                    "Các dịch vụ tài chính quốc tế"
+                ],
+                "note": "Cổng định tuyến OTP quốc tế phổ biến nhất"
+            },
+            {
+                "code": "Verify",
+                "services": [
+                    "Microsoft",
+                    "OpenAI",
+                    "Telegram",
+                    "WhatsApp",
+                    "Uber",
+                    "LinkedIn"
+                ],
+                "note": "Brandname xác thực đa dịch vụ"
+            },
+            {
+                "code": "INFO",
+                "services": [
+                    "Facebook",
+                    "Instagram",
+                    "TikTok",
+                    "Dịch vụ lưu trữ đám mây"
+                ],
+                "note": "Thường dùng khi kênh Brandname chính bị nghẽn"
+            },
+            {
+                "code": "NOTIFY",
+                "services": [
+                    "Các sàn thương mại điện tử xuyên biên giới",
+                    "Dịch vụ phần mềm SaaS"
+                ],
+                "note": "Tin nhắn thông báo và OTP"
+            },
+            {
+                "code": "CloudOTP",
+                "services": [
+                    "Alibaba Cloud",
+                    "DingTalk",
+                    "Taobao",
+                    "1688",
+                    "Alipay"
+                ],
+                "note": "Chuyên dụng cho hệ sinh thái Trung Quốc/Quốc tế"
+            },
+            {
+                "code": "NXSMS",
+                "services": [
+                    "Vonage/Nexmo Gateway",
+                    "Các ứng dụng game quốc tế",
+                    "Sàn крипто/tài chính"
+                ],
+                "note": "Cổng SMS quốc tế"
+            },
+            {
+                "code": "Google",
+                "services": [
+                    "Google Account",
+                    "Gmail",
+                    "YouTube"
+                ],
+                "note": "Thường đi kèm mã G-xxxxxx"
+            },
+            {
+                "code": "Facebook",
+                "services": [
+                    "Meta",
+                    "Facebook",
+                    "Instagram",
+                    "Threads"
+                ],
+                "note": "Xác thực 2 yếu tố (2FA) và lấy lại mật khẩu"
+            },
+            {
+                "code": "TikTok",
+                "services": [
+                    "TikTok",
+                    "Douyin"
+                ],
+                "note": "OTP đăng nhập và liên kết số điện thoại"
+            },
+            {
+                "code": "Zalo",
+                "services": [
+                    "Zalo",
+                    "ZaloPay"
+                ],
+                "note": "OTP kích hoạt tài khoản (hiện thường kết hợp cuộc gọi tự động/ZNS)"
+            },
+            {
+                "code": "Apple",
+                "services": [
+                    "Apple ID",
+                    "iCloud"
+                ],
+                "note": "Mã xác thực 2 yếu tố thiết bị Apple"
+            }
+        ]
+    },
+    "banking_and_finance": [
+        {
+            "code": "Vietcombank",
+            "aliases": [
+                "VCB",
+                "VCB-SMS",
+                "VCBDigibank"
+            ],
+            "name": "Ngân hàng TMCP Ngoại thương Việt Nam"
+        },
+        {
+            "code": "BIDV",
+            "aliases": [
+                "BIDVSmart"
+            ],
+            "name": "Ngân hàng TMCP Đầu tư và Phát triển Việt Nam"
+        },
+        {
+            "code": "VietinBank",
+            "aliases": [
+                "CTG",
+                "VietinBankiPay"
+            ],
+            "name": "Ngân hàng TMCP Công Thương Việt Nam"
+        },
+        {
+            "code": "Agribank",
+            "aliases": [
+                "VBA",
+                "AgribankE-Mobile"
+            ],
+            "name": "Ngân hàng Nông nghiệp và Phát triển Nông thôn Việt Nam"
+        },
+        {
+            "code": "Techcombank",
+            "aliases": [
+                "TCB"
+            ],
+            "name": "Ngân hàng TMCP Kỹ thương Việt Nam"
+        },
+        {
+            "code": "MBBank",
+            "aliases": [
+                "MB",
+                "MBBANK"
+            ],
+            "name": "Ngân hàng TMCP Quân đội"
+        },
+        {
+            "code": "VPBank",
+            "aliases": [
+                "VPB",
+                "VPBankNEO"
+            ],
+            "name": "Ngân hàng TMCP Việt Nam Thịnh Vượng"
+        },
+        {
+            "code": "ACB",
+            "aliases": [
+                "ACB-SMS"
+            ],
+            "name": "Ngân hàng TMCP Á Châu"
+        },
+        {
+            "code": "Sacombank",
+            "aliases": [
+                "STB",
+                "SacombankPay"
+            ],
+            "name": "Ngân hàng TMCP Sài Gòn Thương Tín"
+        },
+        {
+            "code": "TPBank",
+            "aliases": [
+                "TPB"
+            ],
+            "name": "Ngân hàng TMCP Tiên Phong"
+        },
+        {
+            "code": "VIB",
+            "aliases": [
+                "MyVIB"
+            ],
+            "name": "Ngân hàng TMCP Quốc tế Việt Nam"
+        },
+        {
+            "code": "HDBank",
+            "aliases": [
+                "HDB"
+            ],
+            "name": "Ngân hàng TMCP Phát triển TP.HCM"
+        },
+        {
+            "code": "SHB",
+            "aliases": [
+                "SHB-SMS"
+            ],
+            "name": "Ngân hàng TMCP Sài Gòn - Hà Nội"
+        },
+        {
+            "code": "MSB",
+            "aliases": [
+                "MaritimeBank"
+            ],
+            "name": "Ngân hàng TMCP Hàng Hải Việt Nam"
+        },
+        {
+            "code": "OCB",
+            "aliases": [
+                "OCB OMNI"
+            ],
+            "name": "Ngân hàng TMCP Phương Đông"
+        },
+        {
+            "code": "SeABank",
+            "aliases": [
+                "SeAMobile"
+            ],
+            "name": "Ngân hàng TMCP Đông Nam Á"
+        },
+        {
+            "code": "LPBank",
+            "aliases": [
+                "LienVietPostBank",
+                "LPB"
+            ],
+            "name": "Ngân hàng TMCP Lộc Phát Việt Nam"
+        },
+        {
+            "code": "Eximbank",
+            "aliases": [
+                "EIB",
+                "EximbankEDigi"
+            ],
+            "name": "Ngân hàng TMCP Xuất Nhập khẩu Việt Nam"
+        },
+        {
+            "code": "NamABank",
+            "aliases": [
+                "NAB"
+            ],
+            "name": "Ngân hàng TMCP Nam Á"
+        },
+        {
+            "code": "CAKE",
+            "aliases": [
+                "CAKEbyVPB"
+            ],
+            "name": "Ngân hàng số CAKE by VPBank"
+        },
+        {
+            "code": "Timo",
+            "aliases": [
+                "TimoBank"
+            ],
+            "name": "Ngân hàng số Timo (Bản Việt)"
+        },
+        {
+            "code": "FE CREDIT",
+            "aliases": [
+                "FECREDIT"
+            ],
+            "name": "Công ty Tài chính TNHH MTV Ngân hàng Việt Nam Thịnh Vượng"
+        },
+        {
+            "code": "HomeCredit",
+            "aliases": [
+                "HOMECREDIT"
+            ],
+            "name": "Công ty Tài chính TNHH MTV Home Credit Việt Nam"
+        },
+        {
+            "code": "HD SAISON",
+            "aliases": [
+                "HDSAISON"
+            ],
+            "name": "Công ty Tài chính TNHH HD SAISON"
+        }
+    ],
+    "securities_and_investments": [
+        {
+            "code": "SSI",
+            "name": "Công ty Cổ phần Chứng khoán SSI"
+        },
+        {
+            "code": "VNDIRECT",
+            "aliases": [
+                "VNDRECT",
+                "VND"
+            ],
+            "name": "Công ty Cổ phần Chứng khoán VNDIRECT"
+        },
+        {
+            "code": "VPS",
+            "aliases": [
+                "VPS_SmartOne"
+            ],
+            "name": "Công ty Cổ phần Chứng khoán VPS"
+        },
+        {
+            "code": "TCBS",
+            "name": "Công ty Cổ phần Chứng khoán Kỹ Thương (Techcom Securities)"
+        },
+        {
+            "code": "HSC",
+            "name": "Công ty Cổ phần Chứng khoán TP.HCM"
+        },
+        {
+            "code": "VCI",
+            "aliases": [
+                "Vietcap",
+                "VCSC"
+            ],
+            "name": "Công ty Cổ phần Chứng khoán Vietcap (Bản Việt)"
+        },
+        {
+            "code": "MBS",
+            "name": "Công ty Cổ phần Chứng khoán MB"
+        },
+        {
+            "code": "FPTS",
+            "name": "Công ty Cổ phần Chứng khoán FPT"
+        },
+        {
+            "code": "MiraeAsset",
+            "aliases": [
+                "MAS",
+                "MASVN"
+            ],
+            "name": "Công ty Chứng khoán Mirae Asset (Việt Nam)"
+        },
+        {
+            "code": "KIS",
+            "aliases": [
+                "KISVN"
+            ],
+            "name": "Công ty Cổ phần Chứng khoán KIS Việt Nam"
+        },
+        {
+            "code": "VCBS",
+            "name": "Công ty TNHH Chứng khoán Ngân hàng TMCP Ngoại thương Việt Nam"
+        },
+        {
+            "code": "BSC",
+            "name": "Công ty Cổ phần Chứng khoán BIDV"
+        },
+        {
+            "code": "CTS",
+            "aliases": [
+                "VietinBankSc"
+            ],
+            "name": "Công ty Cổ phần Chứng khoán Ngân hàng Công Thương Việt Nam"
+        },
+        {
+            "code": "SHS",
+            "name": "Công ty Cổ phần Chứng khoán Sài Gòn - Hà Nội"
+        },
+        {
+            "code": "DNSE",
+            "aliases": [
+                "EntradeX"
+            ],
+            "name": "Công ty Cổ phần Chứng khoán DNSE"
+        }
+    ],
+    "ewallets_and_ecommerce": [
+        {
+            "code": "MoMo",
+            "aliases": [
+                "MOMO"
+            ],
+            "name": "Ví điện tử MoMo",
+            "category": "E-Wallet"
+        },
+        {
+            "code": "VNPT Money",
+            "aliases": [
+                "VNPTPay",
+                "VNPTMONEY"
+            ],
+            "name": "Hệ sinh thái tài chính số VNPT Money",
+            "category": "E-Wallet"
+        },
+        {
+            "code": "ZaloPay",
+            "aliases": [
+                "ZALOPAY"
+            ],
+            "name": "Ví điện tử ZaloPay",
+            "category": "E-Wallet"
+        },
+        {
+            "code": "ShopeePay",
+            "aliases": [
+                "AirPay"
+            ],
+            "name": "Ví điện tử ShopeePay",
+            "category": "E-Wallet"
+        },
+        {
+            "code": "VNPAY",
+            "aliases": [
+                "VNPAY-QR"
+            ],
+            "name": "Cổng thanh toán và Ví điện tử VNPAY",
+            "category": "Payment_Gateway"
+        },
+        {
+            "code": "ViettelMoney",
+            "aliases": [
+                "ViettelPay"
+            ],
+            "name": "Hệ sinh thái tài chính số Viettel Money",
+            "category": "E-Wallet"
+        },
+        {
+            "code": "Shopee",
+            "aliases": [
+                "SHOPEE"
+            ],
+            "name": "Sàn Thương mại điện tử Shopee",
+            "category": "E-Commerce"
+        },
+        {
+            "code": "Lazada",
+            "aliases": [
+                "LAZADA"
+            ],
+            "name": "Sàn Thương mại điện tử Lazada",
+            "category": "E-Commerce"
+        },
+        {
+            "code": "Tiki",
+            "aliases": [
+                "TIKI"
+            ],
+            "name": "Sàn Thương mại điện tử Tiki",
+            "category": "E-Commerce"
+        },
+        {
+            "code": "Grab",
+            "aliases": [
+                "GRAB"
+            ],
+            "name": "Siêu ứng dụng Grab",
+            "category": "Ride_Hailing"
+        },
+        {
+            "code": "Be",
+            "aliases": [
+                "BEGROUP"
+            ],
+            "name": "Nền tảng tiêu dùng đa dịch vụ Be",
+            "category": "Ride_Hailing"
+        },
+        {
+            "code": "XanhSM",
+            "aliases": [
+                "GSM",
+                "XANH SM"
+            ],
+            "name": "Dịch vụ đặt xe thuần điện Xanh SM",
+            "category": "Ride_Hailing"
+        }
+    ],
+    "smsc_cdr_status_reference": {
+        "description": "Bảng mã trạng thái chuẩn trên hệ thống SMSC VNPT để script tự động hóa ánh xạ nguyên nhân khi đọc log CDR",
+        "status_codes": [
+            {
+                "message_status": "2",
+                "cause_for_termination": "100C",
+                "meaning": "Message Delivery Successful (Giao tin thành công)",
+                "precheck_conclusion": "Bản tin đã được tổng đài SMSC định tuyến và giao thành công tới thiết bị của khách hàng (hoặc đẩy thành công sang mạng đối tác đối với chiều MO)."
+            },
+            {
+                "message_status": "12",
+                "cause_for_termination": "199C",
+                "meaning": "Temporary Failure / First Delivery Attempt Failed (Lỗi tạm thời ở lần đẩy đầu tiên)",
+                "precheck_conclusion": "Thường xuất hiện đối với các tin nhắn dài (Concatenated SMS từ 2-7 tin) hoặc khi thiết bị đang bận/chuyển giao trạm tại giây đầu tiên. Nếu ngay sau đó (cách vài giây) có bản ghi trạng thái 2 / 100C của cùng đầu số đó thì tin nhắn đã được retry và nhận thành công."
+            },
+            {
+                "message_status": "1",
+                "cause_for_termination": "199C",
+                "meaning": "Permanent Failure / Unidentified Subscriber / System Error (Giao tin thất bại)",
+                "precheck_conclusion": "Bản tin bị từ chối hoặc lỗi. Đối với chiều MO: có thể do sai cú pháp, đầu số đích không tồn tại, hoặc thuê bao bị chặn/hết tiền. Đối với chiều MT: thiết bị tắt máy quá thời hạn lưu bản tin hoặc lỗi mạng vô tuyến."
+            },
+            {
+                "message_status": "5",
+                "cause_for_termination": "103C",
+                "meaning": "Absent Subscriber / Memory Capacity Exceeded / Busy (Thuê bao tắt máy, ngoài vùng phủ sóng hoặc đầy bộ nhớ)",
+                "precheck_conclusion": "Tại thời điểm tổng đài đẩy tin, máy khách hàng đang mất kết nối vô tuyến hoặc bộ nhớ SIM/máy bị đầy. SMSC sẽ lưu bản tin vào hàng đợi (Store and Forward) và đẩy lại khi máy bật lên."
+            }
+        ]
+    }
+}

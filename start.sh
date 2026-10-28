@@ -29,12 +29,15 @@ fi
 [ -f btools_cookie.json ] || echo "{}" > btools_cookie.json
 [ -f cem_auth_cache.json ] || echo "{}" > cem_auth_cache.json
 [ -f ttsnew_token_cache.json ] || echo "{}" > ttsnew_token_cache.json
+[ -f tts_old_token_cache.json ] || echo "{}" > tts_old_token_cache.json
 [ -f lan_sessions.json ] || echo "{}" > lan_sessions.json
 [ -f ccos_cookie_cache.json ] || echo "{}" > ccos_cookie_cache.json
+[ -f gw_auth_cache.json ] || echo "{}" > gw_auth_cache.json
 [ -f sapccheck/sapc_cookies.json ] || echo "[]" > sapccheck/sapc_cookies.json
 [ -f user_regions.json ] || echo '{"users":[]}' > user_regions.json
 [ -f incident_causes_ttsnew.json ] || echo "{}" > incident_causes_ttsnew.json
 [ -f incident_causes_catalog.json ] || echo "{}" > incident_causes_catalog.json
+[ -f diagnostic_config.json ] || echo '{"EXCLUDED_SYSTEM_CODES":["0000002042","0000000330","0000000300","0000000302","330","300","302"],"VALID_TITLES":["Mobile Internet 2G/3G","Mobile Internet 4G","Mobile Internet 5G"]}' > diagnostic_config.json
 
 # 2. Tu dong chuan hoa phan vung theo Quy trinh OneOSS (SOC1=MB, SOC2=MN, SOC3=MT) va phuc hoi phieu MN bi dong nham
 if [ -f tickets.db ] && command -v sqlite3 >/dev/null 2>&1; then
@@ -44,6 +47,9 @@ if [ -f tickets.db ] && command -v sqlite3 >/dev/null 2>&1; then
         UPDATE tickets SET region = 'MB' WHERE instr(ticket_code, 'SOC1') > 0 OR instr(ticket_code, 'SOC 1') > 0;
         UPDATE tickets SET region = 'MN' WHERE (region IS NULL OR region = '');
         UPDATE tickets SET ticket_status = 'Chưa đóng' WHERE region = 'MN' AND (ticket_status = 'Đã đóng' OR ticket_status = 'Da dong') AND (closed_by IS NULL OR closed_by = '' OR closed_by = 'Kỹ thuật viên') AND updated_at LIKE '%$(date +%Y-%m-%d)%';
+        UPDATE sms_cdr_records SET status_type = 'intermediate' WHERE (UPPER(termination_cause) = '199C' OR attempts IN ('0', '000') OR status_code = '12') AND (status_type != 'intermediate' OR status_type IS NULL);
+        UPDATE sms_cdr_records SET status_type = 'failed' WHERE (status_code IN ('1', '3', '4', '5', '7', '8') OR UPPER(termination_cause) IN ('175C', '130C', '135C', '136C', '103C', '101F', '1020', '1001', '1004', '1009', '100B', '100D', '100E', '1021', '1032', '1033', '1034', '1035', '1036')) AND (UPPER(termination_cause) != '199C' AND attempts NOT IN ('0', '000') AND status_code != '12') AND (status_type != 'failed' OR status_type IS NULL);
+        UPDATE sms_cdr_records SET status_type = 'success' WHERE (UPPER(termination_cause) IN ('100C', '133C', '4108') OR (status_code = '2' AND (UPPER(termination_cause) IN ('0', '0000', '', '--') OR termination_cause IS NULL))) AND (status_type != 'success' OR status_type IS NULL);
     " 2>/dev/null || true
 fi
 

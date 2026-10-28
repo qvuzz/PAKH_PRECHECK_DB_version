@@ -242,7 +242,7 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
                 "Host": "10.159.21.241:9267",
                 "Connection": "close"
             }
-            resp = requests.get(query_url, headers=req_headers, timeout=(10, 30))
+            resp = requests.get(query_url, headers=req_headers, timeout=(3, 10))
             html = resp.text
                 
             valid, err_reason = is_valid_btools_html(html)
@@ -251,7 +251,7 @@ def extract_btools_single_phone(driver, phone_84, start_d, end_d):
                 cookie_str = get_btools_cookie(driver, force_refresh=True)
                 if cookie_str:
                     req_headers["Cookie"] = cookie_str
-                    resp2 = requests.get(query_url, headers=req_headers, timeout=(10, 30))
+                    resp2 = requests.get(query_url, headers=req_headers, timeout=(3, 10))
                     html = resp2.text
                     valid, err_reason = is_valid_btools_html(html)
 

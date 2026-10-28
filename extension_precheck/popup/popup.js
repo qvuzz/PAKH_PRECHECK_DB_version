@@ -192,6 +192,13 @@ function renderUI(bundle) {
         updateCardStatus('sapc', has, bundle.sapc.preview || 'No cookie');
     }
 
+    // VNPT-GW (10.165.15.29:8080)
+    if (bundle.gw) {
+        const has = bundle.gw.hasCookie;
+        if (has) activeCount++;
+        updateCardStatus('gw', has, bundle.gw.preview || 'No session');
+    }
+
     // 8. tts.vnptnet.vn
     if (bundle.tts_new) {
         const has = bundle.tts_new.valid;
@@ -205,10 +212,10 @@ function renderUI(bundle) {
     if (masterBadge) {
         if (activeCount >= 6) {
             masterBadge.className = 'status-pill status-green';
-            masterBadge.textContent = `${activeCount}/9 READY`;
+            masterBadge.textContent = `${activeCount}/10 READY`;
         } else if (activeCount > 0) {
             masterBadge.className = 'status-pill status-blue';
-            masterBadge.textContent = `${activeCount}/9 CONNECTED`;
+            masterBadge.textContent = `${activeCount}/10 CONNECTED`;
         } else {
             masterBadge.className = 'status-pill status-red';
             masterBadge.textContent = 'NO TOKENS';

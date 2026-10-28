@@ -4,6 +4,8 @@
 // ==============================================================================
 // TÍNH NĂNG CHỈNH SỬA TÓM TẮT & HUẤN LUYỆN AI (FEW-SHOT LEARNING)
 // ==============================================================================
+let currentAiTeachServiceType = 'data';
+
 function openAiTeachModal(event, phone, incidentTime, ticketId) {
     if (event && event.stopPropagation) {
         event.stopPropagation();
@@ -26,8 +28,28 @@ function openAiTeachModal(event, phone, incidentTime, ticketId) {
     const packageTitle = (t && t.package_title) ? t.package_title : '';
     let summary = (t && t.ai_summary) ? t.ai_summary : '';
 
+    // Nhận diện dịch vụ Data hay SMS
+    let isSms = false;
+    if (t) {
+        if (t.service_type === 'sms' || t.tab === 'sms' || t.service === 'sms') isSms = true;
+    }
+    if (!isSms && typeof currentService !== 'undefined' && currentService === 'sms') {
+        isSms = true;
+    }
+    if (!isSms && rawContent) {
+        const rc = rawContent.toLowerCase();
+        if (rc.includes('otp') || rc.includes('tin nhắn') || rc.includes('brandname') || rc.includes('smsc')) {
+            isSms = true;
+        }
+    }
+    currentAiTeachServiceType = isSms ? 'sms' : 'data';
+
     if (!summary || summary === 'null' || summary.trim() === '') {
-        summary = `1. Gói cước sử dụng: ${packageTitle || 'Không đề cập'}\n2. Tình trạng truy cập: Không vào được mạng (toàn bộ)\n3. Tình trạng dung lượng: Không đề cập\n4. Thiết bị sử dụng: Không đề cập\n5. Khu vực xảy ra lỗi: Không đề cập\n6. Tóm tắt thông tin khác: Không có thông tin hành động phụ.`;
+        if (isSms) {
+            summary = '1. Vấn đề phản ánh: Không nhận được mã OTP\n2. Mốc thời gian xảy ra: -- (3 ngày gần nhất)\n3. Số gọi/nhận lỗi: Tất cả các số\n4. Ứng dụng / Đầu số: SMS thông thường\n5. Thiết bị & Thao tác: Máy Không đề cập\n6. Cước phí khiếu nại: Không đề cập\n7. Cảnh báo / Dấu hiệu: Không có dấu hiệu bất thường';
+        } else {
+            summary = '1. Gói cước sử dụng: ' + (packageTitle || 'Không đề cập') + '\n2. Tình trạng truy cập: Không vào được mạng (toàn bộ)\n3. Tình trạng dung lượng: Không đề cập\n4. Thiết bị sử dụng: Không đề cập\n5. Khu vực xảy ra lỗi: Không đề cập\n6. Tóm tắt thông tin khác: Không có thông tin hành động phụ.';
+        }
     }
 
     const elTicketId = document.getElementById('aiTeachTicketId');
@@ -46,19 +68,142 @@ function openAiTeachModal(event, phone, incidentTime, ticketId) {
     if (elPackageDisplay) elPackageDisplay.innerText = packageTitle || '--';
     if (elRawContent) elRawContent.innerText = rawContent || '(Không có nội dung phản ánh gốc)';
 
-    // Điền dữ liệu vào form chuẩn hóa 6 mục
-    parseAiTeachSummaryToForm(summary.replace(/\[?AI\]?[:\-\s]*/gi, '').trim(), packageTitle);
+    // Điền dữ liệu vào form chuẩn hóa 6-7 mục
+    const cleanSummary = summary.replace(/\[?AI\]?[:\-\s]*/gi, '').trim();
+    if (isSms) {
+        parseAiTeachSmsSummaryToForm(cleanSummary);
+    } else {
+        parseAiTeachSummaryToForm(cleanSummary, packageTitle);
+    }
 
     // Mặc định luôn hiện chế độ Form có Dropdown
     const formBox = document.getElementById('aiTeachFormContainer');
+    const smsFormBox = document.getElementById('aiTeachSmsFormContainer');
     const textBox = document.getElementById('aiTeachTextContainer');
     const btnToggle = document.getElementById('btnToggleAiTeachView');
-    if (formBox) formBox.style.display = 'block';
+    if (formBox) formBox.style.display = isSms ? 'none' : 'block';
+    if (smsFormBox) smsFormBox.style.display = isSms ? 'block' : 'none';
     if (textBox) textBox.style.display = 'none';
-    if (btnToggle) btnToggle.innerText = 'Xem dạng văn bản 6 dòng';
+    if (btnToggle) btnToggle.innerText = 'Xem dạng văn bản trực tiếp';
 
     updateAiTeachPreview();
     modal.style.display = 'flex';
+}
+
+function parseAiTeachSmsSummaryToForm(summaryText) {
+    let problem = 'Không nhận được mã OTP';
+    let time = '-- (3 ngày gần nhất)';
+    let target = 'Tất cả các số';
+    let brand = 'SMS thông thường';
+    let device = 'Máy Không đề cập';
+    let cost = 'Không đề cập';
+    let anomaly = 'Không có dấu hiệu bất thường';
+
+    const lines = (summaryText || '').split('\n');
+    for (const line of lines) {
+        const trimmed = line.trim();
+        const m1 = trimmed.match(/^1\.\s*vấn đề(?:\s+phản ánh)?\s*:\s*(.+)$/i);
+        if (m1) {
+            const rawProb = m1[1].trim();
+            const lowerProb = rawProb.toLowerCase();
+            if (lowerProb.includes('otp') || lowerProb.includes('mã')) {
+                problem = 'Không nhận được mã OTP';
+            } else if (lowerProb.includes('không gửi') || lowerProb.includes('mo fail') || lowerProb.includes('gửi đi')) {
+                problem = 'Lỗi không gửi được tin nhắn đi (MO Fail)';
+            } else if (lowerProb.includes('không nhận') || lowerProb.includes('mt fail') || lowerProb.includes('đến')) {
+                problem = 'Lỗi không nhận được tin nhắn đến (MT Fail)';
+            } else if (lowerProb.includes('cước') || lowerProb.includes('trừ tiền')) {
+                problem = 'Khiếu nại phát sinh cước SMS';
+            } else if (lowerProb.includes('ngầm') || lowerProb.includes('tự gửi')) {
+                problem = 'Thiết bị tự phát sinh tin nhắn ngầm';
+            } else if (lowerProb.includes('rác') || lowerProb.includes('spam') || lowerProb.includes('cam kết')) {
+                problem = 'Tin nhắn rác / Quấy rối / Chặn spam';
+            } else {
+                problem = rawProb;
+            }
+        }
+
+        const m2 = trimmed.match(/^2\.\s*mốc thời gian(?:\s+xảy ra)?\s*:\s*(.+)$/i);
+        if (m2) time = m2[1].trim();
+
+        const mTarget = trimmed.match(/^(?:3\.\s*số\s*(?:gọi|gửi)\s*\/\s*nhận(?:\s+lỗi)?|số\s*(?:gọi|gửi)\s*\/\s*nhận(?:\s+lỗi)?)\s*:\s*(.+)$/i);
+        if (mTarget) target = mTarget[1].trim();
+
+        const mBrand = trimmed.match(/^(?:[34]\.\s*ứng dụng|ứng dụng)\s*(?:\/|\s+hoặc\s+)?\s*đầu số\s*:\s*(.+)$/i);
+        if (mBrand) brand = mBrand[1].trim();
+
+        const mDevice = trimmed.match(/^(?:[45]\.\s*thiết bị|thiết bị)(?:\s*&\s*thao tác)?\s*:\s*(.+)$/i);
+        if (mDevice) device = mDevice[1].trim();
+
+        const mCost = trimmed.match(/^(?:[56]\.\s*cước phí|cước phí)(?:\s+khiếu nại)?\s*:\s*(.+)$/i);
+        if (mCost) cost = mCost[1].trim();
+
+        const mAnom = trimmed.match(/^(?:[67]\.\s*cảnh báo|cảnh báo)(?:\s*\/\s*dấu hiệu)?\s*:\s*(.+)$/i);
+        if (mAnom) {
+            const rawAnom = mAnom[1].trim();
+            const lowerAnom = rawAnom.toLowerCase();
+            if (lowerAnom.includes('ttnt') || lowerAnom.includes('smo') || lowerAnom.includes('rcs')) {
+                anomaly = 'Đã kiểm tra TTNT đúng / reset SMO nhưng vẫn không gửi được: Nghi vấn lỗi cài đặt thiết bị (Chat RCS / iMessage) hoặc lỗi SIM';
+            } else if (lowerAnom.includes('nội mạng') && lowerAnom.includes('ngoại mạng')) {
+                anomaly = 'Chỉ gửi được nội mạng, không gửi được ngoại mạng: Nghi vấn chặn chiều ngoại mạng';
+            } else if (lowerAnom.includes('liên tục') || lowerAnom.includes('botnet')) {
+                anomaly = 'Gửi tin nhắn liên tục vài giây/tin - Dấu hiệu mã độc / Botnet tự động phát tán';
+            } else if (lowerAnom.includes('quốc tế') || lowerAnom.includes('004')) {
+                anomaly = 'Phát sinh tin nhắn gửi đi quốc tế lạ (004...) - Dấu hiệu mã độc chiếm quyền SMS';
+            } else if (lowerAnom.includes('không có')) {
+                anomaly = 'Không có dấu hiệu bất thường';
+            } else {
+                anomaly = rawAnom;
+            }
+        }
+    }
+
+    const elProb = document.getElementById('aiTeachSmsProblem');
+    if (elProb) {
+        let matched = false;
+        for (let i = 0; i < elProb.options.length; i++) {
+            if (elProb.options[i].value === problem) {
+                elProb.selectedIndex = i;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched && problem) {
+            const opt = new Option(problem, problem, true, true);
+            elProb.add(opt);
+        }
+    }
+
+    const elTime = document.getElementById('aiTeachSmsTime');
+    if (elTime) elTime.value = time;
+
+    const elTarget = document.getElementById('aiTeachSmsTargetParty');
+    if (elTarget) elTarget.value = target;
+
+    const elBrand = document.getElementById('aiTeachSmsBrand');
+    if (elBrand) elBrand.value = brand;
+
+    const elDevice = document.getElementById('aiTeachSmsDevice');
+    if (elDevice) elDevice.value = device;
+
+    const elCost = document.getElementById('aiTeachSmsCost');
+    if (elCost) elCost.value = cost;
+
+    const elAnomaly = document.getElementById('aiTeachSmsAnomaly');
+    if (elAnomaly) {
+        let matched = false;
+        for (let i = 0; i < elAnomaly.options.length; i++) {
+            if (elAnomaly.options[i].value === anomaly) {
+                elAnomaly.selectedIndex = i;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched && anomaly) {
+            const opt = new Option(anomaly, anomaly, true, true);
+            elAnomaly.add(opt);
+        }
+    }
 }
 
 function parseAiTeachSummaryToForm(summaryText, packageTitle) {
@@ -172,6 +317,26 @@ function handleAiTeachAreaChange() {
 }
 
 function buildAiTeachSummary() {
+    if (currentAiTeachServiceType === 'sms') {
+        const elProb = document.getElementById('aiTeachSmsProblem');
+        const elTime = document.getElementById('aiTeachSmsTime');
+        const elTarget = document.getElementById('aiTeachSmsTargetParty');
+        const elBrand = document.getElementById('aiTeachSmsBrand');
+        const elDevice = document.getElementById('aiTeachSmsDevice');
+        const elCost = document.getElementById('aiTeachSmsCost');
+        const elAnomaly = document.getElementById('aiTeachSmsAnomaly');
+
+        const prob = (elProb && elProb.value) ? elProb.value : 'Không nhận được mã OTP';
+        const time = (elTime && elTime.value.trim()) ? elTime.value.trim() : '-- (3 ngày gần nhất)';
+        const target = (elTarget && elTarget.value.trim()) ? elTarget.value.trim() : 'Tất cả các số';
+        const brand = (elBrand && elBrand.value.trim()) ? elBrand.value.trim() : 'SMS thông thường';
+        const device = (elDevice && elDevice.value.trim()) ? elDevice.value.trim() : 'Máy Không đề cập';
+        const cost = (elCost && elCost.value.trim()) ? elCost.value.trim() : 'Không đề cập';
+        const anomaly = (elAnomaly && elAnomaly.value) ? elAnomaly.value : 'Không có dấu hiệu bất thường';
+
+        return `1. Vấn đề phản ánh: ${prob}\n2. Mốc thời gian xảy ra: ${time}\n3. Số gọi/nhận lỗi: ${target}\n4. Ứng dụng / Đầu số: ${brand}\n5. Thiết bị & Thao tác: ${device}\n6. Cước phí khiếu nại: ${cost}\n7. Cảnh báo / Dấu hiệu: ${anomaly}`;
+    }
+
     const elPkg = document.getElementById('aiTeachPkg');
     const elAccess = document.getElementById('aiTeachAccessStatus');
     const elAppDetail = document.getElementById('aiTeachAppDetail');
@@ -223,21 +388,35 @@ function updateAiTeachPreview() {
 
 function toggleAiTeachViewMode() {
     const formBox = document.getElementById('aiTeachFormContainer');
+    const smsFormBox = document.getElementById('aiTeachSmsFormContainer');
     const textBox = document.getElementById('aiTeachTextContainer');
     const btn = document.getElementById('btnToggleAiTeachView');
     if (!formBox || !textBox) return;
 
-    if (formBox.style.display === 'none') {
+    const isCurrentlyForm = (formBox.style.display !== 'none' || (smsFormBox && smsFormBox.style.display !== 'none'));
+
+    if (!isCurrentlyForm) {
         // Chuyển sang Form
-        formBox.style.display = 'block';
+        if (currentAiTeachServiceType === 'sms') {
+            if (smsFormBox) smsFormBox.style.display = 'block';
+            if (formBox) formBox.style.display = 'none';
+        } else {
+            if (formBox) formBox.style.display = 'block';
+            if (smsFormBox) smsFormBox.style.display = 'none';
+        }
         textBox.style.display = 'none';
         if (btn) btn.innerText = 'Xem dạng văn bản 6 dòng';
         const txt = document.getElementById('aiTeachSummaryInput').value;
-        parseAiTeachSummaryToForm(txt, document.getElementById('aiTeachPackageTitle').value);
+        if (currentAiTeachServiceType === 'sms') {
+            parseAiTeachSmsSummaryToForm(txt);
+        } else {
+            parseAiTeachSummaryToForm(txt, document.getElementById('aiTeachPackageTitle').value);
+        }
         updateAiTeachPreview();
     } else {
         // Chuyển sang Textarea
-        formBox.style.display = 'none';
+        if (formBox) formBox.style.display = 'none';
+        if (smsFormBox) smsFormBox.style.display = 'none';
         textBox.style.display = 'block';
         if (btn) btn.innerText = 'Chuyển sang form chọn nhanh';
         const summary = buildAiTeachSummary();
@@ -295,6 +474,7 @@ async function submitAiTeachFeedback() {
                 package_title: packageTitle,
                 ticket_content: rawContent,
                 summary_content: summaryInput,
+                service_type: currentAiTeachServiceType,
                 verified_by: 'KTV'
             })
         });
@@ -307,6 +487,12 @@ async function submitAiTeachFeedback() {
                 const item = cachedTickets.find(x => (ticketId && x.ticket_id == ticketId) || (x.phone == phone && (!incidentTime || x.incident_time == incidentTime)));
                 if (item) {
                     item.ai_summary = summaryInput;
+                    if (data.sms_incident_time) {
+                        item.sms_incident_time = data.sms_incident_time;
+                    } else {
+                        const mTime = summaryInput.match(/^(?:2\.\s*)?mốc thời gian(?:\s+xảy ra)?\s*:\s*(.+)$/im);
+                        if (mTime) item.sms_incident_time = mTime[1].trim();
+                    }
                 }
             }
             if (typeof renderTicketsTable === 'function') {
@@ -325,4 +511,4 @@ async function submitAiTeachFeedback() {
         }
     }
 }
-
+

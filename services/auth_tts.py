@@ -291,6 +291,7 @@ def _worker_step1(browser, active_sessions: dict, username: str, password: str, 
     session_id = str(uuid.uuid4())
     print(f"[AuthWorker] 🆔 [BƯỚC 1] Đã khởi tạo session_id={session_id[:8]}...", flush=True)
 
+    context = None
     try:
         context = browser.new_context(ignore_https_errors=True)
         page = context.new_page()
@@ -327,6 +328,8 @@ def _worker_step1(browser, active_sessions: dict, username: str, password: str, 
             start_url = "http://10.155.42.218/Account/Login"
         elif system == "ccos":
             start_url = "https://id.vnpt.com.vn/cas/login?service=http%3a%2f%2floginccos.vnpt.vn%2fLogin.aspx%3fIsOtherApp%3d1%26Key%3d10019%26Url%3dhttp%3a%2f%2fgqknccos.vnpt.vn"
+        elif system == "gw":
+            start_url = "https://id.vnpt.com.vn/cas/login?service=http%3A%2F%2F10.165.15.29%3A8080%2FVNPT-GW%2Fclient%2Fsearch"
         else:
             start_url = "https://tts.vnpt.vn/"
 
@@ -543,6 +546,32 @@ def _worker_step1(browser, active_sessions: dict, username: str, password: str, 
                                 "system": "ccos",
                                 "user": {"username": username, "displayName": username}
                             }
+                elif system == "gw":
+                    curr_url = page.url.lower()
+                    if "10.165.15.29" in curr_url or "vnpt-gw" in curr_url:
+                        all_cookies = context.cookies()
+                        jsession = next((c["value"] for c in all_cookies if c["name"] == "JSESSIONID" and "10.165.15.29" in c.get("domain", "")), "")
+                        if not jsession:
+                            for c in all_cookies:
+                                if c.get("name") == "JSESSIONID" and ("vnpt.com.vn" not in c.get("domain", "") and "vnpt.vn" not in c.get("domain", "")):
+                                    jsession = c["value"]
+                                    break
+                        if jsession:
+                            view_state = ""
+                            try:
+                                view_state = page.evaluate("() => { const el = document.querySelector('input[name=\"javax.faces.ViewState\"]'); return el ? el.value : ''; }") or ""
+                            except Exception:
+                                pass
+                            from gw_client import save_gw_cache
+                            save_gw_cache(jsession, view_state=view_state, verify=False)
+                            context.close()
+                            return {
+                                "success": True,
+                                "token": jsession,
+                                "system": "gw",
+                                "view_state": view_state,
+                                "user": {"username": username, "displayName": username}
+                            }
                 else:
                     tok = page.evaluate("() => localStorage.getItem('scnntttoken')")
                     if tok:
@@ -624,6 +653,11 @@ def _worker_step1(browser, active_sessions: dict, username: str, password: str, 
         }
 
     except Exception as ex:
+        if context and session_id not in active_sessions:
+            try:
+                context.close()
+            except Exception:
+                pass
         print(f"[AuthWorker] ❌ [BƯỚC 1] Lỗi ngoại lệ trong quá trình đăng nhập [{system}]: {ex}", flush=True)
         return {"success": False, "error": f"Lỗi hệ thống đăng nhập: {str(ex)}"}
 
@@ -752,6 +786,36 @@ def _worker_step2(active_sessions: dict, session_id: str, otp_code: str, timeout
                         token = cem_k
                         user_info = {"username": username, "displayName": username}
                         print(f"[OTP Step 2] [CEM] ✅ THÀNH CÔNG! Đã lấy API Key: {token[:15]}...", flush=True)
+                        break
+                elif system == "gw":
+                    curr_u = (page.url or "").lower()
+                    all_cookies = context.cookies()
+                    jsession = next((c["value"] for c in all_cookies if c["name"] == "JSESSIONID" and "10.165.15.29" in c.get("domain", "")), "")
+                    if not jsession:
+                        for c in all_cookies:
+                            if c.get("name") == "JSESSIONID" and ("vnpt.com.vn" not in c.get("domain", "") and "vnpt.vn" not in c.get("domain", "")):
+                                jsession = c["value"]
+                                break
+                    if not jsession:
+                        try:
+                            direct_cookies = context.cookies(["http://10.165.15.29:8080/VNPT-GW/client/search", "http://10.165.15.29:8080/"])
+                            for c in direct_cookies:
+                                if c.get("name") == "JSESSIONID":
+                                    jsession = c["value"]
+                                    break
+                        except Exception:
+                            pass
+                    if jsession and ("id.vnpt.com.vn" not in curr_u or "ticket=" in curr_u or "10.165.15.29" in curr_u):
+                        view_state = ""
+                        try:
+                            view_state = page.evaluate("() => { const el = document.querySelector('input[name=\"javax.faces.ViewState\"]'); return el ? el.value : ''; }") or ""
+                        except Exception:
+                            pass
+                        from gw_client import save_gw_cache
+                        save_gw_cache(jsession, view_state=view_state, verify=False)
+                        token = jsession
+                        user_info = {"username": username, "displayName": username}
+                        print(f"[OTP Step 2] [GW] ✅ THÀNH CÔNG! Đã lấy JSESSIONID: {token[:15]}...", flush=True)
                         break
             except Exception:
                 pass
@@ -896,30 +960,72 @@ def _worker_step2(active_sessions: dict, session_id: str, otp_code: str, timeout
         return {"success": False, "error": f"Lỗi xử lý xác thực OTP: {str(ex)}"}
 
 
+def _launch_browser(playwright):
+    """
+    Khởi tạo Chromium với bộ cờ chuẩn tối ưu cho Container Docker Linux.
+    Loại bỏ triệt để các cờ gây xung đột bộ nhớ và crash renderer:
+    --no-zygote, --disable-features=IsolateOrigins,site-per-process, --disable-site-isolation-trials, --disable-software-rasterizer.
+    """
+    return playwright.chromium.launch(
+        headless=True,
+        args=[
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--ignore-certificate-errors",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-extensions",
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--disable-sync",
+            "--disable-translate",
+            "--metrics-recording-only",
+            "--safebrowsing-disable-auto-update"
+        ]
+    )
+
+
+def _ensure_browser(playwright, current_browser):
+    """
+    Cơ chế Self-Healing: Kiểm tra tính sống còn của Chromium.
+    Nếu Chromium bị crash, disconnect hoặc null -> tự động giải phóng và launch mới ngay lập tức.
+    """
+    if current_browser is not None:
+        try:
+            if current_browser.is_connected():
+                return current_browser
+        except Exception:
+            pass
+        print("[AuthWorker] ⚠️ Phát hiện Chromium bị ngắt kết nối hoặc đã chết! Đang dọn dẹp và khởi tạo lại...", flush=True)
+        try:
+            current_browser.close()
+        except Exception:
+            pass
+
+    try:
+        new_b = _launch_browser(playwright)
+        print("[AuthWorker] ✅ Đã hồi sinh Chromium Browser thành công!", flush=True)
+        return new_b
+    except Exception as launch_err:
+        print(f"[AuthWorker] ❌ Không thể khởi tạo lại Chromium: {launch_err}", flush=True)
+        return None
+
+
 def _auth_worker_loop():
     """
     Dedicated worker thread nơi Playwright duy nhất được khởi tạo và chạy.
     Mọi Page, Context, Event Loop đều gắn cố định với thread này.
+    Bổ sung cơ chế Self-Healing tự hồi phục Chromium và tự động Retry khi gặp lỗi Target crashed.
     """
-    print("[AuthWorker] Khởi tạo luồng xử lý Playwright chuyên biệt...")
+    print("[AuthWorker] Khởi tạo luồng xử lý Playwright chuyên biệt (Self-Healing)...", flush=True)
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(
-                headless=True,
-                args=[
-                    "--ignore-certificate-errors",
-                    "--allow-running-insecure-content",
-                    "--disable-web-security",
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--no-zygote"
-                ]
-            )
+            browser = _ensure_browser(playwright, None)
             active_sessions = {}
 
-            print("[AuthWorker] Playwright Browser đã sẵn sàng nhận lệnh.")
+            print("[AuthWorker] Playwright Browser đã sẵn sàng nhận lệnh.", flush=True)
             while True:
                 try:
                     # Dọn dẹp session quá hạn (> 180s)
@@ -946,8 +1052,23 @@ def _auth_worker_loop():
                     args = job.get("args", {})
                     res_q = job.get("res_q")
 
+                    # Luôn đảm bảo Browser còn sống trước khi xử lý bất kỳ job nào
+                    browser = _ensure_browser(playwright, browser)
+                    if not browser:
+                        res_q.put({"success": False, "error": "Máy chủ chưa sẵn sàng dịch vụ trình duyệt xác thực."})
+                        continue
+
                     if action == "step1":
-                        res = _worker_step1(browser, active_sessions, args.get("username", ""), args.get("password", ""), args.get("timeout", 15), args.get("system", "tts_new"))
+                        sys_name = args.get("system", "tts_new")
+                        res = _worker_step1(browser, active_sessions, args.get("username", ""), args.get("password", ""), args.get("timeout", 20), sys_name)
+                        # Nếu gặp lỗi crash bất thường, kích hoạt Self-Healing và thử lại (Retry) 1 lần
+                        if not res.get("success") and not res.get("otp_required"):
+                            err_str = str(res.get("error", "")).lower()
+                            if any(k in err_str for k in ["target crashed", "closed", "crash", "connection"]):
+                                print(f"[AuthWorker] 🔄 Phát hiện Target crashed ở Step 1 [{sys_name}], tự động hồi sinh Chromium và thử lại...", flush=True)
+                                browser = _ensure_browser(playwright, None)
+                                if browser:
+                                    res = _worker_step1(browser, active_sessions, args.get("username", ""), args.get("password", ""), args.get("timeout", 20), sys_name)
                         res_q.put(res)
                     elif action == "step2":
                         res = _worker_step2(active_sessions, args.get("session_id", ""), args.get("otp_code", ""), args.get("timeout", 40))
@@ -956,12 +1077,12 @@ def _auth_worker_loop():
                         res_q.put({"success": False, "error": f"Hành động không hợp lệ: {action}"})
 
                 except Exception as ex:
-                    print(f"[AuthWorker] Ngoại lệ trong vòng lặp worker: {ex}")
+                    print(f"[AuthWorker] Ngoại lệ trong vòng lặp worker: {ex}", flush=True)
     except Exception as fatal_ex:
-        print(f"[AuthWorker] Lỗi nghiêm trọng: {fatal_ex}")
+        print(f"[AuthWorker] Lỗi nghiêm trọng: {fatal_ex}", flush=True)
 
 
-def authenticate_tts_step1(username: str, password: str, timeout: int = 15, system: str = "tts_new") -> dict:
+def authenticate_tts_step1(username: str, password: str, timeout: int = 20, system: str = "tts_new") -> dict:
     """
     Bước 1: Gửi thông tin tài khoản & mật khẩu lên hệ thống CAS TTS qua Dedicated Worker Thread.
     """
@@ -973,7 +1094,7 @@ def authenticate_tts_step1(username: str, password: str, timeout: int = 15, syst
         "res_q": res_q
     })
     try:
-        return res_q.get(timeout=timeout + 10)
+        return res_q.get(timeout=45)
     except queue.Empty:
         return {"success": False, "error": "Quá thời gian kết nối tới dịch vụ xác thực máy chủ."}
 

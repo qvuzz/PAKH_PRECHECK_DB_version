@@ -436,4 +436,45 @@
         setInterval(syncCcos, 3000);
         setTimeout(syncCcos, 800);
     }
+
+    // =============================================================
+    // 9. DỊCH VỤ: VNPT-GW (10.165.15.29:8080) -> Port 1234
+    // =============================================================
+    if (HOST.includes('10.165.15.29')) {
+        let lastGwSynced = '';
+        function syncGw() {
+            try {
+                let js = '';
+                let vs = '';
+                const cookie = document.cookie || '';
+                const m = cookie.match(/JSESSIONID=([^;]+)/i);
+                if (m) js = m[1].trim();
+
+                const vsEl = document.querySelector('input[name="javax.faces.ViewState"]') || document.getElementById('javax.faces.ViewState');
+                if (vsEl && vsEl.value) vs = vsEl.value.trim();
+
+                if (!js) return;
+                const gwKey = `${js}_${vs}`;
+                if (lastGwSynced === gwKey) return;
+
+                getPrecheckServers().forEach(server => {
+                    sendSyncRequest(`${server}/api/gw/cookie`, {
+                        cookie: `JSESSIONID=${js}`,
+                        jsessionid: js,
+                        view_state: vs
+                    }).then(data => {
+                        if (data && data.success) {
+                            lastGwSynced = gwKey;
+                            showToast('PAKH Precheck', 'Đã tự động đồng bộ Cookie VNPT-GW!', '#0d9488');
+                        }
+                    });
+                });
+            } catch (e) {
+                console.error("[Precheck Helper GW Error]", e);
+            }
+        }
+
+        setInterval(syncGw, 3000);
+        setTimeout(syncGw, 800);
+    }
 })();

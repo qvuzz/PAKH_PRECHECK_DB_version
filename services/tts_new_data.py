@@ -51,7 +51,8 @@ def _process_single_ticket(
     list_lock: threading.Lock,
     excel_summary_list: list,
     progress_tracker: dict,
-    force_recheck: bool = False
+    force_recheck: bool = False,
+    btools_online: bool = True
 ):
     """
     Xử lý tiền kiểm hoàn chỉnh cho 1 thuê bao:
@@ -110,6 +111,21 @@ def _process_single_ticket(
                     WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new'
                     ORDER BY updated_at DESC LIMIT 1
                 """, (clean_c, f"{clean_c}%")).fetchone()
+            if not existing_db_row and phone_84:
+                if incident_time_str:
+                    existing_db_row = conn_chk.execute("""
+                        SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary
+                        FROM tickets 
+                        WHERE (phone = ? OR phone LIKE ?) AND incident_time = ? AND source = 'tts_new'
+                        ORDER BY updated_at DESC LIMIT 1
+                    """, (phone_84, f"%{phone_84[-9:]}%", incident_time_str)).fetchone()
+                if not existing_db_row:
+                    existing_db_row = conn_chk.execute("""
+                        SELECT status, comment, action_plan, color, real_packages, rat_types, cem_data, app_usage, ai_summary
+                        FROM tickets 
+                        WHERE (phone = ? OR phone LIKE ?) AND source = 'tts_new' AND status NOT IN ('', 'CHỜ TIỀN KIỂM', 'CHƯA PHÂN LOẠI')
+                        ORDER BY updated_at DESC LIMIT 1
+                    """, (phone_84, f"%{phone_84[-9:]}%")).fetchone()
             conn_chk.close()
     except Exception:
         pass
@@ -163,10 +179,13 @@ def _process_single_ticket(
             except Exception:
                 pass
     else:
-        state.log("INFO", f"[{idx}/{total_tickets}] 🚀 Tra cứu Core (Đa luồng BTools + SAPC + CEM): {phone_84} ({ticket_code})")
+        core_desc = "Đa luồng BTools + SAPC + CEM" if btools_online else "Đa luồng SAPC + CEM (BTools Offline)"
+        state.log("INFO", f"[{idx}/{total_tickets}] 🚀 Tra cứu Core ({core_desc}): {phone_84} ({ticket_code})")
 
         # Định nghĩa các hàm tra cứu con chạy song song
         def _fetch_btools():
+            if not btools_online:
+                return None
             try:
                 with driver_lock:
                     raw_bt = extract_btools_single_phone(driver, phone_84, start_d, end_d)
@@ -359,7 +378,8 @@ def _process_single_ticket(
         "last_reopened_date": last_reopened_date,
         "processing_content": ticket.get("processing_content", ""),
         "region": ticket.get("region") or "MN",
-        "loaded_by": ticket.get("loaded_by", "")
+        "loaded_by": ticket.get("loaded_by", ""),
+        "deadline_overall": ticket.get("deadline_overall", "")
     }
 
     with list_lock:
@@ -591,29 +611,153 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False, target_
         except Exception as ex_db_merge:
             state.log("WARN", f"Lỗi nạp bổ sung phiếu từ DB khi tiền kiểm lại: {ex_db_merge}")
 
+        # Sắp xếp ưu tiên: Quét những phiếu có ngày tiếp nhận cũ nhất trước (FIFO)
+        def _parse_ticket_date_sort_key(t: dict):
+            raw_val = t.get("created_time") or t.get("incident_time") or t.get("requestDate") or ""
+            s = str(raw_val).strip()
+            if not s or s in ("--", "null", "None"):
+                return datetime.max
+            for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    return datetime.strptime(s, fmt)
+                except Exception:
+                    pass
+            import re
+            m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', s)
+            if m:
+                try:
+                    d, mth, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                    return datetime(y, mth, d)
+                except Exception:
+                    pass
+            return datetime.max
+
+        enriched_tickets.sort(key=_parse_ticket_date_sort_key)
+
         if not enriched_tickets:
+            is_admin_sync = True
+            if user_token:
+                from services.session_manager import decode_jwt
+                from region_detector import is_superadmin
+                is_admin_sync = is_superadmin(decode_jwt(user_token))
+
+            if (is_admin_sync or t_reg) and not force_recheck:
+                from db_manager import sync_active_tickets_state
+                sync_active_tickets_state([], source="tts_new", key_type="ticket_code", service_type="data", region=t_reg)
+
             state.log("WARN", f"Đã quét {total_scanned} phiếu trên TTS Mới và không có phiếu Mobile Internet nào đang xử lý / cần tiền kiểm lại{f' tại {t_reg}' if t_reg else ''}.", region=t_reg)
             return
 
         total_tickets = len(enriched_tickets)
         state.log("SUCCESS", f"Thu được {total_tickets} thuê bao Mobile Internet cần xử lý{f' [{t_reg}]' if t_reg else ''} (Quét TTS Mới: {total_scanned}). Khởi chạy Core Engine đa luồng...", region=t_reg)
 
-        # Đồng bộ danh sách phiếu hiện hữu với thực tế trên TTS Mới (chỉ sync khi quét live thực sự bởi SuperAdmin và không phải force recheck)
+        # ⚡ IMMEDIATE INGESTION: Lưu ngay toàn bộ phiếu vào Database ở trạng thái 'CHỜ TIỀN KIỂM'
+        # Giúp WebApp hiển thị phiếu lên màn hình tức thì trong <0.5s, không phải chờ Core Engine cào xong
+        try:
+            from db_manager import save_tickets_bulk
+            init_records = []
+            for t in enriched_tickets:
+                p_84 = normalize_phone_vn(t.get("phone", ""))
+                inc_time = str(t.get("incident_time") or t.get("created_time") or "").strip()
+                if p_84 and inc_time:
+                    init_records.append({
+                        "phone": p_84,
+                        "incident_time": inc_time,
+                        "package_title": t.get("title") or "Mobile Internet",
+                        "ticket_content": t.get("content") or "",
+                        "status": "CHỜ TIỀN KIỂM",
+                        "real_packages": "--",
+                        "rat_types": "--",
+                        "cem_data": "--",
+                        "app_usage": "--",
+                        "ticket_status": "Chưa đóng",
+                        "created_time": t.get("created_time") or "",
+                        "source": "tts_new",
+                        "ticket_code": t.get("ticket_code") or "",
+                        "ticket_id": t.get("ticket_id"),
+                        "flow_id": t.get("flow_id"),
+                        "reopen_count": t.get("reopen_count") or 0,
+                        "last_reopened_date": t.get("last_reopened_date") or "",
+                        "region": t.get("region") or t_reg or "MN",
+                        "loaded_by": t.get("loaded_by") or "",
+                        "deadline_overall": t.get("deadline_overall", "")
+                    })
+            if init_records:
+                save_tickets_bulk(init_records)
+        except Exception as ex_ingest:
+            state.log("WARN", f"Lỗi Immediate Ingestion: {ex_ingest}")
+
+        # Đồng bộ danh sách phiếu hiện hữu với thực tế trên TTS Mới (chỉ sync khi quét live thực sự bởi SuperAdmin hoặc theo phân vùng và không phải force recheck)
         is_admin_sync = True
         if user_token:
             from services.session_manager import decode_jwt
             from region_detector import is_superadmin
             is_admin_sync = is_superadmin(decode_jwt(user_token))
 
-        if total_scanned > 0 and not force_recheck and is_admin_sync:
+        if (is_admin_sync or t_reg) and not force_recheck:
             active_codes = {str(t.get("ticket_code", "")).strip() for t in enriched_tickets if t.get("ticket_code")}
             scanned_regs = {t.get("region") for t in enriched_tickets if t.get("region")}
             from db_manager import sync_active_tickets_state
             if scanned_regs:
                 for s_reg in scanned_regs:
                     sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data", region=s_reg)
-            elif active_codes:
-                sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data")
+            else:
+                sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data", region=t_reg)
+
+        # 🎯 LỌC DANH SÁCH PHIẾU CẦN TIỀN KIỂM:
+        # Nếu không force_recheck: CHỈ TIỀN KIỂM NHỮNG PHIẾU MỚI VỪA NHẬN (chưa có nhận định hợp lệ trong DB).
+        # Tất cả các phiếu đã có nhận định được giữ nguyên, không cào lại BTools/SAPC/CEM.
+        if not force_recheck:
+            tickets_to_precheck = []
+            conn_chk_batch = get_db_connection()
+            try:
+                for t in enriched_tickets:
+                    p_84 = normalize_phone_vn(t.get("phone", ""))
+                    c_code = (t.get("ticket_code") or "").split("\n")[0].strip()
+                    t_id = t.get("ticket_id")
+                    inc_t = t.get("incident_time") or t.get("created_time") or ""
+
+                    ex_row = None
+                    if t_id:
+                        ex_row = conn_chk_batch.execute("""
+                            SELECT status, comment FROM tickets 
+                            WHERE ticket_id = ? AND source = 'tts_new' AND status NOT IN ('', 'CHỜ TIỀN KIỂM', 'CHƯA PHÂN LOẠI')
+                            ORDER BY updated_at DESC LIMIT 1
+                        """, (t_id,)).fetchone()
+                    if not ex_row and c_code:
+                        ex_row = conn_chk_batch.execute("""
+                            SELECT status, comment FROM tickets 
+                            WHERE (ticket_code = ? OR ticket_code LIKE ?) AND source = 'tts_new' AND status NOT IN ('', 'CHỜ TIỀN KIỂM', 'CHƯA PHÂN LOẠI')
+                            ORDER BY updated_at DESC LIMIT 1
+                        """, (c_code, f"{c_code}%")).fetchone()
+                    if not ex_row and p_84:
+                        if inc_t:
+                            ex_row = conn_chk_batch.execute("""
+                                SELECT status, comment FROM tickets 
+                                WHERE (phone = ? OR phone LIKE ?) AND incident_time = ? AND source = 'tts_new' AND status NOT IN ('', 'CHỜ TIỀN KIỂM', 'CHƯA PHÂN LOẠI')
+                                ORDER BY updated_at DESC LIMIT 1
+                            """, (p_84, f"%{p_84[-9:]}%", inc_t)).fetchone()
+                        if not ex_row:
+                            ex_row = conn_chk_batch.execute("""
+                                SELECT status, comment FROM tickets 
+                                WHERE (phone = ? OR phone LIKE ?) AND source = 'tts_new' AND status NOT IN ('', 'CHỜ TIỀN KIỂM', 'CHƯA PHÂN LOẠI')
+                                ORDER BY updated_at DESC LIMIT 1
+                            """, (p_84, f"%{p_84[-9:]}%")).fetchone()
+
+                    is_valid = bool(ex_row and ex_row["status"] and _is_valid_technical_status(ex_row["status"]) and ex_row["comment"])
+                    if not is_valid:
+                        tickets_to_precheck.append(t)
+            finally:
+                conn_chk_batch.close()
+        else:
+            tickets_to_precheck = list(enriched_tickets)
+
+        if not tickets_to_precheck:
+            mode_str = "Tự động đóng 2 vòng" if state.should_auto_close("tts_new") else "Chỉ hiển thị, đóng thủ công"
+            state.log("SUCCESS", f"✅ Đã đồng bộ {total_tickets} phiếu Mobile Internet{f' [{t_reg}]' if t_reg else ''} (Tất cả đã có kết quả tiền kiểm). Không có phiếu mới cần tiền kiểm.", region=t_reg)
+            return
+
+        state.log("INFO", f"⚡ Phát hiện {len(tickets_to_precheck)}/{total_tickets} thuê bao Mobile Internet mới vừa nhận cần tiền kiểm{f' [{t_reg}]' if t_reg else ''}. Khởi chạy Core Engine...")
 
         now = datetime.now()
         start_d = (now - timedelta(days=4)).strftime("%d%m%Y")
@@ -621,11 +765,21 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False, target_
 
         # Tiền xử lý nạp cookie BTools trước để các luồng con không xung đột truy cập Selenium Driver
         driver_lock = threading.Lock()
+        btools_online = False
         with driver_lock:
             try:
-                get_btools_cookie(driver)
-            except Exception:
-                pass
+                bt_cookie = get_btools_cookie(driver)
+                if bt_cookie:
+                    from btools_manager import verify_btools_cookie
+                    is_v, reason = verify_btools_cookie(bt_cookie)
+                    btools_online = bool(is_v)
+                    if not btools_online:
+                        state.log("WARN", f"⚠️ [BTOOLS OFFLINE] {reason}. Hệ thống bỏ qua BTools, tiếp tục tiền kiểm bằng Core SAPC & CEM...")
+                else:
+                    state.log("WARN", "⚠️ [BTOOLS OFFLINE] Chưa có cookie BTools (chưa đăng nhập). Hệ thống bỏ qua BTools, tiếp tục tiền kiểm bằng Core SAPC & CEM...")
+            except Exception as ex_bt_chk:
+                state.log("WARN", f"⚠️ [BTOOLS OFFLINE] Không thể kết nối BTools: {ex_bt_chk}. Hệ thống tiếp tục bằng Core SAPC & CEM...")
+                btools_online = False
 
         # Khởi tạo SAPC & CEM Clients chia sẻ qua kết nối HTTP keep-alive
         try:
@@ -649,8 +803,8 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False, target_
         }
 
         # XỬ LÝ ĐA LUỒNG TICKET LEVEL (TỐI ĐA 3 WORKERS ĐỒNG THỜI TRÁNH QUÁ TẢI SERVER)
-        state.current_step = f"Đang xử lý 0/{total_tickets} thuê bao..."
-        max_ticket_workers = min(3, total_tickets)
+        state.current_step = f"Đang xử lý 0/{len(tickets_to_precheck)} thuê bao..."
+        max_ticket_workers = min(3, len(tickets_to_precheck))
 
         with ThreadPoolExecutor(max_workers=max_ticket_workers) as outer_exec:
             future_to_ticket = {
@@ -658,7 +812,7 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False, target_
                     _process_single_ticket,
                     idx,
                     ticket,
-                    total_tickets,
+                    len(tickets_to_precheck),
                     start_d,
                     end_d,
                     driver,
@@ -670,9 +824,10 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False, target_
                     list_lock,
                     excel_summary_list,
                     progress_tracker,
-                    force_recheck
+                    force_recheck,
+                    btools_online
                 ): ticket
-                for idx, ticket in enumerate(enriched_tickets, 1)
+                for idx, ticket in enumerate(tickets_to_precheck, 1)
             }
 
             for fut in as_completed(future_to_ticket):

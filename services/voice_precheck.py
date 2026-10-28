@@ -34,6 +34,28 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
     last_reopened_date = str(ticket.get("last_reopened_date") or "").strip()
 
     # =========================================================================
+    # 0.1 CHUYÊN BIỆT: NHÓM SỰ CỐ TIN NHẮN (SMS / OTP / CƯỚC SMS / SPAM SMS)
+    # (Tự động bóc tách thực thể bằng ai_sms_interpreter + tra cứu SMSC CDR)
+    # =========================================================================
+    from db_manager import is_sms_ticket as db_is_sms_ticket
+    from services.sms_analyzer import is_sms_ticket, analyze_sms_ticket_with_cdr
+
+    srv_type = str(ticket.get("service_type") or "").strip().lower()
+    is_sms = (
+        srv_type in ("sms", "tin_nhan")
+        or is_sms_ticket(title, ticket_content)
+        or db_is_sms_ticket(title)
+        or any(k in title.lower() for k in ["tin nhắn", "sms"])
+        or any(k in ticket_content.lower() for k in ["nhắn tin", "gửi tin", "nhận tin", "ttnt", "smo", "smt"])
+    )
+    if is_sms:
+        from services.state import state
+        state.log("INFO", f"   📩 [ai_sms_interpreter] Nhận diện sự cố SMS: {phone_84} - Đang bóc tách thực thể & tra cứu CDR...")
+        res = analyze_sms_ticket_with_cdr(phone_84, ticket, force_cdr=True, force_gw=True)
+        if res.get('status') in ('ĐÃ CÓ BẢN CAM KẾT', 'CHƯA CÓ BẢN CAM KẾT'):
+            res['status'] = 'SPAM TIN NHẮN'
+        return res
+
     # 0. CHUYÊN BIỆT: NHÓM SỰ CỐ SPAM CUỘC GỌI / CHẶN GỌI NGOẠI MẠNG / LIÊN MẠNG
     # (Bỏ hoàn toàn gọi Core SAPC và Bỏ cảnh báo Phiếu mở lại theo quy chuẩn)
     # =========================================================================
@@ -83,24 +105,6 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
         }
 
     # =========================================================================
-    # 0.1 CHUYÊN BIỆT: NHÓM SỰ CỐ TIN NHẮN (SMS / OTP / CƯỚC SMS / SPAM SMS)
-    # (Tự động bóc tách thực thể bằng ai_sms_interpreter + tra cứu SMSC CDR)
-    # =========================================================================
-    from db_manager import is_sms_ticket as db_is_sms_ticket
-    from services.sms_analyzer import is_sms_ticket, analyze_sms_ticket_with_cdr
-
-    srv_type = str(ticket.get("service_type") or "").strip().lower()
-    is_sms = (
-        srv_type in ("sms", "tin_nhan")
-        or is_sms_ticket(title, ticket_content)
-        or db_is_sms_ticket(title)
-        or any(k in title.lower() for k in ["tin nhắn", "sms"])
-        or any(k in ticket_content.lower() for k in ["nhắn tin", "gửi tin", "nhận tin", "ttnt", "smo", "smt"])
-    )
-    if is_sms:
-        from services.state import state
-        state.log("INFO", f"   📩 [ai_sms_interpreter] Nhận diện sự cố SMS: {phone_84} - Đang bóc tách thực thể & tra cứu CDR...")
-        return analyze_sms_ticket_with_cdr(phone_84, ticket, force_cdr=True)
 
     # Nhận diện nếu caller truyền driver vào vị trí tham số thứ 3
     if sapc_client is not None and hasattr(sapc_client, "session") is False and hasattr(sapc_client, "execute_cdp_cmd"):
@@ -215,12 +219,9 @@ def precheck_single_voice_ticket(phone_84: str, ticket: dict, sapc_client=None, 
     if is_strange_hss:
         comment = "HSS Profile bất thường, nghi ngờ ảnh hưởng dịch vụ VoLTE/Cuộc gọi."
         action_plan = "Kiểm tra và đồng bộ lại cấu hình Profile thuê bao trên Core HSS."
-    elif is_lock:
+    elif nam_val == "1":
         comment = "Hồ sơ thuê bao bị khóa cước / khóa dịch vụ trên Core HSS (Cờ NAM: 1)."
         action_plan = "Hướng dẫn khách hàng thanh toán cước hoặc nạp tiền để mở khóa chiều dịch vụ."
-    elif is_station_err:
-        comment = f"Trạm phát sóng phục vụ ({sapc_cell or 'khu vực'}) đang có cảnh báo sự cố kỹ thuật."
-        action_plan = "Chuyển đơn vị quản lý trạm viễn thông địa bàn kiểm tra xử lý sự cố phát sóng."
     else:
         pkg_note = f" Gói cước: {formatted_packages}." if formatted_packages and formatted_packages != "--" else ""
         comment = f"Trạng thái Core HSS bình thường, dịch vụ mở 2 chiều, trạm phát sóng đảm bảo.{pkg_note}"

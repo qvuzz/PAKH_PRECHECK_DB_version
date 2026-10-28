@@ -437,7 +437,7 @@ sat_systems = [
     ("Core SAPC / PCRF", "Mạng lõi chính sách & Cước", "10.155.42.218 (PCRF Core)", "Tra cứu Profile cước: Gói Data kích hoạt trên OCS, cờ NAM, hạn mức AMBR QoS, SIM 4G HSS."),
     ("BTools Chrome CDP", "Lịch sử phiên dữ liệu Data", "10.159.21.241:9222 (BTools Service)", "Truy vấn CDR 4G/5G/3G gần nhất: Thời gian phiên, Bytes tải, RAT Type, Service ID, Cause ngắt phiên."),
     ("CEM Vô tuyến", "Chất lượng sóng trạm phát", "https://cem.vnptmedia.vn", "Đo kiểm RSRP (dBm), SINR (dB), tên mã trạm BTS/eNodeB phục vụ, cảnh báo sự cố mất sóng trạm."),
-    ("Google Maps Geocoding", "Chuẩn hóa địa giới hành chính", "http://10.155.59.158:1708/api/reverse-geocode", "Chuyển đổi tọa độ GPS từ CEM thành địa danh chuẩn 2 cấp [Phường/Xã, Tỉnh/TP] theo chuẩn mới."),
+    ("Google Maps Geocoding", "Chuẩn hóa địa giới hành chính", "http://10.155.139.167:1708/api/reverse-geocode", "Chuyển đổi tọa độ GPS từ CEM thành địa danh chuẩn 2 cấp [Phường/Xã, Tỉnh/TP] theo chuẩn mới."),
     ("SMSC Gateway CDR", "Nhật ký tin nhắn thời gian thực", "Cổng kết nối SMSC Gateway", "Tra cứu tin nhắn OTP Brandname, mã trạng thái phát tin Delivery Status (Mã 0, 1, 2, 6, 21, 27)."),
     ("CCOS Cam kết", "Đối soát chặn cuộc gọi rác", "Hệ thống CCOS Tập đoàn", "Kiểm tra biên bản cam kết mở mạng đối với các số bị chặn cuộc gọi rác theo Nghị định 91/2020/NĐ-CP.")
 ]
@@ -1077,7 +1077,7 @@ sat_cards = [
     ("2. Core SAPC / PCRF", "10.155.42.218", "Tra cứu Profile cước: Gói Data kích hoạt trên OCS, cờ khóa NAM, hạn mức AMBR QoS, SIM 4G HSS."),
     ("3. BTools Chrome CDP", "10.159.21.241:9222", "Truy vấn CDR 4G/5G/3G gần nhất: Thời gian phiên, Bytes tải, RAT Type, Service ID, Cause ngắt phiên."),
     ("4. CEM Vô tuyến", "cem.vnptmedia.vn", "Đo kiểm cường độ sóng RSRP (dBm), SINR (dB), mã trạm BTS/eNodeB phục vụ, cảnh báo mất sóng."),
-    ("5. Google Maps Geocoding", "10.155.59.158:1708", "Chuyển đổi tọa độ GPS từ CEM thành địa danh chuẩn 2 cấp [Phường/Xã], [Tỉnh/TP] theo 34 Tỉnh mới."),
+    ("5. Google Maps Geocoding", "10.155.139.167:1708", "Chuyển đổi tọa độ GPS từ CEM thành địa danh chuẩn 2 cấp [Phường/Xã], [Tỉnh/TP] theo 34 Tỉnh mới."),
     ("6. SMSC Gateway CDR", "Cổng SMSC Gateway", "Tra cứu tin nhắn OTP Brandname thời gian thực, mã trạng thái phân phát Delivery Status (0, 1, 2, 6, 21, 27).")
 ]
 

@@ -71,3 +71,9 @@ models/
 VNPT TTS PRECHECK/
 cdr_queue/
 
+
+CustomerPosition/
+gw_auth_cache.json
+tickets.db.bak*
+tts_new
+

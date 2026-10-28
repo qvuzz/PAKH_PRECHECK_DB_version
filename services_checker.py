@@ -12,8 +12,22 @@ _HEALTH_CACHE = {
     "sapc": False,
     "tts_new": False,
     "ccos": False,
+    "gw": False,
     "last_checked": 0
 }
+
+def check_gw_fast(driver=None) -> bool:
+    try:
+        from gw_client import load_gw_cache, verify_gw_session
+        cached = load_gw_cache()
+        js = cached.get("jsessionid", "")
+        vs = cached.get("view_state", "")
+        if js:
+            is_valid, _ = verify_gw_session(js, vs)
+            return bool(is_valid)
+    except Exception:
+        pass
+    return False
 
 def check_ccos_fast(driver=None) -> bool:
     try:
@@ -104,7 +118,8 @@ def get_services_health(force=False, driver=None, tts_new_token: str = None, **k
             "cem": _HEALTH_CACHE["cem"],
             "sapc": _HEALTH_CACHE["sapc"],
             "tts_new": _HEALTH_CACHE["tts_new"],
-            "ccos": _HEALTH_CACHE.get("ccos", False)
+            "ccos": _HEALTH_CACHE.get("ccos", False),
+            "gw": _HEALTH_CACHE.get("gw", False)
         }
 
     from auth_extractor import get_chrome_debug_driver
@@ -119,6 +134,7 @@ def get_services_health(force=False, driver=None, tts_new_token: str = None, **k
     sapc_ok = check_sapc_fast(driver=driver)
     tts_new_ok = check_tts_new_fast(driver=driver, token=tts_new_token)
     ccos_ok = check_ccos_fast(driver=driver)
+    gw_ok = check_gw_fast(driver=driver)
 
     if not has_custom_tokens:
         _HEALTH_CACHE["btools"] = btools_ok
@@ -126,6 +142,7 @@ def get_services_health(force=False, driver=None, tts_new_token: str = None, **k
         _HEALTH_CACHE["sapc"] = sapc_ok
         _HEALTH_CACHE["tts_new"] = tts_new_ok
         _HEALTH_CACHE["ccos"] = ccos_ok
+        _HEALTH_CACHE["gw"] = gw_ok
         _HEALTH_CACHE["last_checked"] = now
 
     return {
@@ -133,5 +150,6 @@ def get_services_health(force=False, driver=None, tts_new_token: str = None, **k
         "cem": cem_ok,
         "sapc": sapc_ok,
         "tts_new": tts_new_ok,
-        "ccos": ccos_ok
+        "ccos": ccos_ok,
+        "gw": gw_ok
     }

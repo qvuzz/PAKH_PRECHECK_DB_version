@@ -100,6 +100,25 @@ async function updateServicesStatus() {
         if (pillCcos) {
             pillCcos.title = isCcosActive ? 'CCOS: Connected (Click để quản lý phiên)' : 'CCOS: Disconnected (Click để đăng nhập)';
         }
+
+        // 7. GW (VNPT-GW 10.165.15.29:8080)
+        const dotGw = document.getElementById('dotGw');
+        const pillGw = document.getElementById('svcPillGw');
+        let isGwActive = !!svcs.gw;
+        if (!isGwActive) {
+            try {
+                const rGw = await fetch('/api/gw/status');
+                const dGw = await rGw.json();
+                isGwActive = !!(dGw && (dGw.connected || dGw.has_session));
+            } catch (e) {}
+        }
+        if (dotGw) {
+            dotGw.className = 'svc-status-dot ' + (isGwActive ? 'active' : 'inactive');
+            dotGw.style.backgroundColor = isGwActive ? '#16a34a' : '#ef4444';
+        }
+        if (pillGw) {
+            pillGw.title = isGwActive ? 'GW: Connected (Click để quản lý phiên)' : 'GW: Disconnected (Click để kết nối/dán cookie)';
+        }
     } catch (e) {
         console.warn('Lỗi kiểm tra trạng thái dịch vụ:', e);
     }
@@ -1421,7 +1440,305 @@ async function handleDirectCemAuthSubmit(event) {
     }
 }
 
-// Tự động kiểm tra trạng thái các dịch vụ (TTS Cũ, TTS Mới, BTools, CEM, SAPC)
+// ==========================================
+// QUẢN LÝ POPUP & KẾT NỐI VNPT-GW (10.165.15.29:8080)
+// ==========================================
+function toggleGwPopup(event) {
+    if (event) event.stopPropagation();
+    const m = document.getElementById('modalGwSync');
+    if (!m) return;
+    if (m.style.display === 'block') {
+        closeGwModal();
+    } else {
+        closeTtsNewModal();
+        closeBtoolsModal();
+        closeCemModal();
+        closeSapcModal();
+        closeCcosModal();
+        openGwModal();
+    }
+}
+
+async function openGwModal() {
+    const m = document.getElementById('modalGwSync');
+    if (!m) return;
+    m.style.display = 'block';
+
+    const boxLogged = document.getElementById('boxGwLoggedInState');
+    const lblUser = document.getElementById('lblGwUser');
+    const boxStep1 = document.getElementById('boxStep1GwLogin');
+    const boxStep2 = document.getElementById('boxStep2GwOtp');
+    const manualSec = document.getElementById('sectionGwManual');
+
+    try {
+        const res = await fetch('/api/gw/status');
+        const data = await res.json();
+        const isConn = !!(data && (data.connected || data.has_session));
+        if (isConn) {
+            if (boxLogged) boxLogged.style.display = 'flex';
+            if (boxStep1) boxStep1.style.display = 'none';
+            if (boxStep2) boxStep2.style.display = 'none';
+            if (manualSec) manualSec.style.display = 'none';
+            if (lblUser) {
+                lblUser.innerText = data.updated_at ? `Cập nhật: ${data.updated_at}` : 'Phiên làm việc đang hoạt động';
+            }
+        } else {
+            if (boxLogged) boxLogged.style.display = 'none';
+            if (boxStep1) boxStep1.style.display = 'block';
+            if (boxStep2) boxStep2.style.display = 'none';
+        }
+    } catch (e) {
+        if (boxLogged) boxLogged.style.display = 'none';
+        if (boxStep1) boxStep1.style.display = 'block';
+    }
+}
+
+function toggleGwReAuth() {
+    const boxStep1 = document.getElementById('boxStep1GwLogin');
+    if (boxStep1) {
+        boxStep1.style.display = (boxStep1.style.display === 'none' || !boxStep1.style.display) ? 'block' : 'none';
+    }
+}
+
+function closeGwModal() {
+    const m = document.getElementById('modalGwSync');
+    if (m) m.style.display = 'none';
+}
+
+let currentGwOtpSessionId = null;
+
+function toggleGwManualSection() {
+    const sec = document.getElementById('sectionGwManual');
+    if (sec) sec.style.display = (sec.style.display === 'none' || !sec.style.display) ? 'block' : 'none';
+}
+
+function backToStep1GwLogin() {
+    const s1 = document.getElementById('boxStep1GwLogin');
+    const s2 = document.getElementById('boxStep2GwOtp');
+    if (s1) s1.style.display = 'block';
+    if (s2) s2.style.display = 'none';
+    currentGwOtpSessionId = null;
+}
+
+async function handleDirectGwLoginSubmit(event) {
+    if (event) event.preventDefault();
+    const uInp = document.getElementById('loginGwUsername');
+    const pInp = document.getElementById('loginGwPassword');
+    const btn = document.getElementById('btnDirectGwLoginSubmit');
+    const msg = document.getElementById('gwLoginStatusMsg');
+
+    const username = uInp ? uInp.value.trim() : '';
+    const password = pInp ? pInp.value : '';
+
+    if (!username || !password) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Vui lòng nhập tên truy nhập và mật khẩu CAS!';
+        }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerText = 'ĐANG XỬ LÝ...'; }
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0f9ff';
+        msg.style.color = '#0284c7';
+        msg.innerText = 'Đang kết nối xác thực CAS VNPT-GW...';
+    }
+
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, system: 'gw' })
+        });
+        const data = await res.json();
+
+        if (data.success && (data.token || data.session_id)) {
+            if (msg) {
+                msg.style.background = '#f0fdf4';
+                msg.style.color = '#15803d';
+                msg.innerText = 'Đăng nhập VNPT-GW thành công!';
+            }
+            setTimeout(() => {
+                closeGwModal();
+                updateServicesStatus();
+            }, 600);
+        } else if (data.otp_required) {
+            currentGwOtpSessionId = data.session_id;
+            const s1 = document.getElementById('boxStep1GwLogin');
+            const s2 = document.getElementById('boxStep2GwOtp');
+            if (s1) s1.style.display = 'none';
+            if (s2) s2.style.display = 'block';
+            const uLabel = document.getElementById('otpGwUserLabel');
+            if (uLabel) uLabel.innerText = data.username || username;
+            const otpInp = document.getElementById('loginGwOtp');
+            if (otpInp) { otpInp.value = ''; otpInp.focus(); }
+        } else {
+            if (msg) {
+                msg.style.background = '#fef2f2';
+                msg.style.color = '#dc2626';
+                msg.innerText = data.error || 'Đăng nhập GW thất bại. Kiểm tra lại thông tin!';
+            }
+        }
+    } catch (e) {
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Lỗi kết nối máy chủ: ' + e.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'ĐĂNG NHẬP GW'; }
+    }
+}
+
+async function handleDirectGwOtpSubmit(event) {
+    if (event) event.preventDefault();
+    const inp = document.getElementById('loginGwOtp');
+    const msg = document.getElementById('gwOtpStatusMsg');
+    const btn = document.getElementById('btnDirectGwOtpSubmit');
+    const otpVal = inp ? inp.value.trim() : '';
+
+    if (!otpVal) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Vui lòng nhập mã OTP!';
+        }
+        return;
+    }
+
+    if (!currentGwOtpSessionId) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Chưa có phiên đăng nhập GW. Vui lòng bấm "Quay lại nhập tài khoản" để thực hiện Bước 1 trước!';
+        }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerText = 'ĐANG XÁC THỰC OTP...'; }
+    if (msg) {
+        msg.style.display = 'block';
+        msg.style.background = '#f0f9ff';
+        msg.style.color = '#0284c7';
+        msg.innerText = 'Đang xác thực OTP với GW, vui lòng chờ...';
+    }
+
+    try {
+        const res = await fetch('/api/login/otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: currentGwOtpSessionId, otp: otpVal })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            if (msg) {
+                msg.style.background = '#f0fdf4';
+                msg.style.color = '#15803d';
+                msg.innerText = 'Xác thực OTP GW thành công!';
+            }
+            setTimeout(() => {
+                closeGwModal();
+                updateServicesStatus();
+            }, 600);
+        } else {
+            if (msg) {
+                msg.style.background = '#fef2f2';
+                msg.style.color = '#dc2626';
+                msg.innerText = data.error || 'Mã OTP không đúng hoặc đã hết hạn!';
+            }
+        }
+    } catch (e) {
+        if (msg) {
+            msg.style.background = '#fef2f2';
+            msg.style.color = '#dc2626';
+            msg.innerText = 'Lỗi kết nối máy chủ: ' + e.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'XÁC NHẬN OTP'; }
+    }
+}
+
+async function logoutGwSession() {
+    try {
+        await fetch('/api/gw/logout', { method: 'POST' });
+    } catch (e) {}
+    const boxLogged = document.getElementById('boxGwLoggedInState');
+    const boxStep1 = document.getElementById('boxStep1GwLogin');
+    const boxStep2 = document.getElementById('boxStep2GwOtp');
+    if (boxLogged) boxLogged.style.display = 'none';
+    if (boxStep1) boxStep1.style.display = 'block';
+    if (boxStep2) boxStep2.style.display = 'none';
+    closeGwModal();
+    updateServicesStatus();
+}
+
+async function clearGwSession() {
+    return logoutGwSession();
+}
+
+async function handleDirectGwCookieSubmit(event) {
+    if (event) event.preventDefault();
+    const inp = document.getElementById('gwCookieInput');
+    const vsInp = document.getElementById('gwViewStateInput');
+    const msg = document.getElementById('gwStatusMsg');
+    const btn = document.getElementById('btnSaveGwCookie');
+
+    const cookieVal = inp ? inp.value.trim() : '';
+    const viewStateVal = vsInp ? vsInp.value.trim() : '';
+
+    if (!cookieVal) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fee2e2';
+            msg.style.color = '#991b1b';
+            msg.innerText = 'Vui lòng nhập Cookie hoặc JSESSIONID của VNPT-GW';
+        }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerText = 'Đang lưu...'; }
+    try {
+        const res = await fetch('/api/gw/cookie', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cookie: cookieVal, view_state: viewStateVal })
+        });
+        const data = await res.json();
+        if (msg) {
+            msg.style.display = 'block';
+            if (data.success) {
+                msg.style.background = '#dcfce7';
+                msg.style.color = '#166534';
+                msg.innerText = data.message || 'Đã lưu phiên GW thành công!';
+                if (inp) inp.value = '';
+                if (vsInp) vsInp.value = '';
+                setTimeout(() => { closeGwModal(); updateServicesStatus(); }, 1200);
+            } else {
+                msg.style.background = '#fee2e2';
+                msg.style.color = '#991b1b';
+                msg.innerText = data.message || 'Lỗi khi lưu phiên GW';
+            }
+        }
+    } catch (err) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.style.background = '#fee2e2';
+            msg.style.color = '#991b1b';
+            msg.innerText = 'Không thể kết nối máy chủ: ' + err.message;
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'LƯU PHIÊN GW THỦ CÔNG'; }
+    }
+}
+
+// Tự động kiểm tra trạng thái các dịch vụ (TTS Cũ, TTS Mới, BTools, CEM, SAPC, GW)
 setTimeout(updateServicesStatus, 500);
 setInterval(updateServicesStatus, 25000);
 
@@ -1437,5 +1754,7 @@ document.addEventListener('click', function (e) {
     if (wrapSapc && !wrapSapc.contains(e.target)) closeSapcModal();
     const wrapCcos = document.getElementById('wrapperCcos');
     if (wrapCcos && !wrapCcos.contains(e.target)) closeCcosModal();
+    const wrapGw = document.getElementById('wrapperGw');
+    if (wrapGw && !wrapGw.contains(e.target)) closeGwModal();
 });
 

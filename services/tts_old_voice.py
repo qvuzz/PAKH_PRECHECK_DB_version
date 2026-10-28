@@ -34,8 +34,31 @@ def execute_tts_old_voice_cycle():
             state.log("WARN", "ℹ️ Trên bảng TTS Cũ hiện tại không có phiếu Thoại / SMS / Gói cước nào (Toàn bộ là phiếu Mobile Internet).")
             return 0
 
-        voice_tickets = raw_tickets
-        state.log("SUCCESS", f"Thu được {len(voice_tickets)} phiếu Thoại / SMS từ bảng TTS Cũ. Đang nạp vào bảng...")
+        voice_tickets = list(raw_tickets)
+
+        # Sắp xếp ưu tiên: Quét những phiếu có ngày tiếp nhận cũ nhất trước (FIFO)
+        def _parse_ticket_date_sort_key(t: dict):
+            raw_val = t.get("created_time") or t.get("incident_time") or t.get("requestDate") or ""
+            s = str(raw_val).strip()
+            if not s or s in ("--", "null", "None"):
+                return datetime.max
+            for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    return datetime.strptime(s, fmt)
+                except Exception:
+                    pass
+            import re
+            m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', s)
+            if m:
+                try:
+                    d, mth, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                    return datetime(y, mth, d)
+                except Exception:
+                    pass
+            return datetime.max
+
+        voice_tickets.sort(key=_parse_ticket_date_sort_key)
+        state.log("SUCCESS", f"Thu được {len(voice_tickets)} phiếu Thoại / SMS từ bảng TTS Cũ (ưu tiên tiếp nhận cũ nhất trước). Đang nạp vào bảng...")
 
         SAPCCHECK_DIR = str(BASE_DIR / "sapccheck")
         if SAPCCHECK_DIR not in sys.path:

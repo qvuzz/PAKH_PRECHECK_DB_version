@@ -83,6 +83,9 @@ Tài liệu này là chỉ dẫn bắt buộc cho mọi trợ lý AI (Antigravit
      1. **Lớp 1 (Code gốc)**: Sửa tại thư mục gốc workspace (`PAKH_PRECHECK/`).
      2. **Lớp 2 (Thư mục Docker)**: Đồng bộ sang thư mục triển khai docker `VNPT TTS PRECHECK/`.
      3. **Lớp 3 (Gói ZIP triển khai)**: Chạy `python update_deploy_zip.py` để đóng gói cập nhật đè vào file `VNPT_TTS_PRECHECK_DEPLOY.zip`.
+   * **BẮT BUỘC KIỂM TRA VÀ CẬP NHẬT FILE `docker-compose.yml`**:
+     * Khi có file/module/từ điển mới được tạo (như file cấu hình, JSON, module python mới), **BẮT BUỘC** phải rà soát và cập nhật file `docker-compose.yml` (ở cả Lớp 1 và Lớp 2) tại mục `volumes:` để đảm bảo file mới được mount trực tiếp vào container (`/app/...`). Điều này giúp container Docker nhận cập nhật live theo thời gian thực mà không bị thiếu file hoặc phải build lại image.
+     * Đồng thời, kiểm tra `update_deploy_zip.py` xem file mới đã được thêm vào danh sách `files_to_update` hay chưa trước khi nén.
    * **BẮT BUỘC HỎI Ý KIẾN TRƯỚC KHI BUILD DOCKER & NÉN FILE ZIP**:
      * **CẤM** tự ý chạy build Docker hoặc nén lại file ZIP (`update_deploy_zip.py`) sau mỗi lần sửa code nhỏ.
      * **BẮT BUỘC**: Trước khi thực hiện đồng bộ sang Docker / build lại container / nén file ZIP, AI phải hỏi ý kiến người dùng với lựa chọn rõ ràng **Yes/No**. Chỉ khi người dùng chọn **Yes (Đồng ý)** thì mới tiến hành đồng bộ và đóng gói ZIP.
@@ -115,6 +118,12 @@ Tài liệu này là chỉ dẫn bắt buộc cho mọi trợ lý AI (Antigravit
       1. **Tránh phình to file (God Object)**: Giúp kiểm soát lỗi cục bộ và tiết kiệm token khi đọc/sửa code.
       2. **Độc lập nghiệp vụ**: Tránh xung đột logic giữa các phân hệ (ví dụ: logic bóc tách Data không thể áp đặt nhầm sang SMS hay Thoại).
       3. **Dễ bảo trì & nâng cấp**: Dễ dàng chỉnh sửa, test riêng từng nghiệp vụ mà không làm ảnh hưởng luồng core đang chạy ổn định.
+
+12. **Môi trường thực tế là Docker Server (KHÔNG PHẢI máy cục bộ / 10.155.139.167 — BẮT BUỘC NHỚ)**:
+    * **BẢN CHẤT MÔI TRƯỜNG TRIỂN KHAI**: Mọi phản ánh lỗi, hiện tượng giật/lag, chậm, trải nghiệm người dùng hoặc kết quả kiểm thử từ KTV **ĐỀU LÀ KẾT QUẢ TEST TRỰC TIẾP TỪ CONTAINER DOCKER (chạy trên Linux Server)**, hoàn toàn KHÔNG PHẢI từ WebApp trên máy dev hay máy `10.155.139.167`.
+    * **CẤM TUYỆT ĐỐI**:
+      * Đổ lỗi hoặc suy đoán nguyên nhân do thư mục OneDrive, filesystem Windows hay môi trường dev cục bộ khi phân tích lỗi/hiệu năng.
+      * Mọi phân tích hiệu năng, I/O disk SQLite, kết nối mạng, luồng tiến trình nền phải được phân tích chuẩn xác trong ngữ cảnh Container Docker Linux và các volume mount tương ứng.
 
 ---
 
@@ -158,5 +167,7 @@ Dự án đã được phân tầng rõ ràng, mọi nghiệp vụ chỉ nằm t
 3. **Cập nhật quy tắc đóng phiếu tự động**:
    * Kiểm tra [`routers/tickets.py`](routers/tickets.py) tại các hàm `save_autoclose_config` và điều kiện trigger.
 4. **Đồng bộ 3 lớp (Bắt buộc cuối mỗi tác vụ)**:
+   * Kiểm tra và cập nhật `docker-compose.yml` (bổ sung volume mount cho file mới nếu có).
+   * Kiểm tra và cập nhật `update_deploy_zip.py` (thêm file mới vào `files_to_update`).
    * Copy file vừa sửa sang thư mục `VNPT TTS PRECHECK/`.
    * Chạy `python update_deploy_zip.py` để cập nhật `VNPT_TTS_PRECHECK_DEPLOY.zip`.

@@ -153,6 +153,11 @@ async def login_tts_step1(request: Request):
         elif system == "ccos":
             ACTIVE_LAN_SESSIONS[client_ip]["ccos_cookie"] = token
             ACTIVE_LAN_SESSIONS[client_ip]["ccos_timestamp"] = time.time()
+        elif system == "gw":
+            ACTIVE_LAN_SESSIONS[client_ip]["gw_cookie"] = token
+            ACTIVE_LAN_SESSIONS[client_ip]["gw_timestamp"] = time.time()
+            from gw_client import save_gw_cache
+            save_gw_cache(token, view_state=result.get("view_state", ""), verify=False)
         else:
             ACTIVE_LAN_SESSIONS[client_ip]["token"] = token
             ACTIVE_LAN_SESSIONS[client_ip]["user"] = user_info
@@ -169,7 +174,7 @@ async def login_tts_step1(request: Request):
         _save_lan_sessions()
 
         user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or user_info.get("displayName") or username
-        sys_tag = "BTOOLS" if system == "btools" else ("CEM" if system == "cem" else ("SAPC" if system == "sapc" else ("CCOS" if system == "ccos" else ("TTS MỚI" if system == "tts_new" else "TTS CŨ"))))
+        sys_tag = "BTOOLS" if system == "btools" else ("CEM" if system == "cem" else ("SAPC" if system == "sapc" else ("CCOS" if system == "ccos" else ("GW" if system == "gw" else ("TTS MỚI" if system == "tts_new" else "TTS CŨ")))))
         print(f"[AUTH API] ✅ [BƯỚC 1] Đăng nhập {sys_tag} THÀNH CÔNG cho {user_display}! (Không cần OTP)", flush=True)
         try:
             state.log("SUCCESS", f"🔑 [XÁC THỰC {sys_tag}] {user_display} (IP: {client_ip}) đã đăng nhập thành công!")
@@ -259,6 +264,11 @@ async def login_tts_step2_otp(request: Request):
         elif system == "ccos":
             ACTIVE_LAN_SESSIONS[client_ip]["ccos_cookie"] = token
             ACTIVE_LAN_SESSIONS[client_ip]["ccos_timestamp"] = time.time()
+        elif system == "gw":
+            ACTIVE_LAN_SESSIONS[client_ip]["gw_cookie"] = token
+            ACTIVE_LAN_SESSIONS[client_ip]["gw_timestamp"] = time.time()
+            from gw_client import save_gw_cache
+            save_gw_cache(token, view_state=result.get("view_state", ""), verify=False)
         else:
             ACTIVE_LAN_SESSIONS[client_ip]["token"] = token
             ACTIVE_LAN_SESSIONS[client_ip]["user"] = user_info
@@ -273,7 +283,7 @@ async def login_tts_step2_otp(request: Request):
         _save_lan_sessions()
 
         user_display = user_info.get("HoTen") or user_info.get("TaiKhoan") or user_info.get("displayName") or "KTV"
-        sys_label = "BTools" if system == "btools" else ("CEM" if system == "cem" else ("TTS Mới" if system == "tts_new" else "TTS Cũ"))
+        sys_label = "BTools" if system == "btools" else ("CEM" if system == "cem" else ("CCOS" if system == "ccos" else ("GW" if system == "gw" else ("TTS Mới" if system == "tts_new" else "TTS Cũ"))))
         print(f"[AUTH API] 🔑 [BƯỚC 2] Xác thực OTP [{sys_label}] THÀNH CÔNG cho {user_display}! Đã lưu phiên.", flush=True)
         try:
             state.log("SUCCESS", f"🔑 [XÁC THỰC OTP {sys_label}] {user_display} (IP: {client_ip}) đã qua bước OTP thành công!")

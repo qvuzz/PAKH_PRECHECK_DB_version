@@ -3524,3 +3524,107 @@
         [data-theme="dark"] #userMgmtTableBody td {
             color: #e6edf3 !important;
         }
+
+        /* Hiệu ứng cảnh báo quá hạn toàn trình SLA */
+        /* 1. ĐÃ QUÁ HẠN TOÀN TRÌNH (Đỏ nhấp nháy khẩn cấp) */
+        @keyframes deadline-overdue-pulse {
+            0% {
+                background-color: rgba(239, 68, 68, 0.16);
+                color: #b91c1c;
+                box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.6);
+            }
+            50% {
+                background-color: rgba(239, 68, 68, 0.42);
+                color: #7f1d1d;
+                box-shadow: inset 0 0 0 1.5px rgba(220, 38, 38, 0.95);
+            }
+            100% {
+                background-color: rgba(239, 68, 68, 0.16);
+                color: #b91c1c;
+                box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.6);
+            }
+        }
+
+        .cell-deadline-overdue,
+        .cell-deadline-warning {
+            animation: deadline-overdue-pulse 1.8s infinite ease-in-out !important;
+            border-radius: 4px;
+            font-weight: 700 !important;
+            display: inline-block;
+            padding: 1px 5px;
+            cursor: help;
+        }
+
+        [data-theme="dark"] .cell-deadline-overdue,
+        [data-theme="dark"] .cell-deadline-warning {
+            animation: deadline-overdue-pulse-dark 1.8s infinite ease-in-out !important;
+        }
+
+        @keyframes deadline-overdue-pulse-dark {
+            0% {
+                background-color: rgba(239, 68, 68, 0.22);
+                color: #fca5a5;
+                box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.6);
+            }
+            50% {
+                background-color: rgba(239, 68, 68, 0.5);
+                color: #ffffff;
+                box-shadow: inset 0 0 0 1.5px rgba(248, 113, 113, 1);
+            }
+            100% {
+                background-color: rgba(239, 68, 68, 0.22);
+                color: #fca5a5;
+                box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.6);
+            }
+        }
+
+        /* 2. SẮP QUÁ HẠN TOÀN TRÌNH TRONG 2 NGÀY (Cam vàng ưu tiên 48h) */
+        @keyframes deadline-impending-pulse {
+            0% {
+                background-color: rgba(245, 158, 11, 0.16);
+                color: #b45309;
+                box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.6);
+            }
+            50% {
+                background-color: rgba(245, 158, 11, 0.38);
+                color: #78350f;
+                box-shadow: inset 0 0 0 1.5px rgba(217, 119, 6, 0.95);
+            }
+            100% {
+                background-color: rgba(245, 158, 11, 0.16);
+                color: #b45309;
+                box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.6);
+            }
+        }
+
+        .cell-deadline-impending {
+            animation: deadline-impending-pulse 2s infinite ease-in-out !important;
+            border-radius: 4px;
+            font-weight: 700 !important;
+            display: inline-block;
+            padding: 1px 5px;
+            cursor: help;
+        }
+
+        [data-theme="dark"] .cell-deadline-impending {
+            animation: deadline-impending-pulse-dark 2s infinite ease-in-out !important;
+        }
+
+        @keyframes deadline-impending-pulse-dark {
+            0% {
+                background-color: rgba(245, 158, 11, 0.22);
+                color: #fcd34d;
+                box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.6);
+            }
+            50% {
+                background-color: rgba(245, 158, 11, 0.48);
+                color: #ffffff;
+                box-shadow: inset 0 0 0 1.5px rgba(251, 191, 36, 1);
+            }
+            100% {
+                background-color: rgba(245, 158, 11, 0.22);
+                color: #fcd34d;
+                box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.6);
+            }
+        }
+

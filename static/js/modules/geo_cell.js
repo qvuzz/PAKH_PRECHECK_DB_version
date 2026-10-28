@@ -1,4 +1,4 @@
-// ==============================================================================
+﻿// ==============================================================================
 // MODULE ĐỊNH VỊ CELL BTS (PORT 1708) & QUẢN LÝ ĐỊA GIỚI HÀNH CHÍNH (GEO CELL)
 // File: static/js/modules/geo_cell.js
 // Nghiệp vụ: Tra cứu Cell BTS port 1708, Reverse Geocode 34 Tỉnh/TP mới,
@@ -29,10 +29,8 @@ function formatRadioCellHtml(radioVal, cellName) {
         c = parts.slice(1).join(',').trim();
     }
     if (c) {
-        const host1708 = (typeof window !== 'undefined' && window.location && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
-            ? window.location.hostname
-            : '10.155.59.158';
-        const cellUrl = `http://${host1708}:1708/cellid/${encodeURIComponent(c)}`;
+        const host1708 = '10.155.139.167';
+        const cellUrl = `/vitri/?cell=${encodeURIComponent(c)}`;
         return `${escapeHtml(r)}, <a href="${cellUrl}" target="_blank" style="color:#0284c7; font-weight:700; text-decoration:underline;" title="Xem vị trí Cell ${escapeHtml(c)} trên bản đồ (CustomerPosition)">${escapeHtml(c)}</a>`;
     }
     return escapeHtml(r);

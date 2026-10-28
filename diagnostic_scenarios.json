@@ -47,6 +47,14 @@
             "color": "E2EFDA",
             "technical_analysis": "Thiết bị truy cập qua RAT_TYPE mã 1, 6 ở nhiều phiên, dữ liệu data duy trì đều nhau một cách bất thường trong khoảng từ 5MB đến 11MB (khoảng 5,000,000 đến 11,500,000 Bytes).",
             "action_plan": "Liên hệ hỗ trợ, nhờ Khách hàng kiểm tra các app VPN/1.1.1.1 cài đặt trên máy và tắt đi giúp."
+        },
+        {
+            "id": "KC_08_RESTRICTED_AREA_3G_BARRED",
+            "name": "Thuê bao bị khóa sóng 3G / Vùng hạn chế (Sub State = RESTRICTED AREA)",
+            "conclusion": "BỊ KHÓA SÓNG 3G (RESTRICTED AREA)",
+            "color": "FCE4D6",
+            "technical_analysis": "Kiểm tra hệ thống Core HLR/HSS: Ghi nhận Sub State = RESTRICTED AREA. Thuê bao đang bị khóa sóng 3G / thuộc vùng hạn chế sóng nên không thể truy cập mạng Mobile Internet.",
+            "action_plan": "Chuyển IT/Khai thác mạng kiểm tra mở lại sóng 3G trên Core HLR/HSS cho thuê bao hoặc kích hoạt profile 4G LTE cho thuê bao."
         }
     ]
 }

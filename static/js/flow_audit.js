@@ -31,6 +31,10 @@ function selectFlowAuditModule(updateUrl = true) {
     document.querySelectorAll('.user-management-container, #userManagementContainer').forEach(el => el.style.display = 'none');
     if (typeof isUserManagementView !== 'undefined') isUserManagementView = false;
 
+    const itContainer = document.getElementById('integratedToolsContainer');
+    if (itContainer) itContainer.style.display = 'none';
+    if (typeof isIntegratedToolsView !== 'undefined') window.isIntegratedToolsView = false;
+
     // 3. Hiện container module kiểm tra luồng
     const container = document.getElementById('flowAuditContainer');
     if (container) {

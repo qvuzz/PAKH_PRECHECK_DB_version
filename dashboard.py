@@ -198,6 +198,20 @@ app.include_router(cdr.router)
 app.include_router(flow_audit.router)
 app.include_router(web.router)
 
+# ==============================================================================
+# TÍCH HỢP MODULE TRA CỨU VỊ TRÍ THUÊ BAO & BẢN ĐỒ BTS (CUSTOMER POSITION)
+# ==============================================================================
+try:
+    from routers import customer_position
+    app.include_router(customer_position.router)
+    app.include_router(customer_position.root_router)
+    cp_static_dir = BASE_DIR / "CustomerPosition" / "static"
+    if cp_static_dir.exists():
+        app.mount("/vitri/static", StaticFiles(directory=str(cp_static_dir)), name="vitri_static")
+    print("[CustomerPosition] Da tich hop module Vi tri truc tiep tai: /vitri/")
+except Exception as ex_cp:
+    print(f"⚠️ [CustomerPosition] Khong the tich hop module Vi tri: {ex_cp}")
+
 
 # ==============================================================================
 # HÀM KHỞI CHẠY MÁY CHỦ WEB

@@ -889,10 +889,11 @@ def check_core_profile_failure(sub_info):
     is_ip_captured = ipv4_val.startswith("113.") or ipv4_val.startswith("172.") or ipv4_val.startswith("192.168.")
     
     if len(hss_digits) >= 3 and is_ip_captured:
+        ip_desc = f", IP: {ipv4_val}" if ipv4_val else ""
         return (
             "PROFILE LẠ",
-            f"Phát hiện HSS Profile lạ ({hss_profile}), IP: {ipv4_val}.",
-            "Chuyển IT kiểm tra khai báo lại HSS Profile cho khách hàng.",
+            f"Phát hiện Profile không đúng ({hss_profile}{ip_desc}).",
+            "VNP kiểm tra và khai báo lại đúng Profile cho khách hàng.",
             "FFC7CE"
         )
 
@@ -1269,14 +1270,6 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 plan = f"{plan} {island_msg}" if plan else island_msg
         return plan + action_suffix
 
-    # 🎯 KỊCH BẢN ĐẶC THÙ: BTOOLS BỊ LỖI HOẶC CHƯA ĐĂNG NHẬP (KHÔNG ĐƯỢC TỰ ĐỘNG ĐÓNG PHIẾU)
-    if clean_data is None:
-        return (
-            "LỖI KẾT NỐI BTOOLS",
-            "Không thể tra cứu dữ liệu lưu lượng BTools (chưa đăng nhập BTools hoặc máy chủ 10.159.21.241 bị lỗi/hết phiên). Cần kiểm tra lại phiên BTools trên trình duyệt Chrome.",
-            "Vui lòng mở tab BTools trên Chrome để đăng nhập hoặc kiểm tra kết nối mạng nội bộ, sau đó bấm '⚡ Tiền kiểm' để kiểm tra lại.",
-            "F8D7DA"
-        )
     sub_info = {}
     if phone_84:
         out_json_file = os.path.join(HSS_PROFILE_DIR, f"{phone_84}.json")
@@ -1303,6 +1296,27 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             "Khách hàng đã off thiết bị nhiều ngày nên không kiểm tra được.",
             "Thông báo khách hàng mở lại thiết bị để sử dụng dịch vụ. Nếu cần hỗ trợ thêm vui lòng liên hệ tổng đài.",
             "FFF2CC"
+        )
+
+    # 🎯 KỊCH BẢN RESTRICTED AREA: Thuê bao bị khóa sóng 3G / Vùng hạn chế
+    if "RESTRICTED" in sub_state:
+        return (
+            "BỊ KHÓA SÓNG 3G (RESTRICTED AREA)",
+            "Kiểm tra hệ thống Core HLR/HSS: Ghi nhận Sub State = RESTRICTED AREA. Thuê bao đang bị khóa sóng 3G / thuộc vùng hạn chế sóng nên không thể truy cập mạng Mobile Internet.",
+            "Chuyển IT/Khai thác mạng kiểm tra mở lại sóng 3G trên Core HLR/HSS cho thuê bao hoặc kích hoạt profile 4G LTE cho thuê bao.",
+            "FCE4D6"
+        )
+
+    # 🎯 KỊCH BẢN ĐẶC THÙ: BTOOLS BỊ LỖI HOẶC CHƯA ĐĂNG NHẬP (KHÔNG ĐƯỢC TỰ ĐỘNG ĐÓNG PHIẾU)
+    if clean_data is None:
+        core_err = check_core_profile_failure(sub_info)
+        if core_err:
+            return core_err
+        return (
+            "LỖI KẾT NỐI BTOOLS",
+            "Không thể tra cứu dữ liệu lưu lượng BTools (chưa đăng nhập BTools hoặc máy chủ 10.159.21.241 bị lỗi/hết phiên). Cần kiểm tra lại phiên BTools trên trình duyệt Chrome.",
+            "Vui lòng mở tab BTools trên Chrome để đăng nhập hoặc kiểm tra kết nối mạng nội bộ, sau đó bấm '⚡ Tiền kiểm' để kiểm tra lại.",
+            "F8D7DA"
         )
 
     # 🔍 BTOOLS GROUND TRUTH: Trích xuất sớm các phiên Downlink và mốc thời gian tiếp nhận
@@ -2938,34 +2952,65 @@ def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, 
         ws.sheet_properties.pageSetUpProperties.fitToPage = True
     except Exception:
         pass
-    
-    # Title Banner - Gộp vùng ô từ A1 đến L1 (12 cột)
-    ws.merge_cells("A1:L1")
+
+    def clean_excel_val(val):
+        if val is None:
+            return ""
+        s = str(val)
+        return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', s)
+
+    NAMED_HEX_COLORS = {
+        'GREEN': 'D4EDDA',
+        'RED': 'F8D7DA',
+        'ORANGE': 'FFF2CC',
+        'YELLOW': 'FFF2CC',
+        'BLUE': 'CCE5FF',
+        'GRAY': 'F2F2F2'
+    }
+
+    def get_safe_hex_color(c_val):
+        if not c_val:
+            return "FFFFFF"
+        c_str = str(c_val).replace("#", "").strip().upper()
+        if c_str in NAMED_HEX_COLORS:
+            return NAMED_HEX_COLORS[c_str]
+        if len(c_str) in (6, 8) and all(ch in "0123456789ABCDEF" for ch in c_str):
+            return c_str
+        return "FFFFFF"
+
+    # Title Banner - Gộp vùng ô từ A1 đến P1 (16 cột chuẩn hóa)
+    ws.merge_cells("A1:P1")
     title_cell = ws["A1"]
-    title_cell.value = "BÁO CÁO PHÂN TÍCH VÀ ĐỀ XUẤT HƯỚNG XỬ LÝ SỰ CỐ THUÊ BAO"
+    title_cell.value = "BÁO CÁO PHÂN TÍCH VÀ ĐỀ XUẤT HƯỚNG XỬ LÝ SỰ CỐ THUÊ BAO (TTS ONEOSS)"
     title_cell.font = Font(name="Segoe UI", size=14, bold=True, color="FFFFFF")
     title_cell.fill = PatternFill(start_color="1F497D", fill_type="solid")
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 42
 
     # Subtitle Copyright Banner
-    ws.merge_cells("A2:L2")
+    ws.merge_cells("A2:P2")
     sub_cell = ws["A2"]
     sub_cell.value = "VNPT TTS PRECHECK • Copyright by quangvu@vnpt.vn (Sep.2026)"
     sub_cell.font = Font(name="Segoe UI", size=9.5, italic=True, color="595959")
     sub_cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[2].height = 18
     
-    # 🎯 DANH SÁCH TIÊU ĐỀ CHUẨN (12 CỘT): Đưa "NHẬN ĐỊNH TÌNH TRẠNG" lên Cột 1 và bổ sung NGÀY TIẾP NHẬN + APP USAGE + TRẠNG THÁI PHIẾU
+    # 🎯 DANH SÁCH TIÊU ĐỀ CHUẨN 16 CỘT TOÀN DIỆN
     headers = [
-        "NHẬN ĐỊNH TÌNH TRẠNG", "SỐ ĐIỆN THOẠI (LINK BTOOLS)", "DỊCH VỤ BÁO LỖI", 
-        "NGÀY TIẾP NHẬN", "GÓI CƯỚC THỰC TẾ (SAPC & BTOOLS)", "HẠ TẦNG KẾT NỐI", 
-        "DỮ LIỆU CEM (TOP 3 CELL)", "ỨNG DỤNG SỬ DỤNG (APP USAGE)", 
-        "NỘI DUNG PHẢN ÁNH (TÓM TẮT AI)", "NỘI DUNG PHÂN TÍCH KỸ THUẬT", 
-        "NỘI DUNG PHẢN HỒI", "TRẠNG THÁI PHIẾU"
+        "STT", "MÃ PHIẾU ONEOSS", "NHẬN ĐỊNH TÌNH TRẠNG", "SỐ ĐIỆN THOẠI", 
+        "ĐỊA BÀN (XÃ / TỈNH)", "DỊCH VỤ BÁO LỖI", "THỜI ĐIỂM TIẾP NHẬN", 
+        "THỜI ĐIỂM SỰ CỐ", "HỒ SƠ GÓI CƯỚC / THUÊ BAO", "HẠ TẦNG KẾT NỐI", 
+        "DỮ LIỆU ĐỐI SOÁT (CEM / CDR)", "ỨNG DỤNG SỬ DỤNG (APP USAGE)", 
+        "TÓM TẮT NỘI DUNG (AI)", "Ý KIẾN PHÂN TÍCH KỸ THUẬT", 
+        "NỘI DUNG PHẢN HỒI", "NGUYÊN NHÂN ĐỀ XUẤT / TRẠNG THÁI"
     ]
     header_fill = PatternFill(start_color="2F5597", fill_type="solid")
-    thin_border = Border(left=Side(style='thin', color='D9D9D9'), right=Side(style='thin', color='D9D9D9'), top=Side(style='thin', color='D9D9D9'), bottom=Side(style='thin', color='D9D9D9'))
+    thin_border = Border(
+        left=Side(style='thin', color='D9D9D9'), 
+        right=Side(style='thin', color='D9D9D9'), 
+        top=Side(style='thin', color='D9D9D9'), 
+        bottom=Side(style='thin', color='D9D9D9')
+    )
     
     ws.row_dimensions[3].height = 38
     for col_idx, h in enumerate(headers, 1):
@@ -2977,117 +3022,181 @@ def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, 
         
     current_row = 4
     for idx, rec in enumerate(summary_records, 1):
-        ws.row_dimensions[current_row].height = 140
+        ws.row_dimensions[current_row].height = 120
         
-        # 🎯 CỘT 1 (A): NHẬN ĐỊNH TÌNH TRẠNG
-        s_cell = ws.cell(row=current_row, column=1, value=rec["status"])
+        # 🎯 CỘT 1 (A): STT
+        c1 = ws.cell(row=current_row, column=1, value=idx)
+        c1.alignment = Alignment(horizontal="center", vertical="center")
+        c1.font = Font(name="Segoe UI", size=11, bold=True, color="333333")
+
+        # 🎯 CỘT 2 (B): MÃ PHIẾU ONEOSS
+        raw_code = str(rec.get("ticket_code") or "").split("\n")[0].strip()
+        if raw_code.endswith(".0") and raw_code[:-2].isdigit():
+            raw_code = raw_code[:-2]
+        c2 = ws.cell(row=current_row, column=2, value=clean_excel_val(raw_code or "--"))
+        c2.alignment = Alignment(horizontal="center", vertical="center")
+        c2.font = Font(name="Consolas", size=10.5, bold=True, color="0F172A")
+
+        # 🎯 CỘT 3 (C): NHẬN ĐỊNH TÌNH TRẠNG
+        st_val = clean_excel_val(rec.get("status") or "CHƯA PHÂN LOẠI")
+        s_cell = ws.cell(row=current_row, column=3, value=st_val)
         s_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        if rec["status"] == "PROFILE LẠ" or "PROFILE LẠ" in str(rec.get("status", "")) or rec.get("color") in ["FFC7CE", "F8D7DA"]:
+        safe_c = get_safe_hex_color(rec.get("color"))
+        if "PROFILE LẠ" in st_val or safe_c in ["FFC7CE", "F8D7DA"]:
             s_cell.font = Font(name="Segoe UI", size=11, bold=True, color="9C0006")
             s_cell.fill = PatternFill(start_color="FFC7CE", fill_type="solid")
         else:
-            raw_c = str(rec.get("color") or "FFFFFF").replace("#", "").strip().upper()
-            safe_c = raw_c if len(raw_c) in (6, 8) else "FFFFFF"
             s_cell.font = Font(name="Segoe UI", size=11, bold=True, color="333333")
             s_cell.fill = PatternFill(start_color=safe_c, fill_type="solid")
         
-        # 🎯 CỘT 2 (B): SỐ ĐIỆN THOẠI + HYPERLINK BTOOLS
-        phone_num = rec["phone"]
-        btools_url = f"http://10.159.21.241:9267/B_tools_v2/data_view.jsp?name={phone_num}&start_d={start_d}&end_d={end_d}&submit=T%C3%ACm+Ki%E1%BA%BFm"
-        p_cell = ws.cell(row=current_row, column=2, value=phone_num)
-        p_cell.hyperlink = btools_url
-        p_cell.font = Font(name="Segoe UI", size=11, bold=True, color="0563C1", underline="single")
+        # 🎯 CỘT 4 (D): SỐ ĐIỆN THOẠI + HYPERLINK BTOOLS (cho Data)
+        phone_num = clean_excel_val(rec.get("phone") or "")
+        p_cell = ws.cell(row=current_row, column=4, value=phone_num)
         p_cell.alignment = Alignment(horizontal="center", vertical="center")
+        if phone_num:
+            btools_url = f"http://10.159.21.241:9267/B_tools_v2/data_view.jsp?name={phone_num}&start_d={start_d}&end_d={end_d}&submit=T%C3%ACm+Ki%E1%BA%BFm"
+            p_cell.hyperlink = btools_url
+            p_cell.font = Font(name="Consolas", size=11, bold=True, color="0563C1", underline="single")
+        else:
+            p_cell.font = Font(name="Consolas", size=11, bold=True, color="333333")
+
+        # 🎯 CỘT 5 (E): ĐỊA BÀN (XÃ / PHƯỜNG, TỈNH / TP)
+        ward_info = str(rec.get("ward") or "").strip()
+        prov_info = str(rec.get("province_name") or "").strip()
+        loc_str = "--"
+        if ward_info and prov_info:
+            loc_str = f"{ward_info}, {prov_info}"
+        elif ward_info:
+            loc_str = ward_info
+        elif prov_info:
+            loc_str = prov_info
+        c5 = ws.cell(row=current_row, column=5, value=clean_excel_val(loc_str))
+        c5.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        c5.font = Font(name="Segoe UI", size=10.5, color="334155")
         
-        # 🎯 CỘT 3 (C): DỊCH VỤ BÁO LỖI
-        ws.cell(row=current_row, column=3, value=rec["package_title"]).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        # 🎯 CỘT 6 (F): DỊCH VỤ BÁO LỖI (PAKH)
+        pkg_title = clean_excel_val(rec.get("package_title") or "--")
+        c6 = ws.cell(row=current_row, column=6, value=pkg_title)
+        c6.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        c6.font = Font(name="Segoe UI", size=10.5)
 
-        # 🎯 CỘT 4 (D): THỜI ĐIỂM XẢY RA SỰ CỐ
-        inc_time = rec.get("incident_time") or extract_incident_time(rec.get("ticket_content", ""), rec.get("created_time", ""))
-        ws.cell(row=current_row, column=4, value=inc_time).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        # 🎯 CỘT 7 (G): THỜI ĐIỂM TIẾP NHẬN
+        created_time = clean_excel_val(rec.get("created_time") or rec.get("incident_time") or "--")
+        c7 = ws.cell(row=current_row, column=7, value=created_time)
+        c7.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c7.font = Font(name="Segoe UI", size=10.5)
 
-        # 🎯 CỘT 5 (E): GÓI CƯỚC THỰC TẾ (SAPC & BTOOLS)
-        p_val = rec["real_packages"]
-        p_cell5 = ws.cell(row=current_row, column=5, value=p_val)
-        p_cell5.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        if "PROFILE LẠ" in str(p_val):
-            p_cell5.font = Font(name="Segoe UI", size=10.5, color="C00000", bold=True)
+        # 🎯 CỘT 8 (H): THỜI ĐIỂM SỰ CỐ
+        inc_time = clean_excel_val(rec.get("sms_incident_time") or rec.get("incident_time") or extract_incident_time(rec.get("ticket_content", ""), rec.get("created_time", "")))
+        c8 = ws.cell(row=current_row, column=8, value=inc_time)
+        c8.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c8.font = Font(name="Segoe UI", size=10.5, bold=True, color="B45309")
 
-        # 🎯 CỘT 6 (F): HẠ TẦNG KẾT NỐI
-        ws.cell(row=current_row, column=6, value=rec["rat_types"]).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        # 🎯 CỘT 9 (I): HỒ SƠ GÓI CƯỚC / THUÊ BAO (SAPC & BTOOLS)
+        p_val = clean_excel_val(rec.get("real_packages") or "--")
+        p_cell9 = ws.cell(row=current_row, column=9, value=p_val)
+        p_cell9.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        if "PROFILE LẠ" in p_val:
+            p_cell9.font = Font(name="Segoe UI", size=10, color="C00000", bold=True)
+        else:
+            p_cell9.font = Font(name="Segoe UI", size=10)
+
+        # 🎯 CỘT 10 (J): HẠ TẦNG KẾT NỐI
+        c10 = ws.cell(row=current_row, column=10, value=clean_excel_val(rec.get("rat_types") or "--"))
+        c10.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c10.font = Font(name="Segoe UI", size=10.5)
         
-        # 🎯 CỘT 7 (G): DỮ LIỆU CEM (TOP 3 CELL BẮT SÓNG TRONG 5 NGÀY)
-        cem_text = rec.get("cem_data", "Không có dữ liệu CEM")
-        cem_cell = ws.cell(row=current_row, column=7, value=cem_text)
-        cem_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        if "CẢNH BÁO VPN" in cem_text or "VPN:" in cem_text:
-            cem_cell.font = Font(name="Segoe UI", size=10.5, color="C00000", bold=True)
+        # 🎯 CỘT 11 (K): DỮ LIỆU ĐỐI SOÁT (CEM / CDR SMS)
+        cem_text = str(rec.get("cem_data") or "").strip()
+        sms_cdr = str(rec.get("sms_cdr_summary") or "").strip()
+        data_diag = cem_text or sms_cdr or "Không có dữ liệu đối soát"
+        diag_cell = ws.cell(row=current_row, column=11, value=clean_excel_val(data_diag))
+        diag_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        if "CẢNH BÁO VPN" in data_diag or "VPN:" in data_diag:
+            diag_cell.font = Font(name="Segoe UI", size=10, color="C00000", bold=True)
+        else:
+            diag_cell.font = Font(name="Segoe UI", size=10)
 
-        # 🎯 CỘT 8 (H): ỨNG DỤNG SỬ DỤNG (APP USAGE TỪ CEM)
-        app_text = rec.get("app_usage", "Không có dữ liệu App Usage")
-        ws.cell(row=current_row, column=8, value=app_text).alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        # 🎯 CỘT 12 (L): ỨNG DỤNG SỬ DỤNG (APP USAGE TỪ CEM)
+        app_text = clean_excel_val(rec.get("app_usage") or "Không có dữ liệu App Usage")
+        c12 = ws.cell(row=current_row, column=12, value=app_text)
+        c12.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        c12.font = Font(name="Segoe UI", size=10)
 
-        # 🎯 CỘT 9 (I): Ô NỘI DUNG PHẢN ÁNH (TÓM TẮT AI)
-        ai_text = rec.get("ai_summary", "null")
-        ai_cell = ws.cell(row=current_row, column=9, value=ai_text)
+        # 🎯 CỘT 13 (M): TÓM TẮT NỘI DUNG (AI) / PHẢN ÁNH GỐC
+        ai_text = clean_excel_val(rec.get("ai_summary") or rec.get("ticket_content") or "--")
+        ai_cell = ws.cell(row=current_row, column=13, value=ai_text)
         ai_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        ai_cell.font = Font(name="Segoe UI", size=10.5, italic=True, color="404040") 
+        ai_cell.font = Font(name="Segoe UI", size=10, italic=True, color="334155")
         
-        # 🎯 CỘT 10 (J): NỘI DUNG PHÂN TÍCH KỸ THUẬT
-        comment_text = str(rec.get("comment") or "").strip()
-        c_cell = ws.cell(row=current_row, column=10, value=comment_text)
+        # 🎯 CỘT 14 (N): Ý KIẾN PHÂN TÍCH KỸ THUẬT
+        comment_text = clean_excel_val(rec.get("comment") or "")
+        c_cell = ws.cell(row=current_row, column=14, value=comment_text)
         c_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        if "Phiếu mở lại" in comment_text:
-            c_cell.font = Font(name="Segoe UI", size=11, bold=True, color="C00000")
-        elif "Lưu ý: 2 ngày gần nhất không thấy phát sinh data" in comment_text:
-            c_cell.font = Font(name="Segoe UI", size=11, bold=True, color="C00000")
+        if "Phiếu mở lại" in comment_text or "Lưu ý:" in comment_text:
+            c_cell.font = Font(name="Segoe UI", size=10.5, bold=True, color="C00000")
+        else:
+            c_cell.font = Font(name="Segoe UI", size=10.5)
             
-        # 🎯 CỘT 11 (K): HƯỚNG XỬ LÝ KHUYÊN DÙNG
-        action_text = str(rec.get("action_plan") or "").strip()
-        a_cell = ws.cell(row=current_row, column=11, value=action_text)
+        # 🎯 CỘT 15 (O): NỘI DUNG PHẢN HỒI
+        action_text = clean_excel_val(rec.get("action_plan") or "")
+        a_cell = ws.cell(row=current_row, column=15, value=action_text)
         a_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-        if "Cần kiểm tra tình trạng thuê bao và gói cước" in action_text:
-            a_cell.font = Font(name="Segoe UI", size=11, bold=True, color="C00000")
+        if "Cần kiểm tra" in action_text or "kiểm tra lại" in action_text:
+            a_cell.font = Font(name="Segoe UI", size=10.5, bold=True, color="C00000")
+        else:
+            a_cell.font = Font(name="Segoe UI", size=10.5)
 
-        # 🎯 CỘT 12 (L): TRẠNG THÁI PHIẾU (ĐÃ ĐÓNG / CHƯA ĐÓNG) & NGƯỜI ĐÓNG
+        # 🎯 CỘT 16 (P): NGUYÊN NHÂN ĐỀ XUẤT & TRẠNG THÁI PHIẾU
+        cause_val = str(rec.get("incident_cause") or "").strip()
         ticket_st = str(rec.get("ticket_status") or ("Đã đóng" if rec.get("is_closed") else "Chưa đóng")).strip()
         closed_by = str(rec.get("closed_by") or "").strip()
-        display_st = f"{ticket_st}\n({closed_by})" if (closed_by and "đã đóng" in ticket_st.lower()) else ticket_st
-        st_cell = ws.cell(row=current_row, column=12, value=display_st)
-        st_cell.alignment = Alignment(horizontal="center", vertical="center")
+        status_disp = f"[{ticket_st}]"
+        if closed_by and "đã đóng" in ticket_st.lower():
+            status_disp += f" ({closed_by})"
+        if cause_val:
+            final_p = f"{status_disp}\nNguyên nhân: {cause_val}"
+        else:
+            final_p = status_disp
+
+        st_cell = ws.cell(row=current_row, column=16, value=clean_excel_val(final_p))
+        st_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         if "đã đóng" in ticket_st.lower():
-            st_cell.font = Font(name="Segoe UI", size=11, bold=True, color="006100")
+            st_cell.font = Font(name="Segoe UI", size=10.5, bold=True, color="006100")
             st_cell.fill = PatternFill(start_color="C6EFCE", fill_type="solid")
         else:
-            st_cell.font = Font(name="Segoe UI", size=11, bold=True, color="9C6500")
+            st_cell.font = Font(name="Segoe UI", size=10.5, bold=True, color="9C6500")
             st_cell.fill = PatternFill(start_color="FFEB9C", fill_type="solid")
         
-        # Vẽ border toàn bộ ô trên hàng (12 cột) và set font size 11
-        for c in range(1, 13):
-            ws.cell(row=current_row, column=c).border = thin_border
-            if c not in [1, 2, 5, 7, 9, 10, 11, 12]: # Chừa các ô có định dạng font đặc biệt
-                ws.cell(row=current_row, column=c).font = Font(name="Segoe UI", size=11)
-            elif c == 5 and "PROFILE LẠ" not in str(p_val):
-                ws.cell(row=current_row, column=c).font = Font(name="Segoe UI", size=11)
-            elif c == 7 and "CẢNH BÁO VPN" not in str(cem_text) and "VPN:" not in str(cem_text):
-                ws.cell(row=current_row, column=c).font = Font(name="Segoe UI", size=11)
-            elif c in [10, 11] and ws.cell(row=current_row, column=c).font.color.rgb not in ["C00000", "00C00000"]:
-                ws.cell(row=current_row, column=c).font = Font(name="Segoe UI", size=11)
+        # Áp dụng Border toàn bộ các ô trên hàng (16 cột)
+        for c in range(1, 17):
+            cur_c = ws.cell(row=current_row, column=c)
+            cur_c.border = thin_border
+            # Bảo đảm xử lý font color an toàn tuyệt đối, không gọi .rgb nếu font.color là None
+            if c in [14, 15]:
+                f_color = getattr(cur_c.font, 'color', None)
+                f_rgb = getattr(f_color, 'rgb', None) if f_color else None
+                if f_rgb not in ["C00000", "00C00000"]:
+                    cur_c.font = Font(name="Segoe UI", size=10.5)
         current_row += 1
         
-    # Thiết lập độ rộng cột tối ưu vừa vặn hiển thị trọn vẹn trên màn hình (12 Cột)
-    ws.column_dimensions["A"].width = 24  # Cột nhãn Trạng thái
-    ws.column_dimensions["B"].width = 16  # Số điện thoại
-    ws.column_dimensions["C"].width = 20  # Dịch vụ báo lỗi
-    ws.column_dimensions["D"].width = 20  # Thời điểm sự cố
-    ws.column_dimensions["E"].width = 36  # Gói cước thực tế SAPC & BTools
-    ws.column_dimensions["F"].width = 15  # Hạ tầng kết nối
-    ws.column_dimensions["G"].width = 32  # Dữ liệu CEM (Top 3 Cell)
-    ws.column_dimensions["H"].width = 26  # Ứng dụng sử dụng (App Usage)
-    ws.column_dimensions["I"].width = 42  # Tóm tắt AI
-    ws.column_dimensions["J"].width = 48  # Phân tích kỹ thuật
-    ws.column_dimensions["K"].width = 40  # Hướng xử lý
-    ws.column_dimensions["L"].width = 16  # Trạng thái phiếu (Đã đóng / Chưa đóng)
+    # Thiết lập độ rộng cột tối ưu vừa vặn hiển thị trọn vẹn (16 Cột)
+    ws.column_dimensions["A"].width = 6   # STT
+    ws.column_dimensions["B"].width = 18  # Mã Phiếu
+    ws.column_dimensions["C"].width = 22  # Nhận định tình trạng
+    ws.column_dimensions["D"].width = 16  # Số điện thoại
+    ws.column_dimensions["E"].width = 24  # Địa bàn
+    ws.column_dimensions["F"].width = 20  # Dịch vụ báo lỗi
+    ws.column_dimensions["G"].width = 18  # Tiếp nhận
+    ws.column_dimensions["H"].width = 18  # Sự cố
+    ws.column_dimensions["I"].width = 34  # Gói cước thực tế SAPC & BTools
+    ws.column_dimensions["J"].width = 15  # Hạ tầng kết nối
+    ws.column_dimensions["K"].width = 30  # Dữ liệu đối soát CEM / CDR
+    ws.column_dimensions["L"].width = 24  # App usage
+    ws.column_dimensions["M"].width = 40  # Tóm tắt AI
+    ws.column_dimensions["N"].width = 44  # Phân tích kỹ thuật
+    ws.column_dimensions["O"].width = 38  # Hướng xử lý
+    ws.column_dimensions["P"].width = 24  # Nguyên nhân & Trạng thái phiếu
 
     out_dir = os.path.dirname(output_filename)
     if out_dir:
@@ -3095,7 +3204,7 @@ def export_diagnostics_to_excel(summary_records, output_filename, start_d=None, 
 
     try:
         wb.save(output_filename)
-        print(f"📊 [XLSX] Đã xuất báo cáo chẩn đoán cấu trúc mới: {output_filename}")
+        print(f"📊 [XLSX] Đã xuất báo cáo chẩn đoán 16 cột chuẩn hóa: {output_filename}")
         return output_filename
     except PermissionError:
         backup_name = output_filename.replace(".xlsx", f"_{datetime.now().strftime('%H%M%S')}.xlsx")

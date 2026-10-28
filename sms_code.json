@@ -1,0 +1,374 @@
+{
+    "metadata": {
+        "file_name": "sms_code.json",
+        "version": "3.0.0",
+        "standard_references": [
+            "3GPP TS 23.040 (Technical realization of Short Message Service)",
+            "3GPP TS 29.002 (Mobile Application Part - MAP specification)",
+            "3GPP TS 24.011 (Point-to-Point Short Message Service support on mobile radio interface)",
+            "SMPP v3.4 / v5.0 (Short Message Peer-to-Peer Protocol Specification)",
+            "VNPT SMSC CDR Format Specification (Mavenir/Acision/Huawei/Comverse)"
+        ],
+        "last_updated": "2026-10-16"
+    },
+    "cdr_Deduplication_and_precheck_rules": {
+        "description": "Quy tắc xử lý logic cho engine tiền kiểm tự động trước khi đếm số lượng tin lỗi",
+        "concatenated_sms_handling": {
+            "rule_name": "Ignore_Intermediate_199C_On_Success",
+            "condition": "Nếu tồn tại bản ghi có MESSAGE_STATUS in ['1', '5', '12'] và CAUSE_FOR_TERMINATION in ['103C', '199C'], NHƯNG có một bản ghi khác cùng CALLING_NUMBER, cùng CALLED_NUMBER, và cùng MESSAGE_SUBMISSION_TIME (hoặc lệch <= 5 giây) có MESSAGE_STATUS == '2' và CAUSE_FOR_TERMINATION == '100C'.",
+            "action": "Đánh dấu bản ghi 12/199C hoặc 5/103C là 'INTERMEDIATE_RETRY_LOG' (Bản ghi trung gian khi ghép mảnh tin dài hoặc retry thành công), KHÔNG tính vào tổng số tin nhắn thất bại của thuê bao."
+        },
+        "mo_shortcode_rejection_handling": {
+            "rule_name": "MO_Syntax_Or_Service_Rejection",
+            "condition": "Chiều MO (CALLING_NUMBER là số thuê bao), CALLED_NUMBER là đầu số ngắn (3-4 số như 5656, 888, 1576...), MESSAGE_STATUS == '1', CAUSE_FOR_TERMINATION == '199C', nhưng ngay lập tức có bản tin MT từ chính đầu số đó trả về thành công (2/100C).",
+            "action": "Kết luận thuê bao gửi tin nhắn lên tổng đài thành công nhưng cú pháp sai hoặc dịch vụ từ chối tại cổng VAS/SMPP, tổng đài đã trả tin nhắn hướng dẫn lại cho khách hàng."
+        }
+    },
+    "smsc_message_status": {
+        "description": "Ánh xạ cột MESSAGE STATUS trên bảng SMSC CDR",
+        "codes": {
+            "0": {
+                "name": "ENROUTE / IN_QUEUE",
+                "state": "PENDING",
+                "is_final": false,
+                "meaning_vi": "Đang trong hàng đợi xử lý",
+                "technical_detail": "Bản tin vừa được tiếp nhận vào bộ nhớ đệm (Store & Forward) của SMSC và đang chờ định tuyến."
+            },
+            "1": {
+                "name": "DELIVERY_FAILED / PERMANENT_ERROR",
+                "state": "FAILED",
+                "is_final": true,
+                "meaning_vi": "Giao tin thất bại (hoặc bị từ chối ở lần đẩy đầu)",
+                "technical_detail": "Bản tin không thể giao tới đích. Lưu ý: Trong cấu hình một số tổng đài SMSC tại VNPT, mã 1 cũng xuất hiện ở giây đầu tiên khi đẩy bản tin ghép (multipart) trước khi retry thành công ở các giây tiếp theo.",
+                "precheck_action": "Kiểm tra xem có bản ghi 2/100C nào cùng MESSAGE_SUBMISSION_TIME không. Nếu không có, đây là lỗi thật."
+            },
+            "2": {
+                "name": "DELIVERED",
+                "state": "SUCCESS",
+                "is_final": true,
+                "meaning_vi": "Giao tin thành công hoàn tất",
+                "technical_detail": "SMSC đã nhận được bản tin RP-ACK từ thiết bị đầu cuối (chiều MT) hoặc từ tổng đài/Cổng đối tác (chiều MO).",
+                "precheck_action": "Khẳng định mạng lưới đã định tuyến và giao bản tin thành công 100% tới thiết bị/đối tác."
+            },
+            "3": {
+                "name": "EXPIRED",
+                "state": "FAILED",
+                "is_final": true,
+                "meaning_vi": "Bản tin hết hạn hiệu lực (Validity Period Expired)",
+                "technical_detail": "Thuê bao tắt máy hoặc ngoài vùng phủ sóng liên tục vượt quá thời gian lưu trữ tối đa của bản tin trên SMSC (thường từ 24h - 72h, hoặc 5-15 phút đối với tin OTP).",
+                "precheck_action": "Giải thích khách hàng tắt máy/mất sóng tại thời điểm đối tác gửi tin cho đến khi bản tin hết hạn."
+            },
+            "4": {
+                "name": "DELETED",
+                "state": "CANCELLED",
+                "is_final": true,
+                "meaning_vi": "Bản tin bị hủy/xóa bởi quản trị viên hoặc hệ thống",
+                "technical_detail": "Bản tin bị xóa khỏi hàng đợi retry do lệnh Cancel_SM từ đối tác hoặc bị chặn bởi hệ thống Anti-Spam Firewall."
+            },
+            "5": {
+                "name": "UNDELIVERABLE_TEMPORARY / DEFERRED",
+                "state": "RETRYING",
+                "is_final": false,
+                "meaning_vi": "Tạm hoãn giao tin (Thuê bao bận, tắt máy hoặc mất sóng tạm thời)",
+                "technical_detail": "SMSC đã thực hiện truy vấn SRI-for-SM hoặc MT-ForwardSM nhưng MSC/VLR báo thuê bao đang bận hoặc không phản hồi Paging. SMSC đưa vào chế độ chờ (Wait for SM-Delivery-Report / AlertSC).",
+                "precheck_action": "Kiểm tra các dòng log kế tiếp có NUMBER_OF_ATTEMPTS = 002, 003... xem bản tin đã được giao bù thành công chưa."
+            },
+            "6": {
+                "name": "ACCEPTED",
+                "state": "SUCCESS_INTERMEDIATE",
+                "is_final": false,
+                "meaning_vi": "Đã chấp nhận bởi cổng giao tiếp",
+                "technical_detail": "Bản tin đã qua bước kiểm tra profile nhưng chưa có xác nhận cuối cùng từ thiết bị."
+            },
+            "7": {
+                "name": "UNKNOWN / INVALID",
+                "state": "FAILED",
+                "is_final": true,
+                "meaning_vi": "Trạng thái không xác định / Định dạng bản tin lỗi",
+                "technical_detail": "Cấu trúc PDU của bản tin bị hỏng hoặc không tương thích giao thức."
+            },
+            "8": {
+                "name": "REJECTED",
+                "state": "FAILED",
+                "is_final": true,
+                "meaning_vi": "Bị từ chối ngay lập tức",
+                "technical_detail": "Bị chặn bởi chính sách cước (IN/OCS báo hết tiền), chặn dịch vụ trên HLR/HSS (Barring), hoặc chặn bởi SMS Firewall."
+            },
+            "12": {
+                "name": "INTERMEDIATE_CONCAT_WAIT / FIRST_ATTEMPT_INCOMPLETE",
+                "state": "INTERMEDIATE",
+                "is_final": false,
+                "meaning_vi": "Bản ghi trung gian chờ ghép mảnh tin dài / Lỗi tạm thời giây đầu",
+                "technical_detail": "Đặc trưng trên hệ thống SMSC VNPT khi xử lý tin nhắn dài (MESSAGE LENGTH > 140 bytes / 160 ký tự GSM-7 hoặc > 70 ký tự Unicode). Khi đẩy mảnh đầu tiên (segment 1) lúc thiết bị đang mở kênh báo hiệu, tổng đài ghi nhận trạng thái 12 (199C), sau đó 1-5 giây khi toàn bộ các mảnh (2-8 tin) được đẩy xong sẽ xuất bản ghi chốt trạng thái 2 (100C).",
+                "precheck_action": "Bỏ qua cảnh báo lỗi nếu đi kèm bản ghi trạng thái 2 (100C) ngay sau đó."
+            }
+        }
+    },
+    "smsc_cause_for_termination": {
+        "description": "Ánh xạ cột CAUSE FOR TERMINATION và TERMINATION CAUSE INFORMATION trên SMSC CDR",
+        "codes": {
+            "100C": {
+                "standard_name": "Message Delivery Successful",
+                "category": "SUCCESS",
+                "severity": "NONE",
+                "meaning_vi": "Giao tin nhắn thành công",
+                "root_cause": "Luồng báo hiệu (SRI-for-SM -> MT-ForwardSM -> RP-ACK) hoàn tất bình thường.",
+                "ktv_suggestion": "Dịch vụ thông suốt. Nếu KH báo không thấy tin trên máy (đặc biệt khi bản ghi đã báo 100C/2), nguyên nhân 100% do thiết bị đầu cuối: Tin nhắn bị đẩy vào mục Thư rác/Tin nhắn bị chặn (Spam & Blocked), chế độ Không làm phiền, hoặc bộ nhớ ứng dụng Tin nhắn bị treo."
+            },
+            "101C": {
+                "standard_name": "Unknown Subscriber / Unallocated Number",
+                "category": "SUBSCRIBER_ERROR",
+                "severity": "HIGH",
+                "meaning_vi": "Số thuê bao không tồn tại hoặc chưa kích hoạt trên HLR/HSS",
+                "root_cause": "HLR/HSS trả về MAP Error 1 (Unknown Subscriber). Số điện thoại đích gõ sai, đã bị thu hồi về kho số, hoặc chuyển mạng giữ số (MNP) sai định tuyến.",
+                "ktv_suggestion": "Kiểm tra lại số đích khách hàng nhắn tới hoặc kiểm tra trạng thái định tuyến MNP và khai báo HLR/HSS của thuê bao."
+            },
+            "102C": {
+                "standard_name": "Teleservice Not Provisioned / Call Barred",
+                "category": "PROFILE_BARRING",
+                "severity": "HIGH",
+                "meaning_vi": "Thuê bao chưa mở dịch vụ SMS hoặc đang bị khóa 1 chiều / 2 chiều",
+                "root_cause": "HLR/HSS trả về MAP Error 10 (Bearer Service Not Provisioned), 11 (Teleservice Not Provisioned) hoặc 13 (Call Barred). Thuê bao đang bị khóa chiều SMO (gửi đi) hoặc SMT (nhận về) do nợ cước, khóa theo yêu cầu, hoặc khóa do phát tán spam.",
+                "ktv_suggestion": "Kiểm tra profile thuê bao trên CCOS/HSS xem có bị khóa dịch vụ SMS (TS21/TS22) hoặc chặn chiều SMO/SMT không. Thực hiện mở lại và reset đồng bộ VLR."
+            },
+            "103C": {
+                "standard_name": "Absent Subscriber / Subscriber Busy for MT-SMS",
+                "category": "RADIO_OR_UE_STATE",
+                "severity": "MEDIUM",
+                "meaning_vi": "Thuê bao tắt máy, ngoài vùng phủ sóng, hoặc đang bận chuyển giao vùng",
+                "root_cause": "MSC/VLR hoặc MME trả về MAP Error 27 (Absent Subscriber) hoặc 6 (Absent Subscriber SM). Thiết bị đang tắt nguồn, bật chế độ máy bay, rớt sóng vô tuyến, hoặc đang thực hiện cuộc gọi thoại/chuyển giao trạm (Handover) khiến kênh báo hiệu SDCCH/FACCH bị nghẽn tạm thời.",
+                "ktv_suggestion": "Nếu chưa có bản ghi retry thành công (100C), hướng dẫn khách hàng kiểm tra vạch sóng, tắt bật chế độ máy bay hoặc khởi động lại máy để thiết bị cập nhật vị trí (Location Update) lên VLR/MME, giúp SMSC đẩy lại tin tồn."
+            },
+            "104C": {
+                "standard_name": "Memory Capacity Exceeded",
+                "category": "DEVICE_LIMITATION",
+                "severity": "MEDIUM",
+                "meaning_vi": "Đầy bộ nhớ lưu trữ tin nhắn trên SIM hoặc thiết bị",
+                "root_cause": "Thiết bị đầu cuối trả về RP-Error Cause 22 (Memory Capacity Exceeded) và MSC/VLR báo MAP Error 32 (SM-Delivery-Failure: MemoryCapacityExceeded). HLR đã bật cờ MNRF (Mobile Station Not Reachable for GPRS/SMS).",
+                "ktv_suggestion": "Hướng dẫn khách hàng xóa bớt tin nhắn cũ trong máy và trên SIM, sau đó thực hiện Reset chiều SMT (xóa cờ đầy bộ nhớ trên HLR/VLR) và yêu cầu khách khởi động lại điện thoại."
+            },
+            "105C": {
+                "standard_name": "System Failure / Network Timeout",
+                "category": "NETWORK_CORE_ERROR",
+                "severity": "HIGH",
+                "meaning_vi": "Lỗi hệ thống mạng lõi hoặc quá thời gian chờ phản hồi (Timeout)",
+                "root_cause": "MAP Error 34 (System Failure). Lỗi kết nối báo hiệu SS7/SIGTRAN/Diameter giữa SMSC và HLR/MSC/MME, hoặc nghẽn mạch tại tổng đài đối tác.",
+                "ktv_suggestion": "Kiểm tra địa chỉ MSC/VLR nơi thuê bao đang đứng sóng, thực hiện Reset VLR/SMT cho thuê bao."
+            },
+            "106C": {
+                "standard_name": "Facility Not Supported / Roaming Restriction",
+                "category": "ROAMING_OR_PROTOCOL",
+                "severity": "MEDIUM",
+                "meaning_vi": "Tính năng không được hỗ trợ tại mạng khách (Roaming) hoặc chặn CVQT",
+                "root_cause": "MAP Error 21 (Facility Not Supported) hoặc VLR mạng quốc tế chặn bản tin MT/MO do chính sách Roaming.",
+                "ktv_suggestion": "Kiểm tra dịch vụ Chuyển vùng quốc tế (CVQT) của thuê bao và chọn lại nhà mạng Roaming khác hỗ trợ đầy đủ SMS."
+            },
+            "199C": {
+                "standard_name": "Unspecified / Temporary Sub-delivery Error / Protocol Error",
+                "category": "GENERAL_OR_MULTIPART",
+                "severity": "LOW_TO_HIGH",
+                "meaning_vi": "Mã lỗi tổng hợp: Lỗi tạm thời khi đẩy tin ghép (Status 12) hoặc Lỗi từ chối dịch vụ/thiết bị (Status 1)",
+                "root_cause": "1. Khi đi kèm MESSAGE_STATUS = 12: Là trạng thái cắt mảnh (Segmentation) bình thường của bản tin dài (>140 bytes) trước khi hoàn tất ở bản ghi 100C/2.\n2. Khi đi kèm MESSAGE_STATUS = 1 (chiều MO): Thuê bao nhắn sai cú pháp lên đầu số VAS/Shortcode, tài khoản hết tiền (OCS từ chối), hoặc gửi tới đầu số không hợp lệ.\n3. Khi đi kèm MESSAGE_STATUS = 1 (chiều MT đơn lẻ không có 100C theo sau): Thiết bị từ chối nhận tin (Protocol Error, lỗi SIM, xung đột phần mềm chặn tin).",
+                "ktv_suggestion": "Bắt buộc đối chiếu theo cặp: Nếu có bản ghi 2/100C ngay sau đó -> Báo dịch vụ bình thường. Nếu đứng độc lập ở chiều MO -> Kiểm tra tài khoản/cú pháp. Nếu đứng độc lập ở chiều MT -> Reset SMT và hướng dẫn KH khởi động lại máy/lắp SIM sang máy khác."
+            },
+            "175C": {
+                "standard_name": "OCS Charging Rejected / MO Service Barred / Anti-Spam Blocked",
+                "category": "CHARGING_OR_POLICY_REJECT",
+                "severity": "HIGH",
+                "meaning_vi": "Từ chối gửi tin chiều đi (MO) do tài khoản không đủ cước phí (IN/OCS), chạm hạn mức hoặc bị chặn chính sách",
+                "root_cause": "Đi kèm với MESSAGE_STATUS = 8 (Rejected). Bản tin MO từ thiết bị đã lên tới SMSC (chứng tỏ cài đúng số TTTN), nhưng khi SMSC truy vấn sang hệ thống tính cước (OCS/IN) hoặc cổng kiểm soát (SMS Firewall) thì bị từ chối ngay lập tức do: 1. Tài khoản chính hết tiền (< 250đ-350đ/tin). 2. Thuê bao trả sau vượt hạn mức tín dụng. 3. Bị chặn chiều đi hoặc chặn spam.",
+                "ktv_suggestion": "Tuyệt đối KHÔNG kết luận sai số Trung tâm tin nhắn. Kiểm tra số dư tài khoản chính của thuê bao trên CCOS/OCS, kiểm tra trạng thái khóa chiều đi hoặc chặn spam, và hướng dẫn khách hàng nạp tiền/kiểm tra tài khoản (*101#) trước khi gửi tin."
+            },
+            "130C": {
+                "standard_name": "SRI-for-SM / Routing Failure (Check Mapped Network Error)",
+                "category": "ROUTING_OR_SUBSCRIBER_ERROR",
+                "severity": "HIGH",
+                "meaning_vi": "Lỗi truy vấn định tuyến đến thuê bao đích (Cần đọc kèm cột MAPPED_NETWORK_ERROR để biết nguyên nhân gốc từ HLR)",
+                "root_cause": "Tổng đài SMSC không lấy được thông tin định tuyến (SRI-for-SM) của số thuê bao nhận. Khi đi kèm MAPPED_NETWORK_ERROR = 1 (chuẩn 3GPP MAP Error 1 - Unknown Subscriber), nguyên nhân chính xác 100% là số thuê bao đích không tồn tại, đã bị hủy hoặc chưa kích hoạt trên mạng đích.",
+                "ktv_suggestion": "Đọc giá trị cột MAPPED_NETWORK_ERROR đi kèm: Nếu bằng 1 -> Khẳng định số điện thoại nhận không tồn tại/đã hủy."
+            },
+            "135C": {
+                "standard_name": "Message Waiting / Delivery Protocol Failure",
+                "category": "NETWORK_OR_PROTOCOL",
+                "severity": "MEDIUM",
+                "meaning_vi": "Lỗi giao thức truyền tin hoặc hàng đợi chờ phát (Status 12 - Bản ghi trung gian)",
+                "root_cause": "Bản ghi trung gian khi SMSC cố gắng kết nối và mở phiên chuyển phát tin nhắn đến nút mạng nhận hoặc thiết bị đầu cuối.",
+                "ktv_suggestion": "Kiểm tra các bản ghi tiếp theo để xem kết quả chốt (100C thành công hay 136C bị chặn)."
+            },
+            "136C": {
+                "standard_name": "Delivery Failure / Anti-Spam Policy Rejection",
+                "category": "SPAM_POLICY_OR_NETWORK_REJECT",
+                "severity": "HIGH",
+                "meaning_vi": "Giao tin thất bại do chính sách Anti-Spam của mạng đích chặn (Status 5 / Retry Loop)",
+                "root_cause": "Thiết bị phát sinh gửi tin nhắn rải thảm liên tục tới hàng trăm số thuê bao khác nhau trong thời gian ngắn. Hệ thống tường lửa tin nhắn (SMS Firewall / Anti-Spam) của mạng nhận phát hiện tần suất bất thường nên kích hoạt cơ chế chặn chuyển tiếp (trả về Status 5 - Retry, Cause 136C, kèm MAP Error 34 - System Failure, 59 - Subscriber Busy for MT SMS / Anti-Spam Block, 9 - Illegal Subscriber). Đây là dấu hiệu điển hình của máy bị nhiễm mã độc (SMS Trojan/Botnet) chiếm quyền gửi SMS ngầm.",
+                "ktv_suggestion": "Kiểm tra số lượng số đích nhận khác nhau (Unique Dests) và số lượng bản ghi 136C. Nếu gửi hàng loạt số lạ: Khẳng định điện thoại nhiễm mã độc tự gửi ngầm và tự xóa lịch sử SMS. Hướng dẫn khách hàng Factory Reset máy hoặc tạm khóa chiều gửi SMO."
+            }
+        }
+    },
+    "3gpp_map_and_rp_error_mapping": {
+        "description": "Ánh xạ cột MAPPED NETWORK ERROR (Theo chuẩn 3GPP TS 29.002 MAP Error & 3GPP TS 24.011 RP-Cause) phòng trường hợp tra cứu từ nguồn Raw CDR hoặc công cụ BTools/CEM",
+        "map_errors": {
+            "0": {
+                "name": "No Error / Normal",
+                "meaning_vi": "Không có lỗi báo hiệu mạng lõi (hoặc giá trị mặc định khi thành công)."
+            },
+            "1": {
+                "name": "Unknown Subscriber",
+                "meaning_vi": "Thuê bao không tồn tại trên HLR/HSS (chưa đấu nối hoặc đã hủy)."
+            },
+            "5": {
+                "name": "Unidentified Subscriber",
+                "meaning_vi": "Không nhận diện được IMSI/ thuê bao tại VLR đang phục vụ."
+            },
+            "6": {
+                "name": "Absent Subscriber SM",
+                "meaning_vi": "Thuê bao mất liên lạc vô tuyến (Tắt máy, tháo SIM, ngoài vùng phủ sóng)."
+            },
+            "9": {
+                "name": "Illegal Subscriber",
+                "meaning_vi": "Thuê bao không hợp lệ (Xác thực SIM/AuC thất bại)."
+            },
+            "10": {
+                "name": "Bearer Service Not Provisioned",
+                "meaning_vi": "Chưa khai báo dịch vụ mang (Bearer Service) trên HLR."
+            },
+            "11": {
+                "name": "Teleservice Not Provisioned",
+                "meaning_vi": "Chưa mở dịch vụ SMS (TS21 - MT / TS22 - MO) trên HLR/HSS."
+            },
+            "12": {
+                "name": "Illegal Equipment",
+                "meaning_vi": "Thiết bị đầu cuối (IMEI) bị khóa hoặc nằm trong danh sách đen (EIR Blacklist)."
+            },
+            "13": {
+                "name": "Call Barred",
+                "meaning_vi": "Thuê bao đang bị chặn dịch vụ (Barring: Khóa 1 chiều, khóa 2 chiều, hoặc chặn SMS quốc tế)."
+            },
+            "21": {
+                "name": "Facility Not Supported",
+                "meaning_vi": "Node mạng (MSC/VLR/SGSN) không hỗ trợ tính năng yêu cầu."
+            },
+            "27": {
+                "name": "Absent Subscriber",
+                "meaning_vi": "Thuê bao đã tách mạng (IMSI Detached) hoặc không phản hồi bản tin tìm gọi (Paging No Response)."
+            },
+            "31": {
+                "name": "Subscriber Busy for MT-SMS",
+                "meaning_vi": "Thuê bao đang bận xử lý một giao dịch SMS khác hoặc đang chuyển giao kênh."
+            },
+            "32": {
+                "name": "SM-Delivery-Failure",
+                "meaning_vi": "Giao tin thất bại tại lớp thiết bị (Đi kèm chi tiết: MemoryCapacityExceeded, EquipmentProtocolError, EquipmentNotSM-Equipped)."
+            },
+            "33": {
+                "name": "Message Waiting List Full",
+                "meaning_vi": "Danh sách chờ gửi lại (MWD) trên HLR cho thuê bao này đã đầy."
+            },
+            "34": {
+                "name": "System Failure",
+                "meaning_vi": "Lỗi hệ thống tại nút mạng (HLR, MSC, VLR hoặc cổng STP) hoặc quá thời gian chờ TCAP."
+            },
+            "35": {
+                "name": "Data Missing",
+                "meaning_vi": "Thiếu tham số bắt buộc trong bản tin báo hiệu MAP."
+            },
+            "36": {
+                "name": "Unexpected Data Value",
+                "meaning_vi": "Giá trị dữ liệu trong bản tin MAP không đúng định dạng quy chuẩn."
+            },
+            "59": {
+                "name": "Subscriber Busy for MT-SMS / Anti-Spam Block",
+                "meaning_vi": "Thuê bao nhận bận xử lý hoặc Tường lửa chống tin rác (SMS Firewall / Anti-Spam) chặn chuyển tiếp bản tin."
+            }
+        },
+        "rp_cause_3gpp_24011": {
+            "1": "Unallocated (unassigned) number (Số chưa cấp phát)",
+            "8": "Operator determined barring (Nhà mạng chặn chiều gửi/nhận)",
+            "10": "Call barred (Bị khóa dịch vụ)",
+            "21": "Short message transfer rejected (Từ chối truyền tải bản tin)",
+            "22": "Memory capacity exceeded (Bộ nhớ SIM/máy bị đầy)",
+            "27": "Destination out of order (Thiết bị đích gặp sự cố/tắt nguồn)",
+            "28": "Unidentified subscriber (Không xác định được thuê bao)",
+            "29": "Facility rejected (Từ chối dịch vụ)",
+            "30": "Unknown subscriber (Thuê bao không tồn tại)",
+            "38": "Network out of order (Mạng gặp sự cố)",
+            "41": "Temporary failure (Lỗi tạm thời - Sẽ tự động retry)",
+            "42": "Congestion (Nghẽn kênh báo hiệu vô tuyến)",
+            "47": "Resources unavailable, unspecified (Tài nguyên mạng tạm thời không khả dụng)",
+            "69": "Requested facility not implemented (Tính năng chưa được triển khai)",
+            "81": "Invalid short message transfer reference value (Sai mã tham chiếu phiên truyền tin)",
+            "95": "Semantically incorrect message (Sai ngữ nghĩa bản tin PDU)",
+            "96": "Invalid mandatory information (Sai thông tin bắt buộc trong header)",
+            "97": "Message type non-existent or not implemented (Loại tin nhắn không tồn tại)",
+            "98": "Message not compatible with short message protocol state (Không tương thích trạng thái giao thức)",
+            "99": "Information element non-existent or not implemented (Phần tử thông tin không hỗ trợ)",
+            "111": "Protocol error, unspecified (Lỗi giao thức không xác định trên thiết bị/SIM)",
+            "127": "Interworking, unspecified (Lỗi kết nối liên mạng)"
+        }
+    },
+    "smpp_esme_error_codes": {
+        "description": "Mã lỗi giao thức SMPP (dành cho luồng tin nhắn Brandname, OTP từ cổng A2P/CP như 1357, VNeID, AUTHMSG, Ngân hàng)",
+        "codes": {
+            "0x00000000": {
+                "dec": 0,
+                "name": "ESME_ROK",
+                "meaning_vi": "Thành công (No Error)"
+            },
+            "0x00000001": {
+                "dec": 1,
+                "name": "ESME_RINVMSGLEN",
+                "meaning_vi": "Độ dài tin nhắn không hợp lệ (Quá ngắn hoặc vượt giới hạn)"
+            },
+            "0x0000000B": {
+                "dec": 11,
+                "name": "ESME_RINVBDSTADR",
+                "meaning_vi": "Địa chỉ số nhận (Destination Address) không hợp lệ"
+            },
+            "0x0000000A": {
+                "dec": 10,
+                "name": "ESME_RINVSRCADR",
+                "meaning_vi": "Brandname / Đầu số gửi (Source Address) chưa được khai báo hoặc sai định dạng"
+            },
+            "0x00000014": {
+                "dec": 20,
+                "name": "ESME_RMSGQFUL",
+                "meaning_vi": "Hàng đợi tin nhắn (Message Queue) cho thuê bao đã đầy"
+            },
+            "0x00000058": {
+                "dec": 88,
+                "name": "ESME_RTHROTTLED",
+                "meaning_vi": "Vượt quá giới hạn tốc độ gửi tin (TPS Throttling) của đối tác CP"
+            },
+            "0x00000045": {
+                "dec": 69,
+                "name": "ESME_RSUBMITFAIL",
+                "meaning_vi": "Đẩy tin nhắn vào SMSC thất bại (Submit_SM Failed)"
+            },
+            "0x00000400": {
+                "dec": 1024,
+                "name": "OCS_INSUFFICIENT_BALANCE",
+                "meaning_vi": "Tài khoản hết tiền hoặc không đủ cước phí gửi tin (Vendor Specific)"
+            }
+        }
+    },
+    "message_length_segmentation_guide": {
+        "description": "Quy chuẩn tính số lượng tin nhắn ghép (Concatenated SMS) từ cột MESSAGE LENGTH (tính theo Octets/Bytes) trong bảng CDR",
+        "encodings": {
+            "GSM_7BIT": {
+                "single_max_chars": 160,
+                "single_max_bytes": 140,
+                "multipart_segment_chars": 153,
+                "multipart_segment_bytes": 134,
+                "note": "Tin nhắn tiếng Việt không dấu hoặc mã hệ thống ASCII"
+            },
+            "UCS2_UNICODE": {
+                "single_max_chars": 70,
+                "single_max_bytes": 140,
+                "multipart_segment_chars": 67,
+                "multipart_segment_bytes": 134,
+                "note": "Tin nhắn tiếng Việt có dấu (như tin từ VinaPhone, 888, 900, 1576...)"
+            }
+        },
+        "cdr_byte_observation": "Trong bảng CDR thực tế của VNPT, các bản ghi trung gian (Status 12 / 199C) thường chốt ở mức độ dài chuẩn 1 mảnh tối đa là '0140' bytes (tương đương 140 octets dữ liệu chuẩn 3GPP), còn bản ghi thành công (Status 2 / 100C) sẽ ghi tổng độ dài toàn bộ các mảnh ghép lại (ví dụ: '0257' ~ 4 tin, '0454' ~ 7 tin)."
+    }
+}

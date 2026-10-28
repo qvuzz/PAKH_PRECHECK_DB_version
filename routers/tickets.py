@@ -3,6 +3,7 @@
 
 import os
 import sys
+import re
 import json
 import time
 import threading
@@ -43,8 +44,8 @@ def get_tickets_api(
     src_f = None if source == "all" else source
     srv_f = None if service_type == "all" else service_type
 
-    # Chỉ phân hệ Data (Mobile Internet) mới áp dụng bộ lọc nhận định kỹ thuật
-    status_f = status if (srv_f == "data" and status != "all") else None
+    # Áp dụng bộ lọc nhận định kỹ thuật cho mọi phân hệ khi có giá trị khác 'all'
+    status_f = status if (status and status != "all") else None
 
     # 🎯 Nhận diện quyền truy cập và Phân vùng 3 Miền
     client_ip = request.client.host if request and request.client else "127.0.0.1"
@@ -65,12 +66,48 @@ def get_tickets_api(
     user_reg = detect_user_region(uinfo) if uinfo else None
     is_region_locked = False
 
-    if is_local or is_superadmin(uinfo):
+    # Kiểm tra token có gửi lên nhưng đã hết hạn exp / không hợp lệ không
+    raw_tok = (client_tok or "").replace("Bearer ", "").strip()
+    is_token_expired = False
+    if raw_tok and len(raw_tok) > 30 and "." in raw_tok:
+        from ttsnew_api import _is_jwt_valid
+        if not _is_jwt_valid(raw_tok):
+            is_token_expired = True
+
+    if not uinfo:
+        msg = "Token đã hết hạn, vui lòng đăng nhập TTS Mới." if is_token_expired else "Vui lòng đăng nhập tài khoản OneOSS để xem danh sách phiếu."
+        return {
+            "tickets": [],
+            "total_count": 0,
+            "closed_count": 0,
+            "active_count": 0,
+            "system_counts": {
+                "tts_new_data": 0,
+                "tts_new_voice": 0,
+                "tts_new_call": 0,
+                "tts_new_spam_call": 0,
+                "tts_new_sms": 0,
+                "tts_new_roaming": 0,
+                "tts_new_sim": 0,
+                "tts_new_other": 0,
+                "total_active": 0,
+                "total_closed": 0,
+                "total_all": 0
+            },
+            "region": "ALL",
+            "user_role": "guest",
+            "user_name": "",
+            "require_login": True,
+            "token_expired": is_token_expired,
+            "message": msg
+        }
+
+    if is_superadmin(uinfo):
         user_role = "admin"
         effective_region = (region or "ALL").upper()
         current_user_name = (uinfo.get("displayName") or uinfo.get("userName") or uinfo.get("HoTen") or "Quản trị viên") if uinfo else "Quản trị viên"
         is_region_locked = False
-    elif uinfo:
+    else:
         # Kiểm soát phân quyền nghiêm ngặt: User phải có trong whitelist user_regions.json
         permitted, matched_u = is_user_permitted(uinfo)
         if not permitted:
@@ -98,11 +135,6 @@ def get_tickets_api(
             effective_region = "ALL"
             is_region_locked = False
         current_user_name = uinfo.get("displayName") or uinfo.get("userName") or "KTV"
-    else:
-        user_role = "guest"
-        effective_region = (region or "ALL").upper()
-        is_region_locked = False
-        current_user_name = ""
 
     tickets = get_all_tickets(
         search=search, 
@@ -113,69 +145,7 @@ def get_tickets_api(
         region=effective_region
     )
 
-    # Tự động bù tóm tắt 6 mục cho các phiếu Mobile Internet nếu chưa có hoặc đang là 'null' (chỉ chạy khi xem dữ liệu data)
-    if srv_f in ("data", None, "", "all"):
-        try:
-            from db_manager import is_mobile_internet_ticket
-            from ai_interpreter import generate_ticket_summary
-            need_db_update = []
-            for t in tickets:
-                if len(need_db_update) >= 10:
-                    break
-                pkg = t.get("package_title") or ""
-                tc = t.get("ticket_content") or ""
-                ai_s = str(t.get("ai_summary") or "").strip()
-                if is_mobile_internet_ticket(pkg) and tc:
-                    if not ai_s or ai_s == "null" or ai_s == "None" or not ai_s.startswith("1.") or ai_s == tc.strip():
-                        new_sum = generate_ticket_summary(pkg, tc, phone=t.get("phone", ""))
-                        if new_sum and new_sum.strip().startswith("1."):
-                            t["ai_summary"] = new_sum
-                            need_db_update.append((new_sum, t.get("ticket_code"), t.get("phone")))
-
-            if need_db_update:
-                conn_u = get_db_connection()
-                with conn_u:
-                    for sum_val, t_code, ph in need_db_update:
-                        if t_code:
-                            clean_c = str(t_code).split("\n")[0].strip()
-                            conn_u.execute("UPDATE tickets SET ai_summary = ? WHERE ticket_code = ? OR ticket_code LIKE ?", (sum_val, clean_c, f"{clean_c}%"))
-                        elif ph:
-                            conn_u.execute("UPDATE tickets SET ai_summary = ? WHERE phone = ?", (sum_val, ph))
-                conn_u.close()
-        except Exception:
-            pass
-
-    # Tự động bù tóm tắt 6 mục cho các phiếu Tin nhắn (SMS) nếu chưa có hoặc đang là text trần
-    if srv_f in ("sms", None, "", "all"):
-        try:
-            from services.sms_analyzer import is_sms_ticket, generate_sms_ticket_summary
-            need_sms_db_update = []
-            for t in tickets:
-                if len(need_sms_db_update) >= 15:
-                    break
-                pkg = t.get("package_title") or ""
-                tc = t.get("ticket_content") or ""
-                ai_s = str(t.get("ai_summary") or "").strip()
-                if (srv_f == "sms" or is_sms_ticket(pkg, tc)) and tc:
-                    is_wrong_data_format = "gói cước sử dụng:" in ai_s.lower() or "tình trạng truy cập:" in ai_s.lower()
-                    if not ai_s or ai_s == "null" or ai_s == "None" or not ai_s.startswith("1.") or ai_s == tc.strip() or is_wrong_data_format:
-                        new_sms_sum = generate_sms_ticket_summary(tc, t.get("incident_time") or t.get("created_time") or "")
-                        if new_sms_sum and new_sms_sum.strip().startswith("1."):
-                            t["ai_summary"] = new_sms_sum
-                            need_sms_db_update.append((new_sms_sum, t.get("ticket_code"), t.get("phone")))
-
-            if need_sms_db_update:
-                conn_u = get_db_connection()
-                with conn_u:
-                    for sum_val, t_code, ph in need_sms_db_update:
-                        if t_code:
-                            clean_c = str(t_code).split("\n")[0].strip()
-                            conn_u.execute("UPDATE tickets SET ai_summary = ? WHERE ticket_code = ? OR ticket_code LIKE ?", (sum_val, clean_c, f"{clean_c}%"))
-                        elif ph:
-                            conn_u.execute("UPDATE tickets SET ai_summary = ? WHERE phone = ?", (sum_val, ph))
-                conn_u.close()
-        except Exception:
-            pass
+    # Đảm bảo phản hồi siêu tốc cho GET /api/tickets: Không chạy blocking ghi DB trong luồng đọc dữ liệu
 
     sys_counts = get_system_counts(region=effective_region)
     total_cnt, closed_cnt, active_cnt = get_ticket_counts(
@@ -226,16 +196,31 @@ def get_closed_stats_api(
 
     user_reg = detect_user_region(uinfo) if uinfo else None
 
-    if is_local or is_superadmin(uinfo):
+    if not uinfo:
+        return {
+            "total": 0, "auto_cnt": 0, "auto_percent": 0, "manual_cnt": 0, "manual_percent": 0,
+            "synced_cnt": 0, "synced_percent": 0, "tool_closed_cnt": 0,
+            "today_cnt": 0, "today_manual_cnt": 0, "today_synced_cnt": 0, "today_total_cnt": 0,
+            "today_received_cnt": 0,
+            "tts_new_cnt": 0, "tts_old_cnt": 0, "data_cnt": 0, "call_cnt": 0, "sms_cnt": 0, "other_cnt": 0, "voice_cnt": 0,
+            "by_diagnosis": [], "daily_trend": [], "top_packages": [], "staff_list": [],
+            "effective_region": "ALL",
+            "user_role": "guest",
+            "require_login": True,
+            "message": "Vui lòng đăng nhập tài khoản OneOSS để xem thống kê."
+        }
+
+    if is_superadmin(uinfo):
         effective_region = (region or "ALL").upper()
         is_region_locked = False
-    elif uinfo:
+    else:
         permitted, _ = is_user_permitted(uinfo)
         if not permitted:
             return {
                 "total": 0, "auto_cnt": 0, "auto_percent": 0, "manual_cnt": 0, "manual_percent": 0,
                 "synced_cnt": 0, "synced_percent": 0, "tool_closed_cnt": 0,
                 "today_cnt": 0, "today_manual_cnt": 0, "today_synced_cnt": 0, "today_total_cnt": 0,
+                "today_received_cnt": 0,
                 "tts_new_cnt": 0, "tts_old_cnt": 0, "data_cnt": 0, "call_cnt": 0, "sms_cnt": 0, "other_cnt": 0, "voice_cnt": 0,
                 "by_diagnosis": [], "daily_trend": [], "top_packages": [], "staff_list": [],
                 "effective_region": "ALL",
@@ -249,9 +234,6 @@ def get_closed_stats_api(
         else:
             effective_region = (region or "ALL").upper()
             is_region_locked = False
-    else:
-        effective_region = (region or "ALL").upper()
-        is_region_locked = False
 
     stats = get_closed_tickets_analytics(
         time_filter=period, 
@@ -266,26 +248,51 @@ def get_closed_stats_api(
 
 
 @router.get("/export_excel")
-def export_excel_api(source: str = "tts_new"):
-    from report_bot import export_diagnostics_to_excel
-    src_f = None if source == "all" else source
-    tickets = get_all_tickets(source=src_f)
-    if not tickets:
-        return Response(content="Database trống, chưa có phiếu để xuất Excel.", status_code=400)
+def export_excel_api(
+    source: str = "all",
+    region: str = "ALL",
+    service_type: str = "all",
+    tab: str = "all",
+    search: str = None,
+    status: str = None
+):
+    try:
+        from report_bot import export_diagnostics_to_excel
+        src_f = None if source in ("all", "", None) else source
+        srv_f = None if service_type in ("all", "", None) else service_type
+        reg_f = None if region in ("ALL", "", None) else region
+        tab_f = None if tab in ("all", "", None) else tab
 
-    out_dir = BASE_DIR / "result"
-    os.makedirs(out_dir, exist_ok=True)
-    prefix = "BaoCao_TTS_NEW"
-    out_file = out_dir / f"{prefix}_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    saved_path = export_diagnostics_to_excel(tickets, out_file)
-
-    if os.path.exists(saved_path):
-        return FileResponse(
-            saved_path, 
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=os.path.basename(saved_path)
+        tickets = get_all_tickets(
+            search=search,
+            status_filter=status if status != "all" else None,
+            tab_filter=tab_f,
+            source=src_f,
+            service_type=srv_f,
+            region=reg_f
         )
-    return Response(content="Lỗi xuất file Excel", status_code=500)
+        if not tickets:
+            return Response(content="Database trống hoặc không có phiếu thỏa mãn điều kiện lọc để xuất Excel.", status_code=400)
+
+        out_dir = BASE_DIR / "result"
+        os.makedirs(out_dir, exist_ok=True)
+        
+        srv_tag = (service_type or "all").upper()
+        reg_tag = (region or "ALL").upper()
+        prefix = f"BaoCao_TTS_{srv_tag}_{reg_tag}"
+        out_file = out_dir / f"{prefix}_Export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        saved_path = export_diagnostics_to_excel(tickets, str(out_file))
+
+        if os.path.exists(saved_path):
+            return FileResponse(
+                saved_path, 
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                filename=os.path.basename(saved_path)
+            )
+        return Response(content="Lỗi: File Excel không được tạo thành công.", status_code=500)
+    except Exception as e:
+        logger.error(f"❌ [EXPORT_EXCEL] Lỗi nghiêm trọng khi xuất Excel: {e}", exc_info=True)
+        return Response(content=f"Lỗi máy chủ khi xuất Excel: {str(e)}", status_code=500)
 
 
 _CELL_INFO_CACHE = {}
@@ -380,12 +387,12 @@ def get_1708_base_url() -> str:
 
     # Ưu tiên các kênh giao tiếp trong Docker bridge và máy Host
     candidates.extend([
+        "http://127.0.0.1:1708",
+        "http://host.docker.internal:1708",
         "http://vnpt_customer_position_app:1708",
         "http://vnpt-customer-position:1708",
-        "http://host.docker.internal:1708",
         "http://172.17.0.1:1708",
-        "http://10.155.59.158:1708",
-        "http://127.0.0.1:1708",
+        "http://10.155.139.167:1708",
     ])
 
     import requests
@@ -437,14 +444,6 @@ def get_cell_info_api(phone: str):
         if cached_data.get("cell_name") or cached_data.get("ward"):
             return cached_data
 
-    import requests
-    base_1708 = get_1708_base_url()
-    target_urls = [
-        f"{base_1708}/api/msisdn/{phone_84}",
-    ]
-    if phone_84.startswith("84"):
-        target_urls.append(f"{base_1708}/api/msisdn/0{phone_84[2:]}")
-
     cell_name = None
     radio = "4G"
     site_name = None
@@ -453,69 +452,31 @@ def get_cell_info_api(phone: str):
     district = None
     address = None
 
-    for url in target_urls:
-        try:
-            resp = requests.get(url, headers={"Accept": "application/json"}, timeout=5.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data and isinstance(data, dict):
-                    loc_dict = data.get("location") or {}
-                    sum_dict = data.get("summary") or {}
-                    cell_name = (data.get("cell") or data.get("cell_name") or sum_dict.get("current_cell") or loc_dict.get("cell_name") or "").strip() or None
-                    ward = (data.get("ward") or data.get("phuong_xa") or sum_dict.get("ward") or loc_dict.get("ward") or "").strip() or None
-                    province = (data.get("province") or data.get("tinh_tp") or sum_dict.get("province") or loc_dict.get("province") or "").strip() or None
-                    district = (data.get("district") or data.get("quan_huyen") or sum_dict.get("district") or loc_dict.get("district") or "").strip() or None
-                    address = (data.get("address") or data.get("dia_chi") or loc_dict.get("address") or "").strip() or None
-                    site_name = (data.get("site") or sum_dict.get("current_site") or loc_dict.get("site_name") or "").strip() or None
+    # 1. Ưu tiên tra cứu trực tiếp từ module CustomerPosition tích hợp
+    try:
+        from CustomerPosition.app import process_lookup_msisdn
+        cp_res = process_lookup_msisdn(phone_84)
+        if cp_res and cp_res.get("success"):
+            loc_dict = cp_res.get("location") or {}
+            sum_dict = cp_res.get("summary") or {}
+            sub_dict = cp_res.get("subscriber") or {}
+            cell_name = (cp_res.get("cell") or cp_res.get("cell_name") or sum_dict.get("current_cell") or loc_dict.get("cell_name") or "").strip() or None
+            ward = (cp_res.get("ward") or cp_res.get("phuong_xa") or sum_dict.get("ward") or loc_dict.get("ward") or "").strip() or None
+            province = (cp_res.get("province") or cp_res.get("tinh_tp") or sum_dict.get("province") or loc_dict.get("province") or "").strip() or None
+            district = (cp_res.get("district") or cp_res.get("quan_huyen") or sum_dict.get("district") or loc_dict.get("district") or "").strip() or None
+            address = (cp_res.get("address") or cp_res.get("dia_chi") or loc_dict.get("address") or "").strip() or None
+            site_name = (cp_res.get("site") or sum_dict.get("current_site") or loc_dict.get("site_name") or "").strip() or None
+            radio = sub_dict.get("Radio") or "4G"
+    except Exception as cp_err:
+        print(f"⚠️ [CellInfo Direct CP] Lỗi gọi CustomerPosition nội bộ: {cp_err}")
 
-                    if cell_name:
-                        c_upper = cell_name.upper()
-                        if c_upper.startswith("5G"):
-                            radio = "5G"
-                        elif c_upper.startswith("3G"):
-                            radio = "3G"
-                        elif c_upper.startswith("2G"):
-                            radio = "2G"
-                        else:
-                            radio = "4G"
-                        break
-        except Exception:
-            continue
-
-    # Fallback endpoint cũ nếu chưa có dữ liệu
-    if not cell_name and not ward:
-        try:
-            old_url = f"{base_1708}/msisdn/{phone_84}"
-            resp = requests.get(old_url, headers={"Accept": "application/json"}, timeout=3.5)
-            if resp.status_code == 200:
-                d = resp.json()
-                summary = d.get("summary") or {}
-                location = d.get("location") or {}
-                subscriber = d.get("subscriber") or {}
-                cell_name = summary.get("current_cell") or location.get("cell_name") or (d.get("cell") or "")
-                radio = subscriber.get("Radio") or "4G"
-                site_name = summary.get("current_site") or location.get("site_name")
-        except Exception:
-            pass
-
-    # 🎯 Fallback nội bộ: Tra cứu trực tiếp từ Core SAPC (10.155.42.218) nếu port 1708 chưa có cell
+    # 2. Fallback nội bộ: Tra cứu trực tiếp từ Core SAPC (10.155.42.218)
     if not cell_name:
         try:
             try:
                 from sapccheck.msisdn_info import tra_cell_tu_so_dien_thoai
             except Exception:
-                import sys
-                from pathlib import Path
-                root_d = Path(__file__).resolve().parent.parent
-                sapc_d = root_d / "sapccheck"
-                if str(root_d) not in sys.path:
-                    sys.path.insert(0, str(root_d))
-                if str(sapc_d) not in sys.path:
-                    sys.path.insert(0, str(sapc_d))
-                try:
-                    from sapccheck.msisdn_info import tra_cell_tu_so_dien_thoai
-                except Exception:
-                    from msisdn_info import tra_cell_tu_so_dien_thoai
+                from msisdn_info import tra_cell_tu_so_dien_thoai
             sapc_res = tra_cell_tu_so_dien_thoai(phone_84)
             if sapc_res and isinstance(sapc_res, dict) and not sapc_res.get("error"):
                 c_sapc = sapc_res.get("CellName") or sapc_res.get("cell_name")
@@ -524,8 +485,38 @@ def get_cell_info_api(phone: str):
                 r_sapc = sapc_res.get("Radio") or sapc_res.get("radio")
                 if r_sapc:
                     radio = str(r_sapc).strip()
+                # Nếu có LAC/CI/eNodeB ID, map tiếp sang CSDL Excel nội bộ
+                lac_val = sapc_res.get("LAC") or ""
+                ci_val = sapc_res.get("CI") or sapc_res.get("CellID") or ""
+                enodeb_val = sapc_res.get("eNodeB ID") or ""
+                if (ci_val or enodeb_val) and not ward:
+                    try:
+                        from CustomerPosition.excel_service import excel_service
+                        map_r = excel_service.lookup_all(lac_val, ci_val, enodeb_val)
+                        if map_r:
+                            if not cell_name and map_r.get("cell_name"):
+                                cell_name = map_r.get("cell_name")
+                            site_name = map_r.get("site_name") or site_name
+                            province = map_r.get("province") or province
+                            district = map_r.get("district") or district
+                            ward = map_r.get("ward") or ward
+                            coord_lat = map_r.get("latitude")
+                            coord_lng = map_r.get("longitude")
+                    except Exception:
+                        pass
         except Exception as sapc_ex:
             print(f"⚠️ [CellInfo Fallback SAPC] Lỗi tra cứu: {sapc_ex}")
+
+    if cell_name:
+        c_upper = cell_name.upper()
+        if c_upper.startswith("5G"):
+            radio = "5G"
+        elif c_upper.startswith("3G"):
+            radio = "3G"
+        elif c_upper.startswith("2G"):
+            radio = "2G"
+        else:
+            radio = "4G"
 
     coord_lat = None
     coord_lng = None
@@ -567,7 +558,7 @@ def get_cell_info_api(phone: str):
         "latitude": coord_lat,
         "longitude": coord_lng,
         "map_url": map_url,
-        "cell_url": f"http://10.155.59.158:1708/cellid/{cell_name}" if cell_name else None
+        "cell_url": f"/vitri/?cell={cell_name}" if cell_name else None
     }
     _CELL_INFO_CACHE[phone_84] = {"time": now_t, "data": result}
     return result
@@ -613,45 +604,60 @@ def get_cell_location_api(
 
     base_1708 = get_1708_base_url()
 
-    def _fetch_from_1708(query_target):
-        nonlocal ward, province, district, address, site, cell_name
-        try:
-            resp = requests.get(f"{base_1708}/api/cell/{query_target}", headers={"Accept": "application/json"}, timeout=4.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data and isinstance(data, dict) and data.get("success") is not False:
-                    w = (data.get("ward") or data.get("phuong_xa") or (data.get("summary") or {}).get("ward") or "").strip() or None
-                    p = (data.get("province") or data.get("tinh_tp") or (data.get("summary") or {}).get("province") or "").strip() or None
-                    if w or p:
-                        ward = w
-                        province = p
-                        district = (data.get("district") or data.get("quan_huyen") or (data.get("summary") or {}).get("district") or "").strip() or None
-                        address = (data.get("address") or data.get("dia_chi") or "").strip() or None
-                        site = (data.get("site") or (data.get("summary") or {}).get("site") or "").strip() or None
-                        cell_name = (data.get("cell") or clean_cell).strip()
-                        return True
-        except Exception:
-            pass
-        return False
+    found = False
 
-    # 1. Tra cứu theo tên Cell ID gốc
-    found = _fetch_from_1708(clean_cell)
+    # 1. 🎯 Ưu tiên tra cứu trực tiếp từ module CustomerPosition tích hợp
+    try:
+        from CustomerPosition.app import process_lookup_by_name, get_address_details
+        cp_res = process_lookup_by_name(clean_cell)
+        if cp_res and cp_res.get("success"):
+            loc = cp_res.get("location") or {}
+            ward = (loc.get("ward") or "").strip() or None
+            province = (loc.get("province") or "").strip() or None
+            district = (loc.get("district") or "").strip() or None
+            address = (loc.get("address") or "").strip() or None
+            site = (loc.get("site_name") or "").strip() or None
+            cell_name = (loc.get("cell_name") or clean_cell).strip()
+            coord_lat = loc.get("latitude") or coord_lat
+            coord_lng = loc.get("longitude") or coord_lng
+            found = True
+        elif not found:
+            # Thử bóc tách Site + Tỉnh
+            prov_m = re.search(r'[-_]([A-Z]{3})$', clean_cell, re.I)
+            prov = prov_m.group(1).upper() if prov_m else ''
+            site_m = re.search(r'(?:[2-5]G[-_]|UL[-_]|DL[-_])?([A-Z]{2,4}\d{2,4})', clean_cell, re.I)
+            site_code = site_m.group(1).upper() if site_m else ''
 
-    # 2. Nếu không tìm thấy, tự động fallback bóc tách Site + Tỉnh (VD: 4G-TDM074M12-BDG -> TDM074_BDG -> TDM074)
-    if not found:
-        prov_m = re.search(r'[-_]([A-Z]{3})$', clean_cell, re.I)
-        prov = prov_m.group(1).upper() if prov_m else ''
-        site_m = re.search(r'(?:[2-5]G[-_]|UL[-_]|DL[-_])?([A-Z]{2,4}\d{2,4})', clean_cell, re.I)
-        site_code = site_m.group(1).upper() if site_m else ''
+            if site_code and prov:
+                cp_sub = process_lookup_by_name(f"{site_code}_{prov}")
+                if not cp_sub or not cp_sub.get("success"):
+                    cp_sub = process_lookup_by_name(f"{site_code}-{prov}")
+                if cp_sub and cp_sub.get("success"):
+                    loc = cp_sub.get("location") or {}
+                    ward = (loc.get("ward") or "").strip() or None
+                    province = (loc.get("province") or "").strip() or None
+                    district = (loc.get("district") or "").strip() or None
+                    address = (loc.get("address") or "").strip() or None
+                    site = (loc.get("site_name") or "").strip() or None
+                    coord_lat = loc.get("latitude") or coord_lat
+                    coord_lng = loc.get("longitude") or coord_lng
+                    found = True
+            if not found and site_code:
+                cp_sub = process_lookup_by_name(site_code)
+                if cp_sub and cp_sub.get("success"):
+                    loc = cp_sub.get("location") or {}
+                    ward = (loc.get("ward") or "").strip() or None
+                    province = (loc.get("province") or "").strip() or None
+                    district = (loc.get("district") or "").strip() or None
+                    address = (loc.get("address") or "").strip() or None
+                    site = (loc.get("site_name") or "").strip() or None
+                    coord_lat = loc.get("latitude") or coord_lat
+                    coord_lng = loc.get("longitude") or coord_lng
+                    found = True
+    except Exception as cp_ex:
+        print(f"⚠️ [CellLocation Direct CP] Lỗi gọi CustomerPosition nội bộ: {cp_ex}")
 
-        if site_code and prov:
-            found = _fetch_from_1708(f"{site_code}_{prov}")
-            if not found:
-                found = _fetch_from_1708(f"{site_code}-{prov}")
-        if not found and site_code:
-            found = _fetch_from_1708(site_code)
-
-    # 3. 🎯 Fallback Reverse-Geocode qua tọa độ lat/long từ CEM nếu 1708 thiếu data Phường/Xã/Địa chỉ
+    # 2. 🎯 Fallback Reverse-Geocode qua tọa độ lat/long từ CEM nếu thiếu data Phường/Xã/Địa chỉ
     if not ward or not address:
         if not coord_lat or not coord_lng:
             try:
@@ -664,29 +670,24 @@ def get_cell_location_api(
 
         if coord_lat and coord_lng:
             try:
-                geo_resp = requests.get(
-                    f"{base_1708}/api/reverse-geocode",
-                    params={"lat": coord_lat, "long": coord_lng, "lng": coord_lng},
-                    timeout=4.0
-                )
-                if geo_resp.status_code == 200:
-                    geo_data = geo_resp.json()
-                    if geo_data and geo_data.get("success") is not False:
-                        g_ward = (geo_data.get("ward") or "").strip()
-                        g_prov = (geo_data.get("province") or "").strip()
-                        g_dist = (geo_data.get("district") or "").strip()
-                        g_addr = (geo_data.get("address") or "").strip()
+                from CustomerPosition.geocode_service import get_address_details
+                geo_data = get_address_details(coord_lat, coord_lng)
+                if geo_data and geo_data.get("success") is not False:
+                    g_ward = (geo_data.get("ward") or "").strip()
+                    g_prov = (geo_data.get("province") or "").strip()
+                    g_dist = (geo_data.get("district") or "").strip()
+                    g_addr = (geo_data.get("address") or "").strip()
 
-                        if g_ward and not ward:
-                            ward = g_ward
-                        if g_prov and (not province or len(province) <= 3):
-                            province = g_prov
-                        if g_dist and not district:
-                            district = g_dist
-                        if g_addr and not address:
-                            address = g_addr
-            except Exception:
-                pass
+                    if g_ward and not ward:
+                        ward = g_ward
+                    if g_prov and (not province or len(province) <= 3):
+                        province = g_prov
+                    if g_dist and not district:
+                        district = g_dist
+                    if g_addr and not address:
+                        address = g_addr
+            except Exception as geo_ex:
+                print(f"⚠️ [Reverse-Geocode Direct CP] Lỗi geocode: {geo_ex}")
 
     norm_w, norm_p, loc_str = normalize_vn_commune_and_province(ward, district, province, address)
 
@@ -701,7 +702,7 @@ def get_cell_location_api(
         "latitude": coord_lat,
         "longitude": coord_lng,
         "location_str": loc_str,
-        "cell_url": f"http://10.155.59.158:1708/cellid/{cell_name}" if cell_name else None,
+        "cell_url": f"/vitri/?cell={cell_name}" if cell_name else None,
         "map_url": f"https://www.google.com/maps?q={coord_lat},{coord_lng}" if (coord_lat and coord_lng) else None
     }
     _CELL_LOCATION_CACHE[clean_cell] = {"time": now_t, "data": result}
@@ -733,6 +734,10 @@ async def save_ai_feedback_api(request: Request):
     ticket_content = body.get("ticket_content", "")
     summary_content = body.get("summary_content", "")
     verified_by = body.get("verified_by", "KTV")
+    service_type = body.get("service_type")
+    if not service_type:
+        from services.sms_analyzer import is_sms_ticket
+        service_type = "sms" if is_sms_ticket(package_title, ticket_content) else "data"
 
     if not summary_content:
         return {"success": False, "error": "Nội dung tóm tắt không được để trống"}
@@ -744,16 +749,106 @@ async def save_ai_feedback_api(request: Request):
             package_title=package_title,
             ticket_content=ticket_content,
             summary_content=summary_content,
-            verified_by=verified_by
+            verified_by=verified_by,
+            service_type=service_type
         )
+        # Đồng bộ mốc thời gian sự cố (Mục 2) vào cột sms_incident_time của tickets
+        inc_time_val = ""
+        for s_line in summary_content.split("\n"):
+            m_time = re.match(r"^(?:2\.\s*)?mốc thời gian(?:\s+xảy ra)?\s*:\s*(.+)$", s_line.strip(), re.IGNORECASE)
+            if m_time:
+                inc_time_val = m_time.group(1).strip()
+                break
+        if inc_time_val and inc_time_val not in ("--", "Không rõ", "Không đề cập"):
+            clean_digits = "".join(filter(str.isdigit, str(phone).strip()))
+            p_84 = ("84" + clean_digits[1:]) if clean_digits.startswith("0") else (("84" + clean_digits) if len(clean_digits) == 9 else clean_digits)
+            conn_inc = get_db_connection()
+            with conn_inc:
+                if ticket_id:
+                    conn_inc.execute("UPDATE tickets SET sms_incident_time = ? WHERE ticket_id = ?", (inc_time_val, ticket_id))
+                elif phone:
+                    conn_inc.execute("UPDATE tickets SET sms_incident_time = ? WHERE phone = ? OR phone = ? OR phone LIKE ?", (inc_time_val, phone, p_84, f"%{clean_digits[-9:]}%"))
+            conn_inc.close()
+
         if phone:
             save_summary(phone, package_title, ticket_content, summary_content)
         return {
             "success": True, 
+            "sms_incident_time": inc_time_val,
             "message": "Đã lưu mẫu chuẩn thành công! Qwen sẽ học theo mẫu này cho các phiếu sau."
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@router.post("/tickets/update-incident-time")
+async def update_incident_time_api(request: Request):
+    """Cập nhật mốc thời gian sự cố (Mục 2) của phiếu SMS theo điều chỉnh của KTV."""
+    from db_manager import get_db_connection
+    from ai_sms_interpreter import update_ai_summary_incident_time, parse_custom_sms_time
+    from ai_cache import save_summary
+
+    body = await request.json()
+    phone = str(body.get("phone") or "").strip()
+    incident_time = str(body.get("incident_time") or "").strip()
+    ticket_id = body.get("ticket_id")
+    new_time = str(body.get("new_time") or "").strip()
+
+    if not new_time:
+        return {"success": False, "error": "Mốc thời gian không được để trống"}
+
+    clean_digits = "".join(filter(str.isdigit, phone))
+    phone_84 = ("84" + clean_digits[1:]) if clean_digits.startswith("0") else (("84" + clean_digits) if len(clean_digits) == 9 else clean_digits)
+
+    # Chuẩn hóa mốc thời gian
+    parsed = parse_custom_sms_time(new_time)
+    formatted_time = parsed.get("time_range_desc") or parsed.get("detected_time") or new_time
+
+    conn = get_db_connection()
+    updated_summary = ""
+    with conn:
+        row = None
+        if ticket_id:
+            row = conn.execute("SELECT rowid, package_title, ticket_content, ai_summary FROM tickets WHERE ticket_id = ?", (ticket_id,)).fetchone()
+        if not row and incident_time:
+            row = conn.execute("SELECT rowid, package_title, ticket_content, ai_summary FROM tickets WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?", (phone, phone_84, f"%{clean_digits[-9:]}%", incident_time)).fetchone()
+        if not row:
+            row = conn.execute("SELECT rowid, package_title, ticket_content, ai_summary FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1", (phone, phone_84, f"%{clean_digits[-9:]}%")).fetchone()
+
+        pkg_title = row[1] if row else "Tin nhắn (SMS)"
+        t_content = row[2] if row else ""
+        current_summary = row[3] if row else ""
+
+        updated_summary = update_ai_summary_incident_time(current_summary, formatted_time)
+
+        if row:
+            target_rowid = row[0]
+            if ticket_id:
+                conn.execute("UPDATE tickets SET sms_incident_time = ?, ai_summary = ?, ticket_id = COALESCE(ticket_id, ?), updated_at = CURRENT_TIMESTAMP WHERE rowid = ?", (formatted_time, updated_summary, ticket_id, target_rowid))
+            else:
+                conn.execute("UPDATE tickets SET sms_incident_time = ?, ai_summary = ?, updated_at = CURRENT_TIMESTAMP WHERE rowid = ?", (formatted_time, updated_summary, target_rowid))
+        else:
+            conn.execute("""
+                INSERT INTO tickets (phone, incident_time, package_title, ticket_content, sms_incident_time, ai_summary, ticket_id, source, ticket_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'tts_new', 'Chưa đóng')
+            """, (phone_84, incident_time or "", pkg_title, t_content, formatted_time, updated_summary, ticket_id))
+
+    conn.close()
+
+    if phone:
+        try:
+            save_summary(phone, pkg_title, t_content, updated_summary)
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "message": f"Đã cập nhật mốc thời gian sự cố thành '{formatted_time}'",
+        "sms_incident_time": formatted_time,
+        "ai_summary": updated_summary,
+        "from_date": parsed.get("from_date"),
+        "to_date": parsed.get("to_date")
+    }
 
 
 @router.post("/tickets/clear")
@@ -978,14 +1073,23 @@ async def close_one_ttsnew_ticket(request: Request):
         except Exception:
             pass
 
+    pkg_t = str(r_dict.get("package_title") or "")
+    tc_c = str(r_dict.get("ticket_code") or "")
+    c_txt = str(r_dict.get("ticket_content") or "")
+    has_flag = ("🚩" in pkg_t) or ("🚩" in tc_c) or ("🚩" in c_txt)
+
     reopen_cnt = int(r_dict.get("reopen_count") or 0)
+    if has_flag and reopen_cnt == 0:
+        reopen_cnt = 1
+
     force_close = body.get("force", False)
     if reopen_cnt > 0 and not force_close:
+        flag_desc = "có gắn cờ đỏ 🚩" if has_flag else f"đã mở lại {reopen_cnt} lần"
         return {
             "success": False, 
             "is_reopened": True,
             "reopen_count": reopen_cnt,
-            "message": f"⚠️ Phiếu này đã mở lại {reopen_cnt} lần (THÔNG TIN MỞ LẠI TTS). Hệ thống chặn tự động đóng. KTV cần xác nhận trước khi đóng thủ công."
+            "message": f"⚠️ Phiếu này là PHIẾU MỞ LẠI ({flag_desc}). Hệ thống chặn tự động đóng. KTV cần xác nhận trước khi đóng thủ công."
         }
 
     client_ip = request.client.host if request.client else "127.0.0.1"
@@ -1101,10 +1205,17 @@ async def close_all_ttsnew_tickets(request: Request):
                     r_dict = dict(row)
                     row_status = r_dict.get("status")
                     if row_status:
+                        pkg_t = str(r_dict.get("package_title") or "")
+                        tc_c = str(r_dict.get("ticket_code") or "")
+                        c_txt = str(r_dict.get("ticket_content") or "")
+                        has_flag = ("🚩" in pkg_t) or ("🚩" in tc_c) or ("🚩" in c_txt)
                         rc = int(r_dict.get("reopen_count") or 0)
+                        if has_flag and rc == 0:
+                            rc = 1
                         row_phone = r_dict.get("phone") or ""
                         if rc > 0:
-                            state.log("WARN", f"   ↳ ⛔ Bỏ qua {ticket_code} ({row_phone}): Đã mở lại {rc} lần (THÔNG TIN MỞ LẠI TTS) - KHÔNG ĐÓNG TỰ ĐỘNG!")
+                            flag_tag = " (có cờ đỏ 🚩)" if has_flag else f" ({rc} lần)"
+                            state.log("WARN", f"   ↳ ⛔ Bỏ qua {ticket_code} ({row_phone}): Phiếu mở lại{flag_tag} - KHÔNG ĐÓNG TỰ ĐỘNG!")
                             continue
 
                         from db_manager import check_ticket_can_close
@@ -1174,11 +1285,23 @@ async def precheck_all_sms_tickets_api(request: Request):
     req_region = str(body.get("region") or "").strip().upper()
     if req_region not in ("MB", "MN", "MT"):
         req_region = None
+    force_recheck = bool(body.get("force_recheck") or body.get("force"))
 
     from db_manager import get_all_tickets
     sms_tickets = get_all_tickets(tab_filter="chua_dong", source="tts_new", service_type="sms", region=req_region)
     if not sms_tickets:
         return {"success": False, "message": "Không có phiếu tin nhắn nào trong danh sách cần xử lý."}
+
+    # Nếu không phải force_recheck: Chỉ tiền kiểm các phiếu CHƯA CÓ NHẬN ĐỊNH hợp lệ
+    if not force_recheck:
+        def _has_valid_sms_eval(t):
+            st = str(t.get("status") or "").strip().upper()
+            if not st or st in ("CHỜ TIỀN KIỂM", "CHƯA PHÂN LOẠI") or "LỖI KẾT NỐI" in st or "LỖI MÁY CHỦ" in st:
+                return False
+            return True
+        sms_tickets = [t for t in sms_tickets if not _has_valid_sms_eval(t)]
+        if not sms_tickets:
+            return {"success": True, "message": "Tất cả các phiếu tin nhắn đã có nhận định trên hệ thống. Không có phiếu mới cần tiền kiểm.", "total": 0}
 
     def _run_batch_sms_precheck():
         import time
@@ -1203,13 +1326,14 @@ async def precheck_all_sms_tickets_api(request: Request):
                 "title": t_row.get("package_title") or "Tin nhắn (SMS)",
                 "content": t_row.get("ticket_content") or "",
                 "incident_time": inc_time,
+                "created_time": t_row.get("created_time") or "",
                 "reopen_count": t_row.get("reopen_count") or 0,
                 "ticket_code": t_row.get("ticket_code") or ""
             }
 
             try:
-                # Tiền kiểm: bóc tách AI + đối soát CDR SMSC
-                res = analyze_sms_ticket_with_cdr(p_84, t_info, force_cdr=True)
+                # Tiền kiểm toàn diện: bóc tách AI + kiểm tra GW + đối soát CDR SMSC
+                res = analyze_sms_ticket_with_cdr(p_84, t_info, force_cdr=True, force_gw=True)
 
                 # Chuẩn bị dữ liệu SMS CDR
                 sms_cdr_str = ""
@@ -1303,14 +1427,17 @@ async def precheck_one_ticket(request: Request):
     conn = get_db_connection()
     with conn:
         if incident_time:
-            cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code FROM tickets WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?", (phone, phone_84, f"%{clean_digits[-9:]}%", incident_time))
+            cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code, ai_summary, sms_incident_time, created_time FROM tickets WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?", (phone, phone_84, f"%{clean_digits[-9:]}%", incident_time))
         else:
-            cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1", (phone, phone_84, f"%{clean_digits[-9:]}%"))
+            cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code, ai_summary, sms_incident_time, created_time FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1", (phone, phone_84, f"%{clean_digits[-9:]}%"))
         row = cur.fetchone()
         pkg_title = (row[0] if row else "Thoại / SMS") or ""
         t_content = row[1] if row else ""
         reopen_cnt = row[2] if row and len(row) > 2 else 0
         t_code = row[3] if row and len(row) > 3 else ""
+        existing_ai_sum = (row[4] if row and len(row) > 4 else "") or ""
+        existing_sms_inc_time = (row[5] if row and len(row) > 5 else "") or ""
+        existing_created_time = (row[6] if row and len(row) > 6 else "") or ""
 
     from region_detector import detect_ticket_region
     target_reg = req_region or detect_ticket_region({
@@ -1425,10 +1552,13 @@ async def precheck_one_ticket(request: Request):
                 "package_title": pkg_title,
                 "content": t_content,
                 "ticket_content": t_content,
-                "incident_time": incident_time,
+                "incident_time": incident_time or existing_created_time,
+                "created_time": existing_created_time,
                 "reopen_count": reopen_cnt,
                 "ticket_code": t_code,
-                "service_type": req_service_type
+                "service_type": req_service_type,
+                "ai_summary": existing_ai_sum,
+                "sms_incident_time": existing_sms_inc_time
             }
             v_res = precheck_single_voice_ticket(phone_84, t_info, driver=driver)
             try:
@@ -1442,8 +1572,21 @@ async def precheck_one_ticket(request: Request):
             except Exception:
                 pass
 
-        with ThreadPoolExecutor(max_workers=3) as exec_pre:
+        ims_res = {}
+        ims_json_str = ""
+        def _fetch_ims_task():
+            nonlocal ims_res, ims_json_str
+            try:
+                from sapccheck.ims_client import get_ims_profile
+                ims_res = get_ims_profile(phone_84, save_to_file=True)
+                if ims_res and ims_res.get("success"):
+                    ims_json_str = json.dumps(ims_res, ensure_ascii=False)
+            except Exception as ex_ims:
+                pass
+
+        with ThreadPoolExecutor(max_workers=4) as exec_pre:
             f_sc = exec_pre.submit(_fetch_sapc_cell_task)
+            f_ims = exec_pre.submit(_fetch_ims_task)
             if is_voice:
                 f_vc = exec_pre.submit(_fetch_voice_task)
                 f_sc.result()
@@ -1454,6 +1597,7 @@ async def precheck_one_ticket(request: Request):
                 f_sc.result()
                 f_bt.result()
                 f_cm.result()
+            f_ims.result()
 
         out_dir = str(BASE_DIR / "output")
         os.makedirs(out_dir, exist_ok=True)
@@ -1498,6 +1642,7 @@ async def precheck_one_ticket(request: Request):
                             sms_problem = COALESCE(NULLIF(?, ''), sms_problem),
                             sms_incident_time = COALESCE(NULLIF(?, ''), sms_incident_time),
                             incident_cause = COALESCE(NULLIF(?, ''), incident_cause),
+                            ims_data = COALESCE(NULLIF(?, ''), ims_data),
                             prechecked_at = ?,
                             region = CASE WHEN ? IN ('MB', 'MN', 'MT') THEN ? ELSE region END,
                             updated_at = CURRENT_TIMESTAMP 
@@ -1509,7 +1654,7 @@ async def precheck_one_ticket(request: Request):
                         v_res.get("status", ""),
                         v_res.get("comment", ""),
                         v_res.get("action_plan", ""),
-                        v_res.get("ai_summary", ""),
+                        v_res.get("ai_summary", "") or existing_ai_sum,
                         v_res.get("app_usage", ""),
                         v_res.get("color", ""),
                         ccos_json_str,
@@ -1517,6 +1662,7 @@ async def precheck_one_ticket(request: Request):
                         sms_prob,
                         sms_inc_time,
                         v_res.get("suggested_cause_name", ""),
+                        ims_json_str,
                         now_precheck_str,
                         target_reg, target_reg,
                         phone, phone_84, f"%{clean_digits[-9:]}%", incident_time
@@ -1538,6 +1684,7 @@ async def precheck_one_ticket(request: Request):
                             sms_problem = COALESCE(NULLIF(?, ''), sms_problem),
                             sms_incident_time = COALESCE(NULLIF(?, ''), sms_incident_time),
                             incident_cause = COALESCE(NULLIF(?, ''), incident_cause),
+                            ims_data = COALESCE(NULLIF(?, ''), ims_data),
                             prechecked_at = ?,
                             region = CASE WHEN ? IN ('MB', 'MN', 'MT') THEN ? ELSE region END,
                             updated_at = CURRENT_TIMESTAMP 
@@ -1549,7 +1696,7 @@ async def precheck_one_ticket(request: Request):
                         v_res.get("status", ""),
                         v_res.get("comment", ""),
                         v_res.get("action_plan", ""),
-                        v_res.get("ai_summary", ""),
+                        v_res.get("ai_summary", "") or existing_ai_sum,
                         v_res.get("app_usage", ""),
                         v_res.get("color", ""),
                         ccos_json_str,
@@ -1557,6 +1704,7 @@ async def precheck_one_ticket(request: Request):
                         sms_prob,
                         sms_inc_time,
                         v_res.get("suggested_cause_name", ""),
+                        ims_json_str,
                         now_precheck_str,
                         target_reg, target_reg,
                         phone, phone_84, f"%{clean_digits[-9:]}%"
@@ -1568,15 +1716,15 @@ async def precheck_one_ticket(request: Request):
                             phone, incident_time, package_title, ticket_content, status, comment, action_plan,
                             real_packages, rat_types, cem_data, app_usage, ai_summary, color,
                             ccos_attachments, sms_cdr_summary, sms_problem, sms_incident_time,
-                            incident_cause, prechecked_at, region, source, ticket_status, ticket_code
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'tts_new', 'Chưa đóng', ?)
+                            incident_cause, ims_data, prechecked_at, region, source, ticket_status, ticket_code
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'tts_new', 'Chưa đóng', ?)
                     """, (
                         phone_84, incident_time or "", pkg_title or "Thoại / SMS", t_content or "",
                         v_res.get("status", "MẠNG LƯỚI ĐẢM BẢO"), v_res.get("comment", ""), v_res.get("action_plan", ""),
                         v_res.get("formatted_pkg", ""), v_res.get("rat_types", ""), v_res.get("cem_data", ""),
-                        v_res.get("app_usage", "--"), v_res.get("ai_summary", t_content or ""), v_res.get("color", "green"),
+                        v_res.get("app_usage", "--"), v_res.get("ai_summary", t_content or "") or existing_ai_sum, v_res.get("color", "green"),
                         ccos_json_str, sms_cdr_str, sms_prob, sms_inc_time,
-                        v_res.get("suggested_cause_name", ""), now_precheck_str, target_reg, t_code or ""
+                        v_res.get("suggested_cause_name", ""), ims_json_str, now_precheck_str, target_reg, t_code or ""
                     ))
                 state.log("SUCCESS", f"✅ Đã tiền kiểm Thoại / SMS / Gói xong cho {phone_84}: {v_res.get('status')}", region=target_reg)
                 return {
@@ -1588,6 +1736,7 @@ async def precheck_one_ticket(request: Request):
                     "action_plan": v_res.get("action_plan"), 
                     "ai_summary": v_res.get("ai_summary"),
                     "sms_problem": sms_prob,
+                    "sms_incident_time": sms_inc_time,
                     "sms_cdr_summary": v_res.get("sms_cdr_summary"),
                     "suggested_cause_name": v_res.get("suggested_cause_name", "")
                 }
@@ -1615,12 +1764,13 @@ async def precheck_one_ticket(request: Request):
                     existing_clean_data, pkg_title, t_content, phone_84=phone_84,
                     cem_records=cem_recs, app_events=app_evs, incident_time_str=incident_time, driver=driver
                 )
-                if t_content:
-                    try:
-                        from ai_interpreter import generate_ticket_summary
-                        ai_sum_calc = generate_ticket_summary(pkg_title, t_content, phone=phone_84)
-                    except Exception:
-                        pass
+                # Khi click nút tiền kiểm trên mỗi phiếu: luôn kiểm tra và làm mới bóc tách nội dung
+                try:
+                    from ai_interpreter import generate_ticket_summary
+                    fresh_sum = generate_ticket_summary(pkg_title, t_content, phone=phone_84)
+                    ai_sum_calc = fresh_sum if fresh_sum else existing_ai_sum
+                except Exception:
+                    ai_sum_calc = existing_ai_sum
             else:
                 status_calc = ""
                 comment_calc = ""
@@ -1637,11 +1787,12 @@ async def precheck_one_ticket(request: Request):
                         comment = ?,
                         action_plan = ?,
                         ai_summary = CASE WHEN ? != '' THEN ? ELSE ai_summary END,
+                        ims_data = COALESCE(NULLIF(?, ''), ims_data),
                         prechecked_at = ?,
                         region = CASE WHEN ? IN ('MB', 'MN', 'MT') THEN ? ELSE region END,
                         updated_at = CURRENT_TIMESTAMP 
                     WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?
-                """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, ai_sum_calc, ai_sum_calc, now_precheck_str, target_reg, target_reg, phone, phone_84, f"%{clean_digits[-9:]}%", incident_time))
+                """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, ai_sum_calc, ai_sum_calc, ims_json_str, now_precheck_str, target_reg, target_reg, phone, phone_84, f"%{clean_digits[-9:]}%", incident_time))
             else:
                 conn.execute("""
                     UPDATE tickets 
@@ -1653,11 +1804,12 @@ async def precheck_one_ticket(request: Request):
                         comment = ?,
                         action_plan = ?,
                         ai_summary = CASE WHEN ? != '' THEN ? ELSE ai_summary END,
+                        ims_data = COALESCE(NULLIF(?, ''), ims_data),
                         prechecked_at = ?,
                         region = CASE WHEN ? IN ('MB', 'MN', 'MT') THEN ? ELSE region END,
                         updated_at = CURRENT_TIMESTAMP 
                     WHERE rowid = (SELECT rowid FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1)
-                """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, ai_sum_calc, ai_sum_calc, now_precheck_str, target_reg, target_reg, phone, phone_84, f"%{clean_digits[-9:]}%"))
+                """, (formatted_pkg, rat, cem_desc, app_usage_str, app_usage_str, status_calc, comment_calc, action_calc, ai_sum_calc, ai_sum_calc, ims_json_str, now_precheck_str, target_reg, target_reg, phone, phone_84, f"%{clean_digits[-9:]}%"))
         conn.close()
 
         state.log("SUCCESS", f"✅ Đã tiền kiểm Core xong cho {phone_84}: Radio={info_res.get('Radio')}, HSS={info_res.get('HSS Profile')}, IP={info_res.get('IPv4')}, NAM={info_res.get('NAM')}", region=target_reg)

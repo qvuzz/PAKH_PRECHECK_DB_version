@@ -376,7 +376,97 @@ async def sync_all_tokens_api(request: Request):
         except Exception as e:
             results["synced"].append({"service": "SAPC", "success": False, "error": str(e)})
 
+    # 7. GW Session (VNPT-GW: JSESSIONID / ViewState)
+    gw_raw = body.get("gw_cookie") or body.get("gw_jsessionid") or (body.get("gw") if isinstance(body.get("gw"), str) else (body.get("gw") or {}).get("cookie"))
+    gw_vs = body.get("gw_view_state") or body.get("view_state") or ((body.get("gw") or {}).get("view_state") if isinstance(body.get("gw"), dict) else "")
+    if gw_raw:
+        try:
+            from gw_client import save_gw_cache
+            is_val, msg = save_gw_cache(str(gw_raw), view_state=str(gw_vs or ""), verify=False)
+            client_ip = request.client.host if request.client else "127.0.0.1"
+            from services.session_manager import ACTIVE_LAN_SESSIONS, _save_lan_sessions
+            if client_ip not in ACTIVE_LAN_SESSIONS:
+                ACTIVE_LAN_SESSIONS[client_ip] = {}
+            ACTIVE_LAN_SESSIONS[client_ip]["gw_cookie"] = str(gw_raw)
+            ACTIVE_LAN_SESSIONS[client_ip]["gw_timestamp"] = time.time()
+            _save_lan_sessions()
+            results["synced"].append({"service": "GW", "success": True, "message": msg})
+        except Exception as e:
+            results["synced"].append({"service": "GW", "success": False, "error": str(e)})
+
     return results
+
+
+@router.get("/gw/status")
+def get_gw_status(request: Request):
+    from gw_client import load_gw_cache
+    cached = load_gw_cache()
+    js = cached.get("jsessionid", "")
+    vs = cached.get("view_state", "")
+
+    # Fallback kiểm tra trong ACTIVE_LAN_SESSIONS nếu cache trên đĩa chưa có
+    if not js:
+        client_ip = request.client.host if request.client else "127.0.0.1"
+        try:
+            from services.session_manager import ACTIVE_LAN_SESSIONS
+            lan_s = ACTIVE_LAN_SESSIONS.get(client_ip, {})
+            lan_gw = lan_s.get("gw_cookie")
+            if lan_gw:
+                from gw_client import save_gw_cache
+                save_gw_cache(lan_gw, verify=False)
+                cached = load_gw_cache()
+                js = cached.get("jsessionid", "")
+                vs = cached.get("view_state", "")
+        except Exception:
+            pass
+
+    has_session = bool(js)
+    is_valid = cached.get("is_valid", has_session)
+    msg = cached.get("message") or ("Phiên làm việc GW đang hoạt động" if has_session else "Chưa có session GW")
+    return {
+        "success": True,
+        "connected": has_session and is_valid,
+        "message": msg,
+        "has_session": has_session,
+        "updated_at": cached.get("updated_at_str", "")
+    }
+
+
+@router.post("/gw/cookie")
+async def update_gw_cookie(request: Request):
+    body = await request.json()
+    cookie_input = str(body.get("cookie") or body.get("jsessionid") or body.get("raw") or "").strip()
+    view_state = str(body.get("view_state") or "").strip()
+    if not cookie_input:
+        return {"success": False, "message": "Cookie/JSESSIONID không được để trống"}
+    from gw_client import save_gw_cache
+    is_valid, msg = save_gw_cache(cookie_input, view_state=view_state, verify=False)
+    return {
+        "success": True,
+        "connected": True,
+        "message": "Đã lưu session GW thành công"
+    }
+
+
+@router.post("/gw/logout")
+def logout_gw_api():
+    from gw_client import clear_gw_cache
+    clear_gw_cache()
+    return {"success": True, "message": "Đã xóa phiên GW thành công"}
+
+
+@router.get("/gw/lookup")
+def lookup_gw_api(msisdn: str, types: str = ""):
+    from gw_client import lookup_subscriber_gw
+    custom_types = [t.strip() for t in types.split(",") if t.strip()] if types else None
+    return lookup_subscriber_gw(msisdn, custom_types=custom_types, save_json=True)
+
+
+@router.get("/gw/diagnostic")
+def diagnostic_gw_api(msisdn: str = "0845061315"):
+    """API chẩn đoán chuyên sâu kết nối GW phục vụ kiểm tra từ trình duyệt hoặc curl."""
+    from gw_client import run_gw_diagnostic
+    return run_gw_diagnostic(msisdn=msisdn, verbose=False)
 
 
 

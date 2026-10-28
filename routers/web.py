@@ -50,7 +50,8 @@ SPA_ROUTES = [
     "/lich-su",
     "/kiem-tra-luong",
     "/quan-tri-ktv",
-    "/admin-users"
+    "/admin-users",
+    "/vitri"
 ]
 
 # Tự động bổ sung các Route phân vùng 3 Miền (mien-bac, mien-trung, mien-nam, mb, mt, mn)

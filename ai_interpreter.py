@@ -20,17 +20,36 @@ _local_llm_lock = threading.Lock()
 
 
 def get_local_llm():
-    """Nạp model Qwen 2.5 GGUF chạy CPU (Lazy loading & Thread-safe)"""
+    """Nạp model Qwen GGUF (ưu tiên Qwen 3) chạy CPU (Lazy loading & Thread-safe)"""
     global local_llm, _local_llm_lock
     if local_llm is not None:
         return local_llm
 
-    model_path = os.getenv("LOCAL_MODEL_PATH", "models/qwen2.5-3b-instruct-q4_k_m.gguf").strip()
-    if not os.path.isabs(model_path):
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        model_path = os.path.join(base_dir, model_path)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    models_dir = os.path.join(base_dir, "models")
 
-    if not os.path.exists(model_path):
+    # 1. Tìm ứng viên model theo thứ tự ưu tiên:
+    #    Ưu tiên 1: Biến môi trường LOCAL_MODEL_PATH nếu file tồn tại
+    #    Ưu tiên 2: Qwen3-4B-Q4_K_M.gguf hoặc bất kỳ file Qwen3*.gguf nào trong models/
+    #    Ưu tiên 3: qwen2.5-3b-instruct-q4_k_m.gguf hoặc bất kỳ file *.gguf nào khác
+    model_path = None
+    env_model = os.getenv("LOCAL_MODEL_PATH", "").strip()
+    if env_model:
+        cand = env_model if os.path.isabs(env_model) else os.path.join(base_dir, env_model)
+        if os.path.exists(cand):
+            model_path = cand
+
+    if not model_path and os.path.exists(models_dir):
+        import glob
+        q3_files = sorted(glob.glob(os.path.join(models_dir, "*[Qq]wen3*.gguf")), key=os.path.getsize, reverse=True)
+        if q3_files:
+            model_path = q3_files[0]
+        else:
+            q2_files = sorted(glob.glob(os.path.join(models_dir, "*.gguf")), key=os.path.getsize, reverse=True)
+            if q2_files:
+                model_path = q2_files[0]
+
+    if not model_path or not os.path.exists(model_path):
         return None
 
     try:
@@ -46,7 +65,9 @@ def get_local_llm():
             n_threads=cpu_threads,
             verbose=False
         )
-        print(f"🤖 [LOCAL LLM] Đã nạp thành công Qwen 2.5 GGUF ({os.path.basename(model_path)}) - CPU {cpu_threads} threads.")
+        model_name = os.path.basename(model_path)
+        ver_tag = "Qwen 3" if "qwen3" in model_name.lower() else "Qwen 2.5"
+        print(f"🤖 [LOCAL LLM] Đã nạp thành công {ver_tag} GGUF ({model_name}) - CPU {cpu_threads} threads.")
         return local_llm
     except Exception as e:
         print(f"⚠️ Lỗi khởi tạo Local LLM ({model_path}): {e}")
@@ -482,7 +503,7 @@ BẮT BUỘC:
     return None
 
 
-def generate_ticket_summary(package_title: str, ticket_content: str, phone: str = "") -> str:
+def generate_ticket_summary(package_title: str, ticket_content: str, phone: str = "", incident_time: str = "", created_time: str = "") -> str:
     """
     Tóm tắt nội dung phản ánh khách hàng chuẩn 6 mục tiêu chuẩn viễn thông.
     Hoạt động 100% trong bộ nhớ, không phụ thuộc vào file trên đĩa hay BTools.
@@ -510,7 +531,7 @@ def generate_ticket_summary(package_title: str, ticket_content: str, phone: str 
         c_low = content.lower()
         if is_sms_ticket(pkg_title) or any(k in t_low for k in ["tin nhắn", "sms"]) or any(k in c_low for k in ["nhắn tin", "gửi tin", "nhận tin", "ttnt", "smo", "smt"]):
             from ai_sms_interpreter import generate_sms_ticket_summary
-            return generate_sms_ticket_summary(pkg_title, content, phone=phone_clean)
+            return generate_sms_ticket_summary(pkg_title, content, phone=phone_clean, incident_time_fallback=incident_time, created_time=created_time)
     except Exception:
         pass
 

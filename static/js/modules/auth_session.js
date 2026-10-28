@@ -10,7 +10,7 @@
     const _originalFetch = window.fetch;
     window.fetch = function(url, options = {}) {
         try {
-            const tok = localStorage.getItem('ttsnew_auth_token') || localStorage.getItem('tts_auth_token');
+            const tok = (typeof getTtsNewAuthToken === 'function' ? getTtsNewAuthToken() : '') || localStorage.getItem('tts_auth_token');
             if (tok && typeof url === 'string' && url.startsWith('/api/')) {
                 options = options || {};
                 options.headers = options.headers || {};
@@ -132,6 +132,11 @@ function getTtsNewAuthToken() {
                 console.warn("[TTS New Auth] Token trong localStorage đã hết hạn exp:", parsed.exp, "hiện tại:", nowSec);
                 localStorage.removeItem('ttsnew_auth_token');
                 localStorage.removeItem('ttsnew_auth_user');
+                window.authRequireLogin = true;
+                window.authTokenExpired = true;
+                window.authLoginMessage = "Token đã hết hạn, vui lòng đăng nhập TTS Mới.";
+                if (typeof cachedTickets !== 'undefined') cachedTickets = [];
+                if (window.ticketsModuleCache) window.ticketsModuleCache = {};
                 return '';
             }
         }
@@ -172,6 +177,9 @@ function setTtsNewAuthToken(tok) {
         clean = 'Bearer ' + clean;
     }
     localStorage.setItem('ttsnew_auth_token', clean);
+    window.authRequireLogin = false;
+    window.authTokenExpired = false;
+    window.authLoginMessage = '';
     const parsed = parseJwt(clean);
     let uObj = null;
     if (parsed) {
@@ -200,6 +208,11 @@ function clearTtsNewAuthToken() {
     localStorage.removeItem('tts_auth_user');
     localStorage.removeItem('pakh_is_admin');
     window.currentApiUserName = '';
+    window.authRequireLogin = true;
+    window.authTokenExpired = false;
+    window.authLoginMessage = 'Vui lòng đăng nhập tài khoản OneOSS để xem danh sách phiếu.';
+    if (typeof cachedTickets !== 'undefined') cachedTickets = [];
+    if (window.ticketsModuleCache) window.ticketsModuleCache = {};
     currentAuthUser = null;
     try {
         fetch('/api/logout', { method: 'POST' }).catch(() => { });
@@ -638,12 +651,15 @@ function applyUserSessionState() {
     // Không bao giờ khóa mờ màn hình (luôn xóa is-unauthenticated để KTV xem dữ liệu tự do)
     document.body.classList.remove('is-unauthenticated');
 
-    // Kiểm tra tài khoản có phải là SuperAdmin (quangvu / quangvu@vnpt.vn / Lê Quang Vũ) hay không
+    // Kiểm tra tài khoản có phải là SuperAdmin (quangvu / admin / superadmin / quantri / root / Lê Quang Vũ)
     if (session) {
         const uName = (session.username || '').toLowerCase();
         const uEmail = (session.email || '').toLowerCase();
         const uDisp = (session.displayName || '').toLowerCase();
-        if (uName === 'quangvu' || uEmail.includes('quangvu') || uDisp.includes('lê quang vũ') || uDisp.includes('quangvu')) {
+        if (
+            uName === 'quangvu' || uEmail.includes('quangvu') || uDisp.includes('lê quang vũ') || uDisp.includes('quangvu') ||
+            uName === 'admin' || uName === 'superadmin' || uName === 'quantri' || uName === 'root'
+        ) {
             isSystemAdmin = true;
         }
     }
@@ -652,7 +668,15 @@ function applyUserSessionState() {
     }
 
     if (!session || !session.token) {
-        if (unauthBtn) unauthBtn.style.display = 'inline-flex';
+        if (unauthBtn) {
+            unauthBtn.style.display = 'inline-flex';
+            const span = unauthBtn.querySelector('span');
+            if (span) {
+                span.innerText = window.authTokenExpired 
+                    ? '<Token đã hết hạn - Đăng nhập lại>' 
+                    : '<Bạn cần đăng nhập TTS Mới trước>';
+            }
+        }
         if (authPill) authPill.style.display = 'none';
         if (welcomeModal) welcomeModal.style.display = 'none';
     } else {
@@ -665,6 +689,12 @@ function applyUserSessionState() {
             authRoleTag.className = isSystemAdmin ? 'auth-role-tag admin' : 'auth-role-tag ktv';
         }
         if (welcomeModal) welcomeModal.style.display = 'none';
+    }
+
+    // Điều khiển hiển thị Menu Quản trị KTV (bật ngay lập tức khi là Admin, không phụ thuộc load phiếu)
+    const navAdminSec = document.getElementById('navAdminSection');
+    if (navAdminSec) {
+        navAdminSec.style.display = isSystemAdmin ? 'block' : 'none';
     }
 
     // Áp dụng vai trò (Admin vs KTV)
@@ -779,6 +809,28 @@ function startAppPolling() {
     if (typeof handleSpaRoute === 'function') {
         handleSpaRoute(window.location.pathname);
     }
+    // Kiểm tra định kỳ thời hạn token JWT để phát hiện hết hạn và ẩn phiếu ngay lập tức
+    setInterval(function() {
+        const rawTok = localStorage.getItem('ttsnew_auth_token');
+        if (rawTok) {
+            const parsed = parseJwt(rawTok);
+            if (parsed && parsed.exp) {
+                const nowSec = Math.floor(Date.now() / 1000);
+                if (parsed.exp <= (nowSec + 5)) {
+                    console.warn("[TTS New Auth] Phát hiện token JWT đã hết hạn realtime");
+                    localStorage.removeItem('ttsnew_auth_token');
+                    localStorage.removeItem('ttsnew_auth_user');
+                    window.authRequireLogin = true;
+                    window.authTokenExpired = true;
+                    window.authLoginMessage = "Token đã hết hạn, vui lòng đăng nhập TTS Mới.";
+                    if (typeof cachedTickets !== 'undefined') cachedTickets = [];
+                    if (window.ticketsModuleCache) window.ticketsModuleCache = {};
+                    applyUserSessionState();
+                    if (typeof renderTicketsTable === 'function') renderTicketsTable(true);
+                }
+            }
+        }
+    }, 5000);
 }
 
 if (document.readyState === 'loading') {

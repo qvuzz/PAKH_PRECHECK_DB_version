@@ -18,7 +18,10 @@ files_to_update = {
     "services/state.py": os.path.join(source_dir, "services", "state.py"),
     "services/tts_new_data.py": os.path.join(source_dir, "services", "tts_new_data.py"),
     "services/tts_old_data.py": os.path.join(source_dir, "services", "tts_old_data.py"),
+    "services/tts_old_api_data.py": os.path.join(source_dir, "services", "tts_old_api_data.py"),
     "services/tts_new_voice.py": os.path.join(source_dir, "services", "tts_new_voice.py"),
+    "services/tts_old_voice.py": os.path.join(source_dir, "services", "tts_old_voice.py"),
+    "services/tts_old_api_voice.py": os.path.join(source_dir, "services", "tts_old_api_voice.py"),
     "services/voice_precheck.py": os.path.join(source_dir, "services", "voice_precheck.py"),
     "docker-compose.yml": os.path.join(source_dir, "docker-compose.yml"),
     "Dockerfile": os.path.join(source_dir, "Dockerfile"),
@@ -38,6 +41,7 @@ files_to_update = {
     "static/js/modules/modal_popups.js": os.path.join(source_dir, "static", "js", "modules", "modal_popups.js"),
     "static/css/dashboard.css": os.path.join(source_dir, "static", "css", "dashboard.css"),
     "templates/dashboard.html": os.path.join(source_dir, "templates", "dashboard.html"),
+    "routers/customer_position.py": os.path.join(source_dir, "routers", "customer_position.py"),
     "routers/web.py": os.path.join(source_dir, "routers", "web.py"),
     "spam_call_analyzer.py": os.path.join(source_dir, "spam_call_analyzer.py"),
     "region_detector.py": os.path.join(source_dir, "region_detector.py"),
@@ -58,8 +62,11 @@ files_to_update = {
     "btools_manager.py": os.path.join(source_dir, "btools_manager.py"),
     "sapccheck/msisdn_info.py": os.path.join(source_dir, "sapccheck", "msisdn_info.py"),
     "sapccheck/sapc_client.py": os.path.join(source_dir, "sapccheck", "sapc_client.py"),
+    "sapccheck/ims_client.py": os.path.join(source_dir, "sapccheck", "ims_client.py"),
     "sapccheck/converter.py": os.path.join(source_dir, "sapccheck", "converter.py"),
     "sapccheck/__init__.py": os.path.join(source_dir, "sapccheck", "__init__.py"),
+    "sapccheck/sapc_cookies.json": os.path.join(source_dir, "sapccheck", "sapc_cookies.json"),
+    "sapccheck/cookies.json": os.path.join(source_dir, "sapccheck", "cookies.json"),
     ".env": os.path.join(source_dir, ".env"),
     # Không ghi đè tickets.db để bảo toàn dữ liệu live trên Docker server
     # "tickets.db": os.path.join(source_dir, "tickets.db"),
@@ -67,10 +74,17 @@ files_to_update = {
     "user_regions.json": os.path.join(source_dir, "user_regions.json"),
     "rattype.json": os.path.join(source_dir, "rattype.json"),
     "serviceid.json": os.path.join(source_dir, "serviceid.json"),
+    "diagnostic_config.json": os.path.join(source_dir, "diagnostic_config.json"),
+    "tts_old_token_cache.json": os.path.join(source_dir, "tts_old_token_cache.json"),
     "diagnostic_scenarios.json": os.path.join(source_dir, "diagnostic_scenarios.json"),
     "incident_causes_ttsnew.json": os.path.join(source_dir, "incident_causes_ttsnew.json"),
     "incident_causes_catalog.json": os.path.join(source_dir, "incident_causes_catalog.json"),
     "diagnostic_scenarios_sms.json": os.path.join(source_dir, "diagnostic_scenarios_sms.json"),
+    "sms_diagnostic_scenarios.json": os.path.join(source_dir, "sms_diagnostic_scenarios.json"),
+    "sms_code.json": os.path.join(source_dir, "sms_code.json"),
+    "sms_lib.json": os.path.join(source_dir, "sms_lib.json"),
+    "gw_client.py": os.path.join(source_dir, "gw_client.py"),
+    "requirements.txt": os.path.join(source_dir, "requirements.txt"),
     "specs_subscriber_core_check.md": os.path.join(source_dir, "specs_subscriber_core_check.md"),
     "static/js/flow_audit.js": os.path.join(source_dir, "static", "js", "flow_audit.js"),
     "static/css/flow_audit.css": os.path.join(source_dir, "static", "css", "flow_audit.css"),
@@ -78,9 +92,35 @@ files_to_update = {
     "routers/integrations.py": os.path.join(source_dir, "routers", "integrations.py"),
     "services/automation_worker.py": os.path.join(source_dir, "services", "automation_worker.py"),
     "services/session_manager.py": os.path.join(source_dir, "services", "session_manager.py"),
+    "gw_client.py": os.path.join(source_dir, "gw_client.py"),
+    "gw_auth_cache.json": os.path.join(source_dir, "gw_auth_cache.json"),
     "AGENTS.md": os.path.join(source_dir, "AGENTS.md"),
-    "DANH_MUC_KICH_BAN_DONG_PHIEU_MOBILE_INTERNET.xlsx": os.path.join(source_dir, "DANH_MUC_KICH_BAN_DONG_PHIEU_MOBILE_INTERNET.xlsx")
+    "requirements.txt": os.path.join(source_dir, "requirements.txt"),
+    "DANH_MUC_KICH_BAN_DONG_PHIEU_MOBILE_INTERNET.xlsx": os.path.join(source_dir, "DANH_MUC_KICH_BAN_DONG_PHIEU_MOBILE_INTERNET.xlsx"),
+    "KICH_BAN_TIEN_KIEM_PRECHECK.xlsx": os.path.join(source_dir, "KICH_BAN_TIEN_KIEM_PRECHECK.xlsx"),
+    "export_scenarios_to_excel.py": os.path.join(source_dir, "export_scenarios_to_excel.py"),
+    "import_scenarios_from_excel.py": os.path.join(source_dir, "import_scenarios_from_excel.py"),
+    "extension_precheck/manifest.json": os.path.join(source_dir, "extension_precheck", "manifest.json"),
+    "extension_precheck/background.js": os.path.join(source_dir, "extension_precheck", "background.js"),
+    "extension_precheck/content.js": os.path.join(source_dir, "extension_precheck", "content.js"),
+    "extension_precheck/popup.html": os.path.join(source_dir, "extension_precheck", "popup.html"),
+    "extension_precheck/popup.js": os.path.join(source_dir, "extension_precheck", "popup.js"),
+    "extension_precheck/popup/popup.html": os.path.join(source_dir, "extension_precheck", "popup", "popup.html"),
+    "extension_precheck/popup/popup.js": os.path.join(source_dir, "extension_precheck", "popup", "popup.js"),
+    "extension_precheck/popup/popup.css": os.path.join(source_dir, "extension_precheck", "popup", "popup.css")
 }
+
+# Tự động nạp toàn bộ module CustomerPosition (bản đồ & tra cứu vị trí)
+cp_source = os.path.join(source_dir, "CustomerPosition")
+if os.path.exists(cp_source):
+    for root, dirs, files in os.walk(cp_source):
+        dirs[:] = [d for d in dirs if d not in ("build", "dist", "__pycache__", ".git", "deploy_package")]
+        for f in files:
+            if f.endswith((".zip", ".tar", ".log", ".pid")):
+                continue
+            full_p = os.path.join(root, f)
+            rel_p = os.path.relpath(full_p, source_dir).replace("\\", "/")
+            files_to_update[rel_p] = full_p
 
 print("=== Đang cập nhật gói ZIP triển khai ===")
 with zipfile.ZipFile(zip_path, 'r') as zin, zipfile.ZipFile(tmp_path, 'w', compression=zipfile.ZIP_DEFLATED) as zout:

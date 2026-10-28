@@ -106,6 +106,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       setPill('stSapc', c && c.length > 0);
     });
 
+    // VNPT-GW
+    chrome.cookies.getAll({ domain: '10.165.15.29' }, (c) => {
+      let hasGw = c && c.some(x => x.name.toUpperCase() === 'JSESSIONID' && x.value);
+      if (!hasGw) {
+        chrome.storage.local.get(['live_gw_jsessionid'], (res) => {
+          setPill('stGw', !!(res && res.live_gw_jsessionid));
+        });
+      } else {
+        setPill('stGw', true);
+      }
+    });
+
     // CCOS
     chrome.cookies.getAll({ domain: 'gqknccos.vnpt.vn' }, (c) => {
       setPill('stCcos', c && c.some(x => x.name.includes('SessionDB') || x.name.includes('SESSIONID')));

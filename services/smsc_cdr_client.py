@@ -16,7 +16,7 @@ INDEX_PATTERNS = f"{HCM_INDEX_PATTERNS},{HN_INDEX_PATTERNS}"
 ALL_INDEX_PATTERNS = INDEX_PATTERNS
 
 ELASTIC_HOSTS = ["10.204.57.26"]
-DIRECT_TIMEOUT_SECS = 90.0
+DIRECT_TIMEOUT_SECS = 5.0
 ELASTIC_URL = f"http://{ELASTIC_HOSTS[0]}/{ALL_INDEX_PATTERNS}/_search"
 AUTH_HEADER = "Basic ZWxhc3RpYzpWSUFTWHRiek1MTFJhdklnTjAxQw=="
 
@@ -35,6 +35,12 @@ TERMINATION_CAUSE_MAP = {
     "0000": "Normal / Successful",
     "100c": "Message Delivery Successful",
     "100C": "Message Delivery Successful",
+    "130c": "SRI-for-SM / Routing Failure (Unknown Subscriber / Check MAP Error)",
+    "130C": "SRI-for-SM / Routing Failure (Unknown Subscriber / Check MAP Error)",
+    "135c": "Message Waiting / Delivery Protocol Failure (Intermediate)",
+    "135C": "Message Waiting / Delivery Protocol Failure (Intermediate)",
+    "136c": "Delivery Failure / Anti-Spam Policy Rejection (Spam Retry Loop)",
+    "136C": "Delivery Failure / Anti-Spam Policy Rejection (Spam Retry Loop)",
     "4108": "Message Delivery Successful",
     "1001": "Unidentified Subscriber",
     "1004": "Call Barred / Facility Not Supported",
@@ -86,21 +92,21 @@ WINSCP_PATH = r"C:\Program Files (x86)\WinSCP\WinSCP.com"
 if not os.path.exists(WINSCP_PATH):
     WINSCP_PATH = r"C:\Program Files\WinSCP\WinSCP.com"
 
-SFTP_HOST = os.getenv("SFTP_HOST", "10.155.59.158")
+SFTP_HOST = os.getenv("SFTP_HOST", "10.165.15.84")
 SFTP_PORT = int(os.getenv("SFTP_PORT", "22"))
-SFTP_USER = os.getenv("SFTP_USER", "root")
-SFTP_PASS = os.getenv("SFTP_PASS", "TeamCode*vm158")
-REMOTE_INPUT_DIR = os.getenv("REMOTE_INPUT_DIR", "/home/web/VNPT_TTS_PRECHECK_DEPLOY/cdr_queue/input")
-REMOTE_OUTPUT_DIR = os.getenv("REMOTE_OUTPUT_DIR", "/home/web/VNPT_TTS_PRECHECK_DEPLOY/cdr_queue/output")
+SFTP_USER = os.getenv("SFTP_USER", "ktm_soc2")
+SFTP_PASS = os.getenv("SFTP_PASS", "slkwD![l(s")
+REMOTE_INPUT_DIR = os.getenv("REMOTE_INPUT_DIR", "/home/sftp/ktm/soc2/quangvu/input")
+REMOTE_OUTPUT_DIR = os.getenv("REMOTE_OUTPUT_DIR", "/home/sftp/ktm/soc2/quangvu/output")
 POLL_TIMEOUT_SECS = 120
 
 def _get_poll_timeout_for_size(size: int = 100) -> int:
     """Tính toán thời gian timeout linh hoạt dựa trên dung lượng số bản ghi truy vấn."""
     if size >= 5000:
-        return 180  # 3 phút cho các ca lớn 5.000 - 10.000 tin
+        return 60   # 60s cho ca lớn (5.000 - 10.000 bản ghi qua 18 index Elastic và Watcher)
     elif size >= 1000:
-        return 120  # 2 phút cho các ca 1.000 - 5.000 tin
-    return 90       # 1.5 phút cho truy vấn thông thường
+        return 45   # 45s cho ca trung bình
+    return 30       # 30s cho truy vấn thông thường
 
 # Cấu hình Hàng đợi Local (cho Docker .158 trao đổi trực tiếp với Watcher trên máy .82)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -247,7 +253,8 @@ def _query_via_local_queue(phone: str, direction_str: str, gte_time: str, lte_ti
     os.makedirs(CDR_LOCAL_INPUT_DIR, exist_ok=True)
     os.makedirs(CDR_LOCAL_OUTPUT_DIR, exist_ok=True)
 
-    req_id = f"{phone}_{datetime.now().strftime('%y%m%d%H%M%S')}"
+    dir_tag = "MO" if "MO" in str(direction_str).upper() else ("MT" if "MT" in str(direction_str).upper() else "ALL")
+    req_id = f"{phone}_{dir_tag}_{datetime.now().strftime('%y%m%d%H%M%S%f')[:16]}"
     req_fname = f"{req_id}.req"
     json_fname = f"{req_id}.json"
 
@@ -301,8 +308,9 @@ def _query_via_local_queue(phone: str, direction_str: str, gte_time: str, lte_ti
 
 
 def _query_via_sftp(phone: str, direction_str: str, gte_time: str, lte_time: str, size: int, target_url: str = None) -> dict:
-    """Gửi yêu cầu qua SFTP 10.165 và chờ VHKT xử lý trả kết quả"""
-    req_id = f"{phone}_{datetime.now().strftime('%y%m%d%H%M%S')}"
+    """Gửi yêu cầu qua SFTP 10.165 (/home/sftp/ktm/soc2/quangvu/input -> output) và chờ VHKT Watcher xử lý trả kết quả"""
+    dir_tag = "MO" if "MO" in str(direction_str).upper() else ("MT" if "MT" in str(direction_str).upper() else "ALL")
+    req_id = f"{phone}_{dir_tag}_{datetime.now().strftime('%y%m%d%H%M%S%f')[:16]}"
     req_fname = f"{req_id}.req"
     json_fname = f"{req_id}.json"
 
@@ -350,16 +358,25 @@ def _query_via_sftp(phone: str, direction_str: str, gte_time: str, lte_time: str
                             raw_data = rf.read()
                             data_str = raw_data.decode("utf-8") if isinstance(raw_data, bytes) else raw_data
                             result = json.loads(data_str)
-                        # Dọn dẹp file kết quả trên SFTP sau khi đã lấy
+                        # Dọn dẹp file kết quả và file request trên SFTP sau khi đã lấy
                         try:
                             sftp.remove(remote_json)
                         except Exception:
                             pass
+                        try:
+                            sftp.remove(remote_req)
+                        except Exception:
+                            pass
                         return result
-                except (IOError, FileNotFoundError):
+                except (IOError, FileNotFoundError, json.JSONDecodeError):
                     continue
 
-            raise TimeoutError(f"Hết thời gian {current_poll_timeout}s chờ VHKT xử lý trả kết quả CDR ({size} bản ghi).")
+            # Dọn file .req nếu hết thời gian chờ tránh tồn đọng trong input/
+            try:
+                sftp.remove(remote_req)
+            except Exception:
+                pass
+            raise TimeoutError(f"Hết thời gian {current_poll_timeout}s chờ VHKT (10.165.15.84) xử lý trả kết quả CDR ({size} bản ghi).")
         finally:
             try:
                 sftp.close()
@@ -530,40 +547,40 @@ def fetch_smsc_cdr(
     if cached and (time.time() - cached["cached_at"] < 180):
         return cached["data"]
 
-    method_used = "local_queue"
+    method_used = "sftp_vhkt"
     raw_result = None
-    err_queue = None
-    err_direct = None
     err_sftp = None
+    err_direct = None
+    err_queue = None
 
-    # 1. KÊNH ƯU TIÊN SỐ 1 (Dành cho Docker .158 trao đổi trực tiếp với Watcher trên máy .82 qua Local Queue)
-    use_local_queue = (os.getenv("IS_DOCKER") == "1")
-    if use_local_queue:
-        try:
-            if direction.lower() in ("both", "cả hai chiều", "all"):
-                raw_mo = None
-                raw_mt = None
-                err_mo = None
-                err_mt = None
-                try:
-                    raw_mo = _query_via_local_queue(clean_p, "MO (Gửi đi)", from_time_str, to_time_str, limit, target_url=target_elastic_url)
-                except Exception as e_mo:
-                    err_mo = str(e_mo)
-                try:
-                    raw_mt = _query_via_local_queue(clean_p, "MT (Nhận vào)", from_time_str, to_time_str, limit, target_url=target_elastic_url)
-                except Exception as e_mt:
-                    err_mt = str(e_mt)
+    # 1. KÊNH ƯU TIÊN SỐ 1: Cầu nối SFTP VHKT 10.165.15.84 (/home/sftp/ktm/soc2/quangvu/input -> output)
+    # Hoạt động đồng nhất trên cả Container Docker (.158) lẫn máy Local thông qua thư viện Paramiko
+    try:
+        method_used = "sftp_vhkt"
+        if direction.lower() in ("both", "cả hai chiều", "all"):
+            raw_mo = None
+            raw_mt = None
+            err_mo = None
+            err_mt = None
+            try:
+                raw_mo = _query_via_sftp(clean_p, "MO (Gửi đi)", from_time_str, to_time_str, limit, target_url=target_elastic_url)
+            except Exception as e_mo:
+                err_mo = str(e_mo)
+            try:
+                raw_mt = _query_via_sftp(clean_p, "MT (Nhận vào)", from_time_str, to_time_str, limit, target_url=target_elastic_url)
+            except Exception as e_mt:
+                err_mt = str(e_mt)
 
-                if not raw_mo and not raw_mt:
-                    raise RuntimeError(f"Watcher máy .82 không phản hồi: MO ({err_mo or '--'}) | MT ({err_mt or '--'})")
+            if not raw_mo and not raw_mt:
+                raise RuntimeError(f"SFTP 10.165.15.84 không phản hồi kết quả: MO ({err_mo or 'không có dữ liệu'}) | MT ({err_mt or 'không có dữ liệu'})")
 
-                raw_result = _merge_mo_mt_hits(raw_mo or {}, raw_mt or {}, limit)
-            else:
-                q_dir = "MT (Nhận vào)" if direction.lower() == "mt" else "MO (Gửi đi)"
-                raw_result = _query_via_local_queue(clean_p, q_dir, from_time_str, to_time_str, limit, target_url=target_elastic_url)
-        except Exception as ex_q:
-            err_queue = str(ex_q)
-            raw_result = None
+            raw_result = _merge_mo_mt_hits(raw_mo or {}, raw_mt or {}, limit)
+        else:
+            sftp_dir = "MT (Nhận vào)" if direction.lower() == "mt" else "MO (Gửi đi)"
+            raw_result = _query_via_sftp(clean_p, sftp_dir, from_time_str, to_time_str, limit, target_url=target_elastic_url)
+    except Exception as ex_sftp:
+        err_sftp = str(ex_sftp)
+        raw_result = None
 
     # 2. KÊNH DỰ PHÒNG 2: Direct Elastic (nếu máy có kết nối thẳng mạng tới 10.204.57.26)
     if not raw_result:
@@ -573,41 +590,15 @@ def fetch_smsc_cdr(
         except Exception as ex_dir:
             err_direct = str(ex_dir)
 
-    # 3. KÊNH DỰ PHÒNG 3: SFTP VHKT 10.165 (Dành cho máy cá nhân test code)
     if not raw_result:
-        try:
-            method_used = "sftp_vhkt"
-            if direction.lower() in ("both", "cả hai chiều", "all"):
-                raw_mo = None
-                raw_mt = None
-                err_mo = None
-                err_mt = None
-                try:
-                    raw_mo = _query_via_sftp(clean_p, "MO (Gửi đi)", from_time_str, to_time_str, limit, target_url=target_elastic_url)
-                except Exception as e_mo:
-                    err_mo = str(e_mo)
-                try:
-                    raw_mt = _query_via_sftp(clean_p, "MT (Nhận vào)", from_time_str, to_time_str, limit, target_url=target_elastic_url)
-                except Exception as e_mt:
-                    err_mt = str(e_mt)
-
-                if not raw_mo and not raw_mt:
-                    raise RuntimeError(f"SFTP VHKT không phản hồi kết quả: MO ({err_mo or 'không có dữ liệu'}) | MT ({err_mt or 'không có dữ liệu'})")
-
-                raw_result = _merge_mo_mt_hits(raw_mo or {}, raw_mt or {}, limit)
-            else:
-                sftp_dir = "MT (Nhận vào)" if direction.lower() == "mt" else "MO (Gửi đi)"
-                raw_result = _query_via_sftp(clean_p, sftp_dir, from_time_str, to_time_str, limit, target_url=target_elastic_url)
-        except Exception as ex_sftp:
-            err_sftp = str(ex_sftp)
-            return {
-                "success": False,
-                "phone": clean_p,
-                "total_hits": 0,
-                "method": "failed",
-                "records": [],
-                "message": f"Không thể lấy SMSC CDR (Watcher .82: {err_queue} | Direct: {err_direct} | SFTP VHKT: {err_sftp})"
-            }
+        return {
+            "success": False,
+            "phone": clean_p,
+            "total_hits": 0,
+            "method": "failed",
+            "records": [],
+            "message": f"Không thể lấy SMSC CDR (SFTP 10.165: {err_sftp or '--'} | Direct: {err_direct or '--'})"
+        }
 
     # Bóc tách và chuẩn hóa bản ghi
     hits = raw_result.get("hits", {}).get("hits", [])
@@ -648,33 +639,80 @@ def fetch_smsc_cdr(
         mapped_net_err = str(src.get("mappednetworkerr") or src.get("localerr") or "--").strip()
         term_info = _resolve_termination_info(src, term_cause)
 
-        # 3. Đánh giá trạng thái thành công / lỗi chuẩn xác
-        is_term_ok = (term_cause in ("0", "0000", "100C", "100c", "4108", "") or term_cause == "--")
-        if status_code in ("8", "0") or (status_code == "2" and is_term_ok) or term_cause in ("100C", "100c", "4108"):
-            status_desc = "Thành công (Đã phát đến thuê bao)"
+        attempts_raw = src.get("numberofattempts") or src.get("attempts") or src.get("retry_count") or 1
+        attempts_str = str(attempts_raw).strip()
+
+        # 3. Đánh giá trạng thái thành công / lỗi chuẩn xác (Chuẩn 3GPP TS 23.040 & VNPT SMSC)
+        # QUY TẮC A: Bản ghi có CAUSE == "199C" hoặc attempts == "000" hoặc Status 12 là log tiếp nhận trung gian / ghép mảnh tin dài, TUYỆT ĐỐI KHÔNG PHẢI LỖI VÀ CHƯA PHẢI THÀNH CÔNG!
+        is_intermediate = (term_cause.upper() == "199C" or attempts_str in ("0", "000") or status_code == "12")
+
+        fail_causes = {
+            "130C", "135C", "136C", "101F", "1020", "1001", "1004", "1009", "100B", 
+            "100D", "100E", "1021", "1032", "1033", "1034", "1035", "1036", "175C", "103C"
+        }
+        tc_up = term_cause.upper()
+        sc_up = status_code.upper()
+        is_success_cause = (tc_up in ("100C", "133C", "4108") or sc_up in ("100C", "133C", "4108")) and not is_intermediate
+        is_fail_cause = tc_up in fail_causes or status_code in ("1", "3", "4", "5", "7", "8")
+
+        is_delivered = is_success_cause or (status_code == "2" and not is_fail_cause and not is_intermediate and tc_up in ("0", "0000", "", "--"))
+
+        if is_intermediate:
+            status_desc = f"Tiếp nhận phân mảnh tin dài (Intermediate - Status: {status_code or '--'}, Cause: {term_cause or '199C'})"
+            status_type = "intermediate"
+            is_delivered = False
+        elif is_delivered:
+            status_desc = f"Thành công (Đã phát đến thuê bao/đối tác - Status: {status_code}, Cause: {term_cause or '100C'})"
             status_type = "success"
-        elif status_code in ("1", "3") or (status_code == "2" and not is_term_ok):
-            status_desc = f"Chờ gửi / Đang thử lại (Status: {status_code})"
-            status_type = "pending"
-        else:
-            status_desc = f"Thất bại (Status: {status_code}, Cause: {term_cause})"
+        elif status_code == "8":
+            status_desc = f"Bị từ chối / Chặn cước OCS (Status: 8, Cause: {term_cause or '--'})"
             status_type = "failed"
+        elif status_code == "0":
+            status_desc = f"Đang trong hàng đợi SMSC (Status: 0, Cause: {term_cause or '--'})"
+            status_type = "pending"
+        elif status_code in ("1", "3", "4", "5", "7", "12"):
+            status_desc = f"Thất bại (Status: {status_code}, Cause: {term_cause or '--'})"
+            status_type = "failed"
+        else:
+            status_desc = f"Thất bại (Status: {status_code or '--'}, Cause: {term_cause or '--'})"
+            status_type = "failed"
+
+        # Bóc tách linh hoạt các biến thể key từ SMSC Elastic/Logstash
+        orig_msc = str(
+            src.get("originatingmscaddress") or src.get("originating_msc") or 
+            src.get("orig_msc") or src.get("originating_msc_address") or 
+            src.get("msc_in") or "--"
+        ).strip()
+        dest_msc = str(
+            src.get("destinationmscaddress") or src.get("destination_msc") or 
+            src.get("dest_msc") or src.get("destination_msc_address") or 
+            src.get("msc_out") or "--"
+        ).strip()
+        call_ref = str(
+            src.get("callreference") or src.get("call_reference") or 
+            src.get("callref") or src.get("callRef") or 
+            src.get("reference") or src.get("call_id") or 
+            src.get("callid") or src.get("session_id") or 
+            src.get("seq") or "--"
+        ).strip()
 
         records.append({
             "site": site,
             "calling_number": calling,
             "called_number": called,
             "delivery_time": dt_fmt,
-            "originating_msc": str(src.get("originatingmscaddress") or "--"),
-            "destination_msc": str(src.get("destinationmscaddress") or "--"),
+            "originating_msc": orig_msc or "--",
+            "destination_msc": dest_msc or "--",
             "submission_time": sub_fmt,
-            "call_reference": str(src.get("callreference") or "--"),
+            "call_reference": call_ref or "--",
             "message_length": str(src.get("messagelength") or "--"),
             "attempts": src.get("numberofattempts") or 1,
             "mapped_network_err": mapped_net_err,
             "status_code": status_code,
             "status_desc": status_desc,
             "status_type": status_type,
+            "is_success": is_delivered,
+            "is_intermediate": is_intermediate,
             "termination_cause": term_cause or "--",
             "termination_cause_info": term_info,
             "direction": record_dir,

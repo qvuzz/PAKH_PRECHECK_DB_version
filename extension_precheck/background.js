@@ -271,6 +271,91 @@ async function scrapeSapcCookies() {
     };
 }
 
+// 1.7 VNPT-GW (10.165.15.29:8080)
+async function scrapeGwCookies() {
+    let jsessionId = '';
+    let viewState = '';
+    const cookieSources = [];
+    try {
+        const domCookies = await getCookiesForDomain('10.165.15.29');
+        if (domCookies && domCookies.length > 0) cookieSources.push(...domCookies);
+    } catch (e) {}
+    try {
+        const c1 = await chrome.cookies.getAll({ url: 'http://10.165.15.29:8080/VNPT-GW/client/search' }).catch(() => []);
+        if (c1) cookieSources.push(...c1);
+    } catch (e) {}
+    try {
+        const c1b = await chrome.cookies.getAll({ url: 'http://10.165.15.29:8080/VNPT-GW/' }).catch(() => []);
+        if (c1b) cookieSources.push(...c1b);
+    } catch (e) {}
+    try {
+        const c1c = await chrome.cookies.getAll({ url: 'http://10.165.15.29:8080/VNPT-GW' }).catch(() => []);
+        if (c1c) cookieSources.push(...c1c);
+    } catch (e) {}
+    try {
+        const c2 = await chrome.cookies.getAll({ url: 'http://10.165.15.29:8080/' }).catch(() => []);
+        if (c2) cookieSources.push(...c2);
+    } catch (e) {}
+    try {
+        const c3 = await chrome.cookies.getAll({ domain: '10.165.15.29' }).catch(() => []);
+        if (c3) cookieSources.push(...c3);
+    } catch (e) {}
+
+    for (const c of cookieSources) {
+        if ((c.name || '').toUpperCase() === 'JSESSIONID' && c.value) {
+            jsessionId = c.value;
+            break;
+        }
+    }
+
+    // Fallback doc tu tab 10.165.15.29 mo tren trinh duyet
+    try {
+        const tabs = await chrome.tabs.query({});
+        const gwTab = tabs.find(t => t.url && t.url.includes('10.165.15.29'));
+        if (gwTab && gwTab.id) {
+            const res = await chrome.scripting.executeScript({
+                target: { tabId: gwTab.id },
+                func: () => {
+                    let js = '';
+                    let vs = '';
+                    if (document.cookie) {
+                        const m = document.cookie.match(/JSESSIONID=([^;]+)/i);
+                        if (m) js = m[1].trim();
+                    }
+                    const vsEl = document.querySelector('input[name="javax.faces.ViewState"]') || document.getElementById('javax.faces.ViewState');
+                    if (vsEl && vsEl.value) vs = vsEl.value.trim();
+                    return { js, vs };
+                }
+            }).catch(() => null);
+
+            if (res && res[0] && res[0].result) {
+                if (res[0].result.js) jsessionId = res[0].result.js;
+                if (res[0].result.vs) viewState = res[0].result.vs;
+            }
+        }
+    } catch (e) {}
+
+    if (jsessionId) {
+        await chrome.storage.local.set({ live_gw_jsessionid: jsessionId, live_gw_view_state: viewState });
+    } else {
+        const cached = await chrome.storage.local.get(['live_gw_jsessionid', 'live_gw_view_state']);
+        if (cached.live_gw_jsessionid) {
+            jsessionId = cached.live_gw_jsessionid;
+            viewState = cached.live_gw_view_state || '';
+        }
+    }
+
+    return {
+        service: 'GW',
+        domain: '10.165.15.29',
+        hasCookie: !!jsessionId,
+        jsessionId: jsessionId,
+        viewState: viewState,
+        cookieHeader: jsessionId ? `JSESSIONID=${jsessionId}` : '',
+        preview: jsessionId ? `${jsessionId.slice(0, 10)}...` : 'No session'
+    };
+}
+
 async function readStorageFromMatchingTab(urlKeyword, storageKeys) {
     try {
         const tabs = await chrome.tabs.query({});
@@ -710,7 +795,10 @@ async function dispatchAll(bundle) {
             cem_api_key: bundle.cem ? bundle.cem.apiKey : '',
             cem_cookie: bundle.cem ? bundle.cem.cookieHeader : '',
             cem_cookies: bundle.cem ? bundle.cem.cookieMap : {},
-            sapc_cookie: bundle.sapc ? (bundle.sapc.cookieHeader || bundle.sapc.cookieValue) : ''
+            sapc_cookie: bundle.sapc ? (bundle.sapc.cookieHeader || bundle.sapc.cookieValue) : '',
+            gw_cookie: bundle.gw ? (bundle.gw.cookieHeader || bundle.gw.jsessionId) : '',
+            gw_jsessionid: bundle.gw ? bundle.gw.jsessionId : '',
+            gw_view_state: bundle.gw ? bundle.gw.viewState : ''
         };
 
         const precheckServers = await getPrecheckServerUrls();
@@ -725,6 +813,7 @@ async function dispatchAll(bundle) {
             if (bundle.cem && bundle.cem.hasKey) sentItems.push('CEM');
             if (bundle.tts_old.valid || bundle.tts_new.valid) sentItems.push('TTS');
             if (bundle.sapc && bundle.sapc.hasCookie) sentItems.push('SAPC');
+            if (bundle.gw && bundle.gw.hasCookie) sentItems.push('GW');
             status.port1234.items = sentItems;
         }
 
@@ -746,6 +835,13 @@ async function dispatchAll(bundle) {
                 api_key: bundle.cem.apiKey,
                 raw_cookie: bundle.cem.cookieHeader,
                 cookies: bundle.cem.cookieMap
+            }).catch(() => {});
+        }
+        if (bundle.gw && bundle.gw.hasCookie) {
+            sendPostDual(precheckServers.map(s => `${s}/api/gw/cookie`), {
+                cookie: bundle.gw.cookieHeader || bundle.gw.jsessionId,
+                jsessionid: bundle.gw.jsessionId,
+                view_state: bundle.gw.viewState || ''
             }).catch(() => {});
         }
     } catch (e) {}
@@ -788,7 +884,8 @@ async function keepAliveOpenTabs() {
             'oneoss.vnpt.vn', 'npmran.vnpt.vn',
             'tts.vnptnet.vn', 'tts.vnpt.vn',
             'pms.vnpt.vn', 'cts.vnpt.vn',
-            'gqknccos.vnpt.vn', 'cem.vnptmedia.vn'
+            'gqknccos.vnpt.vn', 'cem.vnptmedia.vn',
+            '10.165.15.29'
         ];
         for (const tab of tabs) {
             if (!tab.id || !tab.url) continue;
@@ -842,6 +939,11 @@ async function pingKeepAlive() {
         // 2.3.5 SAPC (10.155.42.218)
     pings.push(
         fetchKeepAlive('http://10.155.42.218/').catch(() => {})
+    );
+
+    // 2.3.6 VNPT-GW (10.165.15.29:8080)
+    pings.push(
+        fetchKeepAlive('http://10.165.15.29:8080/VNPT-GW/').catch(() => {})
     );
 
     // 2.4 BTools (10.159.21.241) - Duy tri Tomcat JSESSIONID (Tranh het han 30 phut)
@@ -905,7 +1007,7 @@ async function executeSync(clearOld = false) {
         await chrome.storage.local.clear();
     }
 
-    const [cts, pms, ccos, btools, cem, oneoss, tts_new, tts_old, sapc] = await Promise.all([
+    const [cts, pms, ccos, btools, cem, oneoss, tts_new, tts_old, sapc, gw] = await Promise.all([
         scrapeCtsCookies(),
         scrapePmsCookies(),
         scrapeCcosCookies(),
@@ -914,7 +1016,8 @@ async function executeSync(clearOld = false) {
         scrapeOneossToken(),
         scrapeTtsNewToken(),
         scrapeTtsOldToken(),
-        scrapeSapcCookies()
+        scrapeSapcCookies(),
+        scrapeGwCookies()
     ]);
 
     const bundle = {
@@ -927,13 +1030,14 @@ async function executeSync(clearOld = false) {
         tts_new,
         tts_old,
         sapc,
+        gw,
         timestamp: new Date().toLocaleTimeString('en-US', { hour12: false })
     };
 
     const dispatchStatus = await dispatchAll(bundle);
     bundle.dispatch = dispatchStatus;
 
-    // Cap nhat Badge (Toan bo 7 dich vu)
+    // Cap nhat Badge (Toan bo 8 dich vu)
     let count = 0;
     if (cts.hasCookie) count++;
     if (pms.hasCookie) count++;
@@ -944,6 +1048,7 @@ async function executeSync(clearOld = false) {
     if (tts_new.valid) count++;
     if (tts_old.valid) count++;
     if (sapc && sapc.hasCookie) count++;
+    if (gw && gw.hasCookie) count++;
 
     let badgeText = '';
     let badgeColor = '#64748b';
@@ -984,7 +1089,7 @@ function debouncedSync() {
 
 chrome.cookies.onChanged.addListener((changeInfo) => {
     const domain = (changeInfo.cookie.domain || '').toLowerCase();
-    if (domain.includes('vnpt.vn') || domain.includes('vnptnet.vn') || domain.includes('vnptmedia.vn') || domain.includes('10.159.21.241') || domain.includes('10.155.42.218')) {
+    if (domain.includes('vnpt.vn') || domain.includes('vnptnet.vn') || domain.includes('vnptmedia.vn') || domain.includes('10.159.21.241') || domain.includes('10.155.42.218') || domain.includes('10.165.15.29')) {
         debouncedSync();
     }
 });
@@ -1020,7 +1125,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             targetUrl.includes('tts.vnptnet.vn') ||
             targetUrl.includes('tts.vnpt.vn') ||
             targetUrl.includes('gqknccos.vnpt.vn') ||
-            targetUrl.includes('cem.vnptmedia.vn') || targetUrl.includes('10.159.21.241') || targetUrl.includes('10.155.42.218') ||
+            targetUrl.includes('cem.vnptmedia.vn') || targetUrl.includes('10.159.21.241') || targetUrl.includes('10.155.42.218') || targetUrl.includes('10.165.15.29') ||
             targetUrl.includes(':1234')
         )
     ) {
