@@ -255,77 +255,87 @@ def _run_init_schema(conn):
             conn.execute("ALTER TABLE tickets ADD COLUMN appearance_count INTEGER DEFAULT 1;")
         except Exception:
             pass
+        cur_schema_ver = 0
         try:
-            from region_detector import normalize_to_new_province
-            rows_reg = conn.execute("""
-                SELECT rowid, ticket_code, package_title, ticket_content, ward, province_name, loaded_by 
-                FROM tickets 
-                WHERE region IS NULL OR region = ''
-                   OR (region = 'MN' AND (
-                       instr(ticket_code, 'SOC3') > 0 OR instr(ticket_code, 'SOC 3') > 0
-                       OR instr(ticket_code, 'SOC1') > 0 OR instr(ticket_code, 'SOC 1') > 0
-                       OR instr(ticket_code, 'NET3') > 0 OR instr(ticket_code, 'NET 3') > 0
-                       OR instr(ticket_code, 'NET1') > 0 OR instr(ticket_code, 'NET 1') > 0
-                   ));
-            """).fetchall()
-            for r in rows_reg:
-                comb = f"{r['ticket_code'] or ''} {r['package_title'] or ''} {r['ticket_content'] or ''} {r['ward'] or ''} {r['province_name'] or ''} {r['loaded_by'] or ''}"
-                comb_u = comb.upper()
-                target_reg = None
-                if any(k in comb_u for k in ("SOC3", "SOC 3", "NET3", "NET 3", "MIỀN TRUNG", "MIEN TRUNG", "VHKT MT")):
-                    target_reg = "MT"
-                elif any(k in comb_u for k in ("SOC1", "SOC 1", "NET1", "NET 1", "MIỀN BẮC", "MIEN BAC", "VHKT MB")):
-                    target_reg = "MB"
-                else:
-                    _, det_reg = normalize_to_new_province(comb)
-                    if det_reg in ("MT", "MB"):
-                        target_reg = det_reg
-                if target_reg:
-                    conn.execute("UPDATE tickets SET region = ? WHERE rowid = ?", (target_reg, r["rowid"]))
-        except Exception:
-            pass
-        try:
-            # Tự động dọn dẹp và chuẩn hóa trường status_type cho bảng sms_cdr_records
-            # Đảm bảo dữ liệu cũ trên Docker server không bị hiểu nhầm tin ghép mảnh/lỗi thành công
-            conn.execute("""
-                UPDATE sms_cdr_records 
-                SET status_type = 'intermediate' 
-                WHERE (UPPER(termination_cause) = '199C' OR attempts IN ('0', '000') OR status_code = '12') 
-                  AND (status_type != 'intermediate' OR status_type IS NULL);
-            """)
-            conn.execute("""
-                UPDATE sms_cdr_records 
-                SET status_type = 'failed' 
-                WHERE (status_code IN ('1', '3', '4', '5', '7', '8') 
-                       OR UPPER(termination_cause) IN ('175C', '130C', '135C', '136C', '103C', '101F', '1020', '1001', '1004', '1009', '100B', '100D', '100E', '1021', '1032', '1033', '1034', '1035', '1036'))
-                  AND (UPPER(termination_cause) != '199C' AND attempts NOT IN ('0', '000') AND status_code != '12')
-                  AND (status_type != 'failed' OR status_type IS NULL);
-            """)
-            conn.execute("""
-                UPDATE sms_cdr_records 
-                SET status_type = 'success' 
-                WHERE (UPPER(termination_cause) IN ('100C', '133C', '4108') 
-                       OR (status_code = '2' AND (UPPER(termination_cause) IN ('0', '0000', '', '--') OR termination_cause IS NULL)))
-                  AND (status_type != 'success' OR status_type IS NULL);
-            """)
-            conn.commit()
+            ver_row = conn.execute("PRAGMA user_version;").fetchone()
+            cur_schema_ver = ver_row[0] if ver_row else 0
         except Exception:
             pass
 
-        try:
-            conn.execute("UPDATE tickets SET ticket_status = 'Đã đóng 2.6' WHERE ticket_status = 'Đã đóng' OR ticket_status = 'Da dong';")
-            # Chuẩn hóa các bản ghi bị lưu giờ UTC (06:xx, 07:xx) thành giờ Việt Nam UTC+7
-            conn.execute("""
-                UPDATE tickets 
-                SET closed_at = datetime(closed_at, '+7 hours') 
-                WHERE (ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%')
-                  AND closed_at IS NOT NULL 
-                  AND closed_at != ''
-                  AND (closed_at LIKE '% 06:%' OR closed_at LIKE '% 07:%')
-                  AND updated_at = closed_at;
-            """)
-        except Exception:
-            pass
+        if cur_schema_ver < 12:
+            try:
+                from region_detector import normalize_to_new_province
+                rows_reg = conn.execute("""
+                    SELECT rowid, ticket_code, package_title, ticket_content, ward, province_name, loaded_by 
+                    FROM tickets 
+                    WHERE region IS NULL OR region = ''
+                       OR (region = 'MN' AND (
+                           instr(ticket_code, 'SOC3') > 0 OR instr(ticket_code, 'SOC 3') > 0
+                           OR instr(ticket_code, 'SOC1') > 0 OR instr(ticket_code, 'SOC 1') > 0
+                           OR instr(ticket_code, 'NET3') > 0 OR instr(ticket_code, 'NET 3') > 0
+                           OR instr(ticket_code, 'NET1') > 0 OR instr(ticket_code, 'NET 1') > 0
+                       ));
+                """).fetchall()
+                for r in rows_reg:
+                    comb = f"{r['ticket_code'] or ''} {r['package_title'] or ''} {r['ticket_content'] or ''} {r['ward'] or ''} {r['province_name'] or ''} {r['loaded_by'] or ''}"
+                    comb_u = comb.upper()
+                    target_reg = None
+                    if any(k in comb_u for k in ("SOC3", "SOC 3", "NET3", "NET 3", "MIỀN TRUNG", "MIEN TRUNG", "VHKT MT")):
+                        target_reg = "MT"
+                    elif any(k in comb_u for k in ("SOC1", "SOC 1", "NET1", "NET 1", "MIỀN BẮC", "MIEN BAC", "VHKT MB")):
+                        target_reg = "MB"
+                    else:
+                        _, det_reg = normalize_to_new_province(comb)
+                        if det_reg in ("MT", "MB"):
+                            target_reg = det_reg
+                    if target_reg:
+                        conn.execute("UPDATE tickets SET region = ? WHERE rowid = ?", (target_reg, r["rowid"]))
+            except Exception:
+                pass
+            try:
+                # Tự động dọn dẹp và chuẩn hóa trường status_type cho bảng sms_cdr_records
+                # Đảm bảo dữ liệu cũ trên Docker server không bị hiểu nhầm tin ghép mảnh/lỗi thành công
+                conn.execute("""
+                    UPDATE sms_cdr_records 
+                    SET status_type = 'intermediate' 
+                    WHERE (UPPER(termination_cause) = '199C' OR attempts IN ('0', '000') OR status_code = '12') 
+                      AND (status_type != 'intermediate' OR status_type IS NULL);
+                """)
+                conn.execute("""
+                    UPDATE sms_cdr_records 
+                    SET status_type = 'failed' 
+                    WHERE (status_code IN ('1', '3', '4', '5', '7', '8') 
+                           OR UPPER(termination_cause) IN ('175C', '130C', '135C', '136C', '103C', '101F', '1020', '1001', '1004', '1009', '100B', '100D', '100E', '1021', '1032', '1033', '1034', '1035', '1036'))
+                      AND (UPPER(termination_cause) != '199C' AND attempts NOT IN ('0', '000') AND status_code != '12')
+                      AND (status_type != 'failed' OR status_type IS NULL);
+                """)
+                conn.execute("""
+                    UPDATE sms_cdr_records 
+                    SET status_type = 'success' 
+                    WHERE (UPPER(termination_cause) IN ('100C', '133C', '4108') 
+                           OR (status_code = '2' AND (UPPER(termination_cause) IN ('0', '0000', '', '--') OR termination_cause IS NULL)))
+                      AND (status_type != 'success' OR status_type IS NULL);
+                """)
+                conn.commit()
+            except Exception:
+                pass
+
+            try:
+                conn.execute("UPDATE tickets SET ticket_status = 'Đã đóng 2.6' WHERE ticket_status = 'Đã đóng' OR ticket_status = 'Da dong';")
+                # Chuẩn hóa các bản ghi bị lưu giờ UTC (06:xx, 07:xx) thành giờ Việt Nam UTC+7
+                conn.execute("""
+                    UPDATE tickets 
+                    SET closed_at = datetime(closed_at, '+7 hours') 
+                    WHERE (ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%')
+                      AND closed_at IS NOT NULL 
+                      AND closed_at != ''
+                      AND (closed_at LIKE '% 06:%' OR closed_at LIKE '% 07:%')
+                      AND updated_at = closed_at;
+                """)
+                conn.execute("PRAGMA user_version = 12;")
+                conn.commit()
+            except Exception:
+                pass
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS tts_new_stages (
@@ -584,8 +594,9 @@ def check_ticket_can_close(t):
 
 def save_or_update_ticket(t):
     with _DB_WRITE_LOCK:
-        _system_counts_cache.clear()
-        return _save_or_update_ticket_internal(t)
+        res = _save_or_update_ticket_internal(t)
+        notify_tickets_changed()
+        return res
 
 def _execute_save_or_update(conn, t):
     """
@@ -917,6 +928,7 @@ def save_tickets_bulk(ticket_list):
                         _execute_save_or_update(conn, t)
                 conn.close()
                 conn = None
+                notify_tickets_changed()
                 break
             except sqlite3.OperationalError as e:
                 if conn:
@@ -1196,9 +1208,26 @@ def sync_active_tickets_state(active_keys, source="tts_old", key_type="phone", s
                   AND phone NOT IN ({placeholders})
             """, source_params + list(active_keys))
     conn.close()
+    notify_tickets_changed()
 
 _system_counts_cache = {}
 _system_counts_cache_time = {}
+_CACHE_INVALIDATE_CALLBACKS = []
+
+def register_cache_invalidation_callback(cb):
+    """Đăng ký hàm xóa cache khi có sự kiện thay đổi dữ liệu DB"""
+    if cb and cb not in _CACHE_INVALIDATE_CALLBACKS:
+        _CACHE_INVALIDATE_CALLBACKS.append(cb)
+
+def notify_tickets_changed():
+    """Thông báo hủy cache server khi có phiếu được thêm, sửa, xóa hoặc cập nhật trạng thái"""
+    _system_counts_cache.clear()
+    _system_counts_cache_time.clear()
+    for cb in _CACHE_INVALIDATE_CALLBACKS:
+        try:
+            cb()
+        except Exception:
+            pass
 
 def get_system_counts(region=None):
     """Lấy số lượng phiếu phân chia theo từng nghiệp vụ cho Menu Sidebar (hỗ trợ lọc theo vùng miền)."""
@@ -1617,6 +1646,7 @@ def update_ticket_field(phone, field, value, incident_time=None):
             except Exception:
                 pass
     conn.close()
+    notify_tickets_changed()
     return True
 
 def delete_all_tickets(source=None):
@@ -1631,6 +1661,7 @@ def delete_all_tickets(source=None):
             conn.execute("DELETE FROM tickets")
     conn.commit()
     conn.close()
+    notify_tickets_changed()
 
 def normalize_staff_name(name: str) -> str:
     if not name:
@@ -2075,6 +2106,7 @@ def save_sms_analysis_bulk(records: list):
                     WHERE phone = ?
                 """, (sms_inc_time, sms_prob, phone))
     conn.close()
+    notify_tickets_changed()
 
 
 def save_sms_cdr_summary(phone: str, summary_json_str: str, incident_time: str = "", ticket_code: str = ""):
@@ -2105,6 +2137,7 @@ def save_sms_cdr_summary(phone: str, summary_json_str: str, incident_time: str =
                 WHERE phone = ? OR phone LIKE ?
             """, (summary_json_str, clean_phone, f"%{clean_phone[-9:]}%"))
     conn.close()
+    notify_tickets_changed()
 
 
 def save_sms_cdr_records(phone: str, ticket_code: str, records: list) -> int:

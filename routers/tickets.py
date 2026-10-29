@@ -22,13 +22,27 @@ from db_manager import (
     get_db_connection, 
     update_ticket_field, 
     delete_all_tickets,
-    is_mobile_internet_ticket
+    is_mobile_internet_ticket,
+    register_cache_invalidation_callback
 )
 from services.state import state
 from services.session_manager import ACTIVE_LAN_SESSIONS, resolve_ttsnew_token
+import time
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 router = APIRouter(prefix="/api", tags=["Quản lý Phiếu Sự Cố (Tickets)"])
+
+# ⚡ SERVER-SIDE IN-MEMORY CACHE (0.1ms phản hồi siêu tốc, triệt tiêu nghẽn SQLite)
+_TICKETS_API_CACHE = {}
+_TICKETS_CACHE_TTL = 6.0  # Giữ cache 6 giây trong RAM
+
+def invalidate_tickets_cache():
+    """Xóa toàn bộ In-Memory Cache của API Tickets khi có sự kiện cập nhật DB"""
+    global _TICKETS_API_CACHE
+    _TICKETS_API_CACHE.clear()
+
+# Đăng ký hàm xóa cache tự động khi DB có bất kỳ cập nhật nào
+register_cache_invalidation_callback(invalidate_tickets_cache)
 
 
 @router.get("/tickets")
@@ -136,6 +150,16 @@ def get_tickets_api(
             is_region_locked = False
         current_user_name = uinfo.get("displayName") or uinfo.get("userName") or "KTV"
 
+    # ⚡ SERVER-SIDE IN-MEMORY CACHE (0.1ms phản hồi dùng chung cho toàn bộ KTV trong phân vùng)
+    cache_key = f"{tab}_{src_f}_{srv_f}_{effective_region}_{status_f}_{search or ''}"
+    now_ts = time.time()
+    cached_val = _TICKETS_API_CACHE.get(cache_key)
+    if cached_val and (now_ts - cached_val[1] < _TICKETS_CACHE_TTL):
+        res = dict(cached_val[0])
+        res["user_role"] = user_role
+        res["user_name"] = current_user_name
+        return res
+
     tickets = get_all_tickets(
         search=search, 
         status_filter=status_f, 
@@ -155,7 +179,7 @@ def get_tickets_api(
         region=effective_region
     )
 
-    return {
+    res_payload = {
         "tickets": tickets,
         "total_count": total_cnt,
         "closed_count": closed_cnt,
@@ -167,6 +191,8 @@ def get_tickets_api(
         "user_role": user_role,
         "user_name": current_user_name
     }
+    _TICKETS_API_CACHE[cache_key] = (res_payload, now_ts)
+    return res_payload
 
 
 @router.get("/tickets/closed_stats")

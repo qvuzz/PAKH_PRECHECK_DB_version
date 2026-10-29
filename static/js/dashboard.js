@@ -1583,6 +1583,10 @@ function selectModule(sys, srv, updateUrl = true) {
         sys = 'tts_new';
         srv = 'data';
     }
+    const isServiceChanged = (currentService !== srv);
+    if (isServiceChanged && activeTicketsAbortController) {
+        try { activeTicketsAbortController.abort(); } catch (e) {}
+    }
     isHistoryStatsView = false;
     currentSystem = 'tts_new';
     currentService = srv;
@@ -2175,16 +2179,17 @@ function switchTableTab(tab) {
     const searchInputVal = document.getElementById('searchInput') ? document.getElementById('searchInput').value.trim() : '';
     const curStatusFilterVal = filterStatus ? filterStatus.value : 'all';
     const expectedCacheKey = `${tab}_${currentSystem}_${currentService}_${currentRegion || 'ALL'}_${curStatusFilterVal}_${searchInputVal}`;
-    const hasFreshModuleCache = window.ticketsModuleCache && window.ticketsModuleCache[expectedCacheKey] && (Date.now() - window.ticketsModuleCache[expectedCacheKey].timestamp < 30000);
+    const cachedItem = window.ticketsModuleCache ? window.ticketsModuleCache[expectedCacheKey] : null;
+    const hasFreshModuleCache = cachedItem && (Date.now() - cachedItem.timestamp < 35000);
 
-    if (!hasFreshModuleCache && tbody) {
-        // Nếu tbody chưa có hàng nào hoặc đang là skeleton thì hiển thị skeleton, nếu đã có dữ liệu thì làm mờ nhẹ để chuyển tab tức thì
-        if (tbody.children.length === 0 || tbody.querySelector('.table-skeleton-row')) {
-            renderTicketsSkeleton(tbody, totalCols);
-        } else {
-            tbody.style.opacity = '0.55';
-            tbody.style.transition = 'opacity 0.15s ease';
-        }
+    if (hasFreshModuleCache && tbody) {
+        // ⚡ INSTANT SWITCH (0ms): Đã có sẵn trong RAM, render tức thì đồng bộ thead/tbody không độ trễ
+        tbody.style.opacity = '1';
+        applyTicketsData(cachedItem.data, false);
+    } else if (tbody) {
+        // Chưa có sẵn: Render ngay Skeleton đúng số cột của module mới, dọn sạch hàng của module trước
+        renderTicketsSkeleton(tbody, totalCols);
+        tbody.style.opacity = '1';
     }
 
     lastTicketsSignature = "";
@@ -3605,6 +3610,12 @@ function applyTicketsData(data, force = false) {
 
     cachedTickets = tickets;
     renderTicketsTable(force);
+
+    // Kích hoạt preload ngầm toàn bộ các module còn lại vào RAM client sau khi tải xong dữ liệu đầu tiên
+    if (!window._hasPreloadedModules && !isHistoryStatsView && !isUserManagementView) {
+        window._hasPreloadedModules = true;
+        setTimeout(preloadAllModulesInBackground, 1000);
+    }
 }
 
 // Xử lý tìm kiếm với cơ chế Debounce (tránh bão request khi gõ nhanh)
@@ -3706,8 +3717,53 @@ async function loadTickets(force = false, resetPage = false) {
             return; // Request bị hủy có chủ đích do người dùng chuyển tab nhanh
         }
         console.error("Lỗi fetch tickets:", e);
+    } finally {
+        const tb = document.getElementById('ticketsBody');
+        if (tb) tb.style.opacity = '1';
     }
 }
+
+// ⚡ PRELOAD TOÀN BỘ CÁC MODULE VÀO RAM CLIENT (Nhờ Server RAM Cache <1ms nên chạy siêu nhẹ)
+let isPreloadingModules = false;
+async function preloadAllModulesInBackground() {
+    if (isPreloadingModules || isHistoryStatsView || isUserManagementView) return;
+    const clientAuthTok = (typeof getTtsNewAuthToken === 'function' ? getTtsNewAuthToken() : '') || (typeof getTtsAuthSession === 'function' && getTtsAuthSession() ? getTtsAuthSession().token : '');
+    if (!clientAuthTok || window.authRequireLogin || window.authTokenExpired) return;
+
+    isPreloadingModules = true;
+    const modulesToPreload = ['sms', 'call', 'roaming', 'spam_call', 'sim', 'other', 'data'];
+    const tab = currentTableTab || 'chua_dong';
+    const reg = currentRegion || 'ALL';
+    const reqHeaders = clientAuthTok ? { 'Authorization': clientAuthTok } : {};
+
+    for (const srv of modulesToPreload) {
+        if (srv === currentService) continue;
+        const cacheKey = `${tab}_tts_new_${srv}_${reg}_all_`;
+        if (window.ticketsModuleCache && window.ticketsModuleCache[cacheKey] && (Date.now() - window.ticketsModuleCache[cacheKey].timestamp < 35000)) {
+            continue;
+        }
+        try {
+            const res = await fetch(`/api/tickets?search=&status=all&tab=${encodeURIComponent(tab)}&source=tts_new&service_type=${encodeURIComponent(srv)}&region=${encodeURIComponent(reg)}`, {
+                headers: reqHeaders
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data && !data.require_login) {
+                    if (!window.ticketsModuleCache) window.ticketsModuleCache = {};
+                    window.ticketsModuleCache[cacheKey] = {
+                        data: data,
+                        timestamp: Date.now()
+                    };
+                }
+            }
+        } catch (e) {
+            // im lặng
+        }
+        await new Promise(r => setTimeout(r, 60));
+    }
+    isPreloadingModules = false;
+}
+window.preloadAllModulesInBackground = preloadAllModulesInBackground;
 
 // Quản lý trạng thái mở rộng chi tiết của các dòng phiếu (giữ nguyên khi tự động làm mới)
 let expandedTicketKeys = new Set();

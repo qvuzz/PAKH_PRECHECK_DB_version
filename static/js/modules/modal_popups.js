@@ -59,20 +59,22 @@ async function updateServicesStatus() {
 
         // 3. BTools (Chỉ cần xanh và đỏ, khi rê chuột hiển thị trạng thái kết nối)
         const isBtoolsActive = !!svcs.btools;
+        window._isBtoolsConnected = isBtoolsActive;
         if (dotBtools) {
             dotBtools.className = 'svc-status-dot ' + (isBtoolsActive ? 'active' : 'inactive');
             dotBtools.style.backgroundColor = isBtoolsActive ? '#16a34a' : '#ef4444';
             const pillBtools = document.getElementById('svcBtnBtools');
-            if (pillBtools) pillBtools.title = isBtoolsActive ? 'BTools: Connected (Click để mở trang 10.159.21.241)' : 'BTools: Disconnected (Chưa kết nối)';
+            if (pillBtools) pillBtools.title = isBtoolsActive ? 'BTools: Đã kết nối (Click để xem / mở trang)' : 'BTools: Chưa kết nối (Click để đăng nhập)';
         }
 
         // 4. CEM (Chỉ cần xanh và đỏ, khi rê chuột hiển thị trạng thái kết nối)
         const isCemActive = !!svcs.cem;
+        window._isCemConnected = isCemActive;
         if (dotCem) {
             dotCem.className = 'svc-status-dot ' + (isCemActive ? 'active' : 'inactive');
             dotCem.style.backgroundColor = isCemActive ? '#16a34a' : '#ef4444';
             const pillCem = document.getElementById('svcPillCem');
-            if (pillCem) pillCem.title = isCemActive ? 'CEM: Connected (Click để mở trang cem.vnptmedia.vn)' : 'CEM: Disconnected (Chưa kết nối)';
+            if (pillCem) pillCem.title = isCemActive ? 'CEM: Đã kết nối (Click để xem / mở trang)' : 'CEM: Chưa kết nối (Click để đăng nhập)';
         }
 
         // 5. SAPC (Chỉ cần xanh và đỏ, khi rê chuột hiển thị trạng thái kết nối)
@@ -112,12 +114,13 @@ async function updateServicesStatus() {
                 isGwActive = !!(dGw && (dGw.connected || dGw.has_session));
             } catch (e) {}
         }
+        window._isGwConnected = isGwActive;
         if (dotGw) {
             dotGw.className = 'svc-status-dot ' + (isGwActive ? 'active' : 'inactive');
             dotGw.style.backgroundColor = isGwActive ? '#16a34a' : '#ef4444';
         }
         if (pillGw) {
-            pillGw.title = isGwActive ? 'GW: Connected (Click để quản lý phiên)' : 'GW: Disconnected (Click để kết nối/dán cookie)';
+            pillGw.title = isGwActive ? 'GW: Đã kết nối (Click để xem / mở trang)' : 'GW: Chưa kết nối (Click để đăng nhập)';
         }
     } catch (e) {
         console.warn('Lỗi kiểm tra trạng thái dịch vụ:', e);
@@ -944,7 +947,7 @@ function backToStep1BtoolsLogin() {
     if (msg) msg.style.display = 'none';
 }
 
-function toggleBtoolsPopup(event) {
+async function toggleBtoolsPopup(event) {
     if (event) event.stopPropagation();
     const m = document.getElementById('modalBtoolsSync');
     if (!m) return;
@@ -952,7 +955,19 @@ function toggleBtoolsPopup(event) {
     closeAllSyncModals();
     if (!isShowing) {
         m.style.display = 'block';
-        const isConn = !!window._isBtoolsConnected;
+        let isConn = !!window._isBtoolsConnected;
+        try {
+            const res = await fetch('/api/btools/status');
+            const data = await res.json();
+            if (data && data.connected) {
+                isConn = true;
+                window._isBtoolsConnected = true;
+            } else if (data && !data.connected) {
+                isConn = false;
+                window._isBtoolsConnected = false;
+            }
+        } catch (e) {}
+
         const loggedBox = document.getElementById('boxBtoolsLoggedInState');
         const s1 = document.getElementById('boxStep1BtoolsLogin');
         const s2 = document.getElementById('boxStep2BtoolsOtp');
@@ -1199,7 +1214,7 @@ function backToStep1CemLogin() {
     if (msg) msg.style.display = 'none';
 }
 
-function toggleCemPopup(event) {
+async function toggleCemPopup(event) {
     if (event) event.stopPropagation();
     const m = document.getElementById('modalCemSync');
     if (!m) return;
@@ -1207,7 +1222,19 @@ function toggleCemPopup(event) {
     closeAllSyncModals();
     if (!isShowing) {
         m.style.display = 'block';
-        const isConn = !!window._isCemConnected;
+        let isConn = !!window._isCemConnected;
+        try {
+            const res = await fetch('/api/cem/status');
+            const data = await res.json();
+            if (data && data.connected) {
+                isConn = true;
+                window._isCemConnected = true;
+            } else if (data && !data.connected) {
+                isConn = false;
+                window._isCemConnected = false;
+            }
+        } catch (e) {}
+
         const loggedBox = document.getElementById('boxCemLoggedInState');
         const s1 = document.getElementById('boxStep1CemLogin');
         const s2 = document.getElementById('boxStep2CemOtp');
