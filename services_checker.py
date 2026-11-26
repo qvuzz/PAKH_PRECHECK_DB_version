@@ -2,6 +2,8 @@
 # Kiểm tra nhanh trạng thái kích hoạt (activate/deactivate) của:
 # BTools, CEM, SAPC, TTS (cũ), TTS (mới)
 import time
+import threading
+import concurrent.futures
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -15,6 +17,7 @@ _HEALTH_CACHE = {
     "gw": False,
     "last_checked": 0
 }
+_HEALTH_LOCK = threading.Lock()
 
 def check_gw_fast(driver=None) -> bool:
     try:
@@ -110,40 +113,66 @@ def check_tts_new_fast(driver=None, token: str = None) -> bool:
 def get_services_health(force=False, driver=None, tts_new_token: str = None, **kwargs) -> dict:
     global _HEALTH_CACHE
     now = time.time()
-    has_custom_tokens = bool(tts_new_token and tts_new_token.strip())
-    
-    if not force and not has_custom_tokens and (now - _HEALTH_CACHE["last_checked"] < 25):
+    custom_tok = (tts_new_token or "").strip()
+
+    def _eval_custom_tts_new(tok_str: str) -> bool:
+        try:
+            from ttsnew_api import _is_jwt_valid
+            t = tok_str if (tok_str.startswith("Bearer ") or "." not in tok_str) else f"Bearer {tok_str}"
+            return bool(_is_jwt_valid(t))
+        except Exception:
+            return False
+
+    # Trả cache ngay (< 1ms) nếu chưa quá 30s (dù client có truyền tts_new_token)
+    if not force and (now - _HEALTH_CACHE["last_checked"] < 30):
+        tts_new_val = _eval_custom_tts_new(custom_tok) if custom_tok else _HEALTH_CACHE["tts_new"]
         return {
             "btools": _HEALTH_CACHE["btools"],
             "cem": _HEALTH_CACHE["cem"],
             "sapc": _HEALTH_CACHE["sapc"],
-            "tts_new": _HEALTH_CACHE["tts_new"],
+            "tts_new": tts_new_val,
             "ccos": _HEALTH_CACHE.get("ccos", False),
             "gw": _HEALTH_CACHE.get("gw", False)
         }
 
-    from auth_extractor import get_chrome_debug_driver
-    if driver is None:
-        try:
-            driver = get_chrome_debug_driver()
-        except Exception:
-            driver = None
+    with _HEALTH_LOCK:
+        # Double-check sau khi nhận lock (tránh nhiều request cùng làm mới song song)
+        now2 = time.time()
+        if not force and (now2 - _HEALTH_CACHE["last_checked"] < 30):
+            tts_new_val = _eval_custom_tts_new(custom_tok) if custom_tok else _HEALTH_CACHE["tts_new"]
+            return {
+                "btools": _HEALTH_CACHE["btools"],
+                "cem": _HEALTH_CACHE["cem"],
+                "sapc": _HEALTH_CACHE["sapc"],
+                "tts_new": tts_new_val,
+                "ccos": _HEALTH_CACHE.get("ccos", False),
+                "gw": _HEALTH_CACHE.get("gw", False)
+            }
 
-    btools_ok = check_btools_fast(driver=driver)
-    cem_ok = check_cem_fast(driver=driver)
-    sapc_ok = check_sapc_fast(driver=driver)
-    tts_new_ok = check_tts_new_fast(driver=driver, token=tts_new_token)
-    ccos_ok = check_ccos_fast(driver=driver)
-    gw_ok = check_gw_fast(driver=driver)
+        # Chạy song song toàn bộ các hàm check thay vì tuần tự nối đuôi nhau
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            f_btools = pool.submit(check_btools_fast, driver)
+            f_cem = pool.submit(check_cem_fast, driver)
+            f_sapc = pool.submit(check_sapc_fast, driver)
+            f_tts_new = pool.submit(_eval_custom_tts_new, custom_tok) if custom_tok else pool.submit(check_tts_new_fast, driver, None)
+            f_ccos = pool.submit(check_ccos_fast, driver)
+            f_gw = pool.submit(check_gw_fast, driver)
 
-    if not has_custom_tokens:
+            btools_ok = f_btools.result()
+            cem_ok = f_cem.result()
+            sapc_ok = f_sapc.result()
+            tts_new_ok = f_tts_new.result()
+            ccos_ok = f_ccos.result()
+            gw_ok = f_gw.result()
+
         _HEALTH_CACHE["btools"] = btools_ok
         _HEALTH_CACHE["cem"] = cem_ok
         _HEALTH_CACHE["sapc"] = sapc_ok
-        _HEALTH_CACHE["tts_new"] = tts_new_ok
+        if not custom_tok:
+            _HEALTH_CACHE["tts_new"] = tts_new_ok
         _HEALTH_CACHE["ccos"] = ccos_ok
         _HEALTH_CACHE["gw"] = gw_ok
-        _HEALTH_CACHE["last_checked"] = now
+        _HEALTH_CACHE["last_checked"] = time.time()
 
     return {
         "btools": btools_ok,

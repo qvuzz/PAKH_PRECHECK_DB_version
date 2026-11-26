@@ -31,8 +31,8 @@ def get_elastic_url_for_site(site_opt: str = "all") -> str:
     return f"http://{ELASTIC_HOSTS[0]}/{p}/_search"
 
 TERMINATION_CAUSE_MAP = {
-    "0": "Normal / Successful",
-    "0000": "Normal / Successful",
+    "0": "Message Delivery Successful",
+    "0000": "Message Delivery Successful",
     "100c": "Message Delivery Successful",
     "100C": "Message Delivery Successful",
     "130c": "SRI-for-SM / Routing Failure (Unknown Subscriber / Check MAP Error)",
@@ -63,17 +63,29 @@ TERMINATION_CAUSE_MAP = {
 }
 
 def _resolve_termination_info(src: dict, term_cause: str) -> str:
-    raw_info = src.get("terminationcauseinfo") or src.get("messagestate") or src.get("networkerr")
-    if raw_info and str(raw_info).strip():
-        return str(raw_info).strip()
     key = str(term_cause or "").strip()
     if key in TERMINATION_CAUSE_MAP:
         return TERMINATION_CAUSE_MAP[key]
     if key.upper() in TERMINATION_CAUSE_MAP:
         return TERMINATION_CAUSE_MAP[key.upper()]
+    if key.lower() in TERMINATION_CAUSE_MAP:
+        return TERMINATION_CAUSE_MAP[key.lower()]
+
+    raw_info = src.get("terminationcauseinfo") or src.get("networkerr") or src.get("messagestate")
+    if raw_info is not None:
+        r_str = str(raw_info).strip()
+        if r_str in TERMINATION_CAUSE_MAP:
+            return TERMINATION_CAUSE_MAP[r_str]
+        if r_str.upper() in TERMINATION_CAUSE_MAP:
+            return TERMINATION_CAUSE_MAP[r_str.upper()]
+        if len(r_str) > 3 and not r_str.isdigit() and r_str != "--":
+            return r_str
+
+    if key in ("0", "0000"):
+        return "Message Delivery Successful"
     if key and key != "--":
         return f"Cause: {key}"
-    return "--"
+    return "Message Delivery Successful" if str(src.get("status")) in ("0", "2") else "--"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0",
@@ -124,19 +136,30 @@ CDR_MEMORY_CACHE = {}
 
 
 def _format_smsc_timestamp(val_str: str) -> str:
-    """Chuyển định dạng YYMMDDhhmmss (vd: 260910110137) -> YYYY-MM-DD HH:mm:ss"""
-    if not val_str or len(val_str) < 12:
-        return val_str or "--"
-    try:
-        yy = "20" + val_str[0:2]
-        mm = val_str[2:4]
-        dd = val_str[4:6]
-        hh = val_str[6:8]
-        mi = val_str[8:10]
-        ss = val_str[10:12]
-        return f"{yy}-{mm}-{dd} {hh}:{mi}:{ss}"
-    except Exception:
-        return val_str
+    """Chuyển định dạng YYMMDDhhmmss (vd: 260910110137) hoặc ISO -> YYYY-MM-DD HH:mm:ss"""
+    if not val_str:
+        return "--"
+    val_str = str(val_str).strip()
+    if "T" in val_str:
+        try:
+            return val_str.split("+")[0].split(".")[0].replace("T", " ")
+        except Exception:
+            pass
+    digits = "".join(filter(str.isdigit, val_str))
+    if len(digits) >= 14:
+        return f"{digits[0:4]}-{digits[4:6]}-{digits[6:8]} {digits[8:10]}:{digits[10:12]}:{digits[12:14]}"
+    elif len(digits) >= 12:
+        try:
+            yy = "20" + digits[0:2]
+            mm = digits[2:4]
+            dd = digits[4:6]
+            hh = digits[6:8]
+            mi = digits[8:10]
+            ss = digits[10:12]
+            return f"{yy}-{mm}-{dd} {hh}:{mi}:{ss}"
+        except Exception:
+            return val_str
+    return val_str or "--"
 
 
 def _normalize_to_smsc_timestamp(val: str, is_end: bool = False) -> str:
@@ -610,18 +633,17 @@ def fetch_smsc_cdr(
         idx = str(h.get("_index", "")).lower()
         tags = [str(t).lower() for t in src.get("tags", [])] if isinstance(src.get("tags"), list) else []
 
-        # 1. Xác định Site (HCM / HNI)
+        # 1. Xác định Cụm tổng đài / FDA chuẩn theo IP máy chủ (FDA 26, FDA 235, FDA 204)
         origin = str(h.get("_site_origin") or "").upper()
-        if "HNI" in origin or "HN" in origin:
-            site = "HNI"
-        elif "HCM" in origin:
-            site = "HCM"
-        elif "hn" in idx or "hni" in idx or "hn" in tags or "hni" in tags:
-            site = "HNI"
-        elif "hcm" in idx or "hcm" in tags:
-            site = "HCM"
+        tags_str = " ".join(tags).lower()
+        node_name_src = str(src.get("nodename") or src.get("nodeName") or "").strip()
+        if "204" in origin or "204" in idx or "204" in tags_str or "fda204" in idx or "fda_204" in tags_str:
+            site = f"FDA 204 ({node_name_src})" if node_name_src and node_name_src not in ("FDAM2A 204", "FDA204", "204") else "FDA 204"
+        elif any(k in origin or k in idx or k in tags_str for k in ("235", "72.235", "NODE2", "NODE 2", "8084", "NEW_SMSC")):
+            site = f"FDA 235 ({node_name_src})" if node_name_src and node_name_src not in ("Node2", "235", "new_smsc_8084", "smsc-cdr-new-8084") else "FDA 235"
         else:
-            site = "HCM"
+            # Toàn bộ bản ghi truy vấn qua máy chủ Elasticsearch 10.204.57.26 (bao gồm cả các index HCM, HN, HNI)
+            site = f"FDA 26 ({node_name_src})" if node_name_src and node_name_src not in ("HCM", "26", "HNI", "HN") else "FDA 26"
 
         calling = str(src.get("callingnumber") or "").strip()
         called = str(src.get("callednumber") or "").strip()
@@ -652,10 +674,10 @@ def fetch_smsc_cdr(
         }
         tc_up = term_cause.upper()
         sc_up = status_code.upper()
-        is_success_cause = (tc_up in ("100C", "133C", "4108") or sc_up in ("100C", "133C", "4108")) and not is_intermediate
+        is_success_cause = (tc_up in ("100C", "133C", "4108", "0", "0000") or sc_up in ("100C", "133C", "4108")) and not is_intermediate
         is_fail_cause = tc_up in fail_causes or status_code in ("1", "3", "4", "5", "7", "8")
 
-        is_delivered = is_success_cause or (status_code == "2" and not is_fail_cause and not is_intermediate and tc_up in ("0", "0000", "", "--"))
+        is_delivered = is_success_cause or (status_code in ("2", "0") and not is_fail_cause and not is_intermediate and tc_up in ("0", "0000", "", "--"))
 
         if is_intermediate:
             status_desc = f"Tiếp nhận phân mảnh tin dài (Intermediate - Status: {status_code or '--'}, Cause: {term_cause or '199C'})"

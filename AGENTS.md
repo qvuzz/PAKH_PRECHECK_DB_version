@@ -78,23 +78,17 @@ Tài liệu này là chỉ dẫn bắt buộc cho mọi trợ lý AI (Antigravit
        `http://127.0.0.1:1708/api/reverse-geocode?lat=...&long=...` kết hợp tọa độ GPS (lat/long) từ CEM.
      * Hàm chuẩn hóa lõi: [`normalize_vn_commune_and_province()`](routers/tickets.py) tự động trích xuất đúng `Phường/Xã` và `Tỉnh/TP`.
 
-7. **Quy chuẩn đồng bộ 3 lớp & Xác nhận trước khi Build/Nén ZIP (BẮT BUỘC)**:
-   * **Quy trình 3 Lớp**:
-     1. **Lớp 1 (Code gốc)**: Sửa tại thư mục gốc workspace (`PAKH_PRECHECK/`).
-     2. **Lớp 2 (Thư mục Docker)**: Đồng bộ sang thư mục triển khai docker `VNPT TTS PRECHECK/`.
-     3. **Lớp 3 (Gói ZIP triển khai)**: Chạy `python update_deploy_zip.py` để đóng gói cập nhật đè vào file `VNPT_TTS_PRECHECK_DEPLOY.zip`.
-   * **BẮT BUỘC KIỂM TRA VÀ CẬP NHẬT FILE `docker-compose.yml`**:
-     * Khi có file/module/từ điển mới được tạo (như file cấu hình, JSON, module python mới), **BẮT BUỘC** phải rà soát và cập nhật file `docker-compose.yml` (ở cả Lớp 1 và Lớp 2) tại mục `volumes:` để đảm bảo file mới được mount trực tiếp vào container (`/app/...`). Điều này giúp container Docker nhận cập nhật live theo thời gian thực mà không bị thiếu file hoặc phải build lại image.
-     * Đồng thời, kiểm tra `update_deploy_zip.py` xem file mới đã được thêm vào danh sách `files_to_update` hay chưa trước khi nén.
-   * **BẮT BUỘC HỎI Ý KIẾN TRƯỚC KHI BUILD DOCKER & NÉN FILE ZIP**:
-     * **CẤM** tự ý chạy build Docker hoặc nén lại file ZIP (`update_deploy_zip.py`) sau mỗi lần sửa code nhỏ.
-     * **BẮT BUỘC**: Trước khi thực hiện đồng bộ sang Docker / build lại container / nén file ZIP, AI phải hỏi ý kiến người dùng với lựa chọn rõ ràng **Yes/No**. Chỉ khi người dùng chọn **Yes (Đồng ý)** thì mới tiến hành đồng bộ và đóng gói ZIP.
+7. **Quy chuẩn đồng bộ & Triển khai (Tạm thời chạy trực tiếp trên Host, tạm dừng Docker & ZIP)**:
+   * **Môi trường hiện tại**: Theo chỉ đạo của người dùng, **tạm thời ngưng sử dụng Docker và nén file ZIP**. Mọi hoạt động chỉnh sửa code, chạy server, kiểm thử và vận hành đều diễn ra trực tiếp tại thư mục workspace gốc (`PAKH_PRECHECK/`).
+   * **BẢO LƯU QUY TẮC AN TOÀN**:
+     * **CẤM** tự ý chạy build Docker hoặc nén lại file ZIP (`update_deploy_zip.py`).
+     * Chỉ khi nào người dùng có yêu cầu rõ ràng về việc đóng gói hoặc tái kích hoạt triển khai Docker thì mới thực hiện, và **BẮT BUỘC** hỏi ý kiến xác nhận (Yes/No) trước khi build/nén.
 
 8. **Quy chuẩn đặc biệt bảo vệ JavaScript Client (`static/js/dashboard.js`) - BẮT BUỘC TUÂN THỦ**:
    * File `static/js/dashboard.js` điều khiển toàn bộ Single Page App với gần 9.000 dòng code. Bất kỳ một lỗi cú pháp nhỏ (như thiếu dấu đóng ngoặc `});`, sai template string `${...}`) sẽ khiến trình duyệt crash toàn bộ runtime JS, làm đơ toàn bộ Dashboard (treo ở trạng thái "Đang tải dữ liệu phiếu...").
    * **BẮT BUỘC KIỂM TRA CÚ PHÁP BẰNG NODE.JS**: Sau mỗi lần chỉnh sửa bất kỳ dòng nào trong `static/js/dashboard.js`, **BẮT BUỘC** chạy ngay lệnh:
      `node -c "static/js/dashboard.js"`
-   * **ĐIỀU KIỆN CHẶN BẮT BUỘC (STRICT GATE)**: Chỉ khi lệnh trên trả về **Exit code 0** (không có lỗi) thì mới được phép đồng bộ sang thư mục Docker và đóng gói ZIP. Tuyệt đối không bàn giao code JS chưa qua kiểm tra cú pháp `node -c`.
+   * **ĐIỀU KIỆN CHẶN BẮT BUỘC (STRICT GATE)**: Chỉ khi lệnh trên trả về **Exit code 0** (không có lỗi) thì mới được coi là hợp lệ. Tuyệt đối không bàn giao code JS chưa qua kiểm tra cú pháp `node -c`.
 
 9. **Quy chuẩn chẩn đoán trước khi hành động (Root Cause & User Confirmation First — BẮT BUỘC)**:
    * **BẮT BUỘC**: Trước khi thực hiện bất kỳ sửa đổi code hay can thiệp hệ thống nào, AI phải:
@@ -119,11 +113,9 @@ Tài liệu này là chỉ dẫn bắt buộc cho mọi trợ lý AI (Antigravit
       2. **Độc lập nghiệp vụ**: Tránh xung đột logic giữa các phân hệ (ví dụ: logic bóc tách Data không thể áp đặt nhầm sang SMS hay Thoại).
       3. **Dễ bảo trì & nâng cấp**: Dễ dàng chỉnh sửa, test riêng từng nghiệp vụ mà không làm ảnh hưởng luồng core đang chạy ổn định.
 
-12. **Môi trường thực tế là Docker Server (KHÔNG PHẢI máy cục bộ / 10.155.139.167 — BẮT BUỘC NHỚ)**:
-    * **BẢN CHẤT MÔI TRƯỜNG TRIỂN KHAI**: Mọi phản ánh lỗi, hiện tượng giật/lag, chậm, trải nghiệm người dùng hoặc kết quả kiểm thử từ KTV **ĐỀU LÀ KẾT QUẢ TEST TRỰC TIẾP TỪ CONTAINER DOCKER (chạy trên Linux Server)**, hoàn toàn KHÔNG PHẢI từ WebApp trên máy dev hay máy `10.155.139.167`.
-    * **CẤM TUYỆT ĐỐI**:
-      * Đổ lỗi hoặc suy đoán nguyên nhân do thư mục OneDrive, filesystem Windows hay môi trường dev cục bộ khi phân tích lỗi/hiệu năng.
-      * Mọi phân tích hiệu năng, I/O disk SQLite, kết nối mạng, luồng tiến trình nền phải được phân tích chuẩn xác trong ngữ cảnh Container Docker Linux và các volume mount tương ứng.
+12. **Môi trường hoạt động: Chạy trực tiếp trên Host (TẠM NGỪNG DOCKER THEO CHỈ ĐẠO CỦA USER)**:
+    * **BẢN CHẤT MÔI TRƯỜNG HIỆN TẠI**: Theo yêu cầu của người dùng, **tạm thời ngưng sử dụng Docker**. Mọi tác vụ, chạy server FastAPI (`main.py` / `dashboard.py`), crawler dữ liệu và giao diện WebApp đều đang chạy và kiểm thử trực tiếp trên môi trường máy chủ cục bộ (Windows host tại thư mục `PAKH_PRECHECK/`).
+    * Mọi phân tích đường dẫn file, database SQLite `tickets.db`, phiên đăng nhập, cookie, token và kết nối mạng đều dựa trên môi trường máy chủ cục bộ đang chạy.
 
 ---
 
@@ -170,4 +162,7 @@ Dự án đã được phân tầng rõ ràng, mọi nghiệp vụ chỉ nằm t
    * Kiểm tra và cập nhật `docker-compose.yml` (bổ sung volume mount cho file mới nếu có).
    * Kiểm tra và cập nhật `update_deploy_zip.py` (thêm file mới vào `files_to_update`).
    * Copy file vừa sửa sang thư mục `VNPT TTS PRECHECK/`.
-   * Chạy `python update_deploy_zip.py` để cập nhật `VNPT_TTS_PRECHECK_DEPLOY.zip`.
+   * Chạy `python update_deploy_zip.py` để cập nhật `VNPT_TTS_PRECHECK_DEPLOY.zip` *(chỉ chạy khi có yêu cầu đóng gói từ người dùng)*.
+5. **Đồng bộ code sang bản backup OneDrive (Bắt buộc sau mỗi lần sửa code tại `D:\PAKH_PRECHECK`)**:
+   * Copy toàn bộ các file code / giao diện / JSON cấu hình vừa sửa từ `D:\PAKH_PRECHECK` sang `C:\Users\lequa\OneDrive - VNPT\python\PAKH_PRECHECK` (và `VNPT TTS PRECHECK/`).
+   * **Chỉ** đồng bộ file mã nguồn và cấu hình; **tuyệt đối KHÔNG** copy `tickets.db`, file log hay dữ liệu tạm sang OneDrive.

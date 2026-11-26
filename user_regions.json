@@ -11,70 +11,80 @@
       "region": "MB",
       "name": "Nguyễn Thị Hồng Hạnh",
       "email": "nguyenthihanh@vnpt.vn",
-      "username": "nguyenthihanh"
+      "username": "nguyenthihanh",
+      "can_auto_close": true
     },
     {
       "soc": "SOC1",
       "region": "MB",
       "name": "Lương Thị Thủy",
       "email": "luongthithuy@vnpt.vn",
-      "username": "luongthithuy"
+      "username": "luongthithuy",
+      "can_auto_close": true
     },
     {
       "soc": "SOC1",
       "region": "MB",
       "name": "Trần Trung Tuấn",
       "email": "trantrungtuan@vnpt.vn",
-      "username": "trantrungtuan"
+      "username": "trantrungtuan",
+      "can_auto_close": true
     },
     {
       "soc": "SOC1",
       "region": "MB",
       "name": "Nguyễn Thị Thu Hằng",
       "email": "thuhang@vnpt.vn",
-      "username": "thuhang"
+      "username": "thuhang",
+      "can_auto_close": true
     },
     {
       "soc": "SOC1",
       "region": "MB",
       "name": "Lê Minh Đức",
       "email": "duclm@vnpt.vn",
-      "username": "duclm"
+      "username": "duclm",
+      "can_auto_close": true
     },
     {
       "soc": "SOC1",
       "region": "MB",
       "name": "Hệ thống TTS",
       "email": "tts@vnpt.vn",
-      "username": "tts"
+      "username": "tts",
+      "can_auto_close": true
     },
     {
       "soc": "SOC1",
       "region": "MB",
       "name": "Đỗ Việt Đức",
       "email": "dvduc@vnpt.vn",
-      "username": "dvduc"
+      "username": "dvduc",
+      "can_auto_close": true
     },
     {
       "soc": "SOC1",
       "region": "MB",
       "name": "Nguyễn Thị Thanh Tùng",
       "email": "tungntt@vnpt.vn",
-      "username": "tungntt"
+      "username": "tungntt",
+      "can_auto_close": true
     },
     {
       "soc": "SOC2",
       "region": "MN",
       "name": "Hoàng Thị Lan Phương",
       "email": "lanphuong@vnpt.vn",
-      "username": "lanphuong"
+      "username": "lanphuong",
+      "can_auto_close": true
     },
     {
       "soc": "SOC2",
       "region": "MN",
       "name": "Nguyễn Thị Cẩm Tú",
       "email": "tuntc@vnpt.vn",
-      "username": "tuntc"
+      "username": "tuntc",
+      "can_auto_close": true
     },
     {
       "soc": "SOC2",
@@ -82,42 +92,48 @@
       "name": "Lê Quang Vũ",
       "email": "quangvu@vnpt.vn",
       "username": "quangvu",
-      "role": "admin"
+      "role": "admin",
+      "can_auto_close": true
     },
     {
       "soc": "SOC2",
       "region": "MN",
       "name": "Nguyễn Thị Hoa",
       "email": "nguyenhoa@vnpt.vn",
-      "username": "nguyenhoa"
+      "username": "nguyenhoa",
+      "can_auto_close": true
     },
     {
       "soc": "SOC2",
       "region": "MN",
       "name": "Đặng Trần Phương",
       "email": "tranphuong@vnpt.vn",
-      "username": "tranphuong"
+      "username": "tranphuong",
+      "can_auto_close": true
     },
     {
       "soc": "SOC3",
       "region": "MT",
       "name": "Hồ Văn Quang",
       "email": "quanghv@vnpt.vn",
-      "username": "quanghv"
+      "username": "quanghv",
+      "can_auto_close": true
     },
     {
       "soc": "SOC3",
       "region": "MT",
       "name": "Huỳnh Thái Dương",
       "email": "huynhthaiduong@vnpt.vn",
-      "username": "huynhthaiduong"
+      "username": "huynhthaiduong",
+      "can_auto_close": true
     },
     {
       "soc": "SOC3",
       "region": "MT",
       "name": "Đặng Quang Phương",
       "email": "phuongdq@vnpt.vn",
-      "username": "phuongdq"
+      "username": "phuongdq",
+      "can_auto_close": true
     }
   ]
 }

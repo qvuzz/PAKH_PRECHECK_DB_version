@@ -5,56 +5,56 @@
             "name": "Không bắt được sóng 4G (đã có HSS Profile 4G)",
             "conclusion": "KHÔNG BẮT ĐƯỢC SÓNG 4G",
             "color": "FCE4D6",
-            "technical_analysis": "Hệ thống HSS Profile đã mở dịch vụ 4G nhưng thiết bị hoàn toàn không bắt được sóng 4G trong các ngày gần đây. Nguyên nhân do thiết bị chưa bật chế độ LTE/4G hoặc SIM 4G bị lỗi vật lý.",
-            "action_plan": "Hướng dẫn khách hàng cài đặt lại chế độ mạng sang 4G/LTE tự động, hoặc mang SIM qua điểm giao dịch VinaPhone kiểm tra đổi SIM nếu SIM bị lỗi."
+            "technical_analysis": "Hồ sơ HSS đã mở dịch vụ 4G nhưng thiết bị của khách hàng hoàn toàn không kết nối sóng 4G những ngày gần đây, do máy chưa bật chế độ 4G/LTE hoặc SIM 4G bị lỗi vật lý.",
+            "action_plan": "Hướng dẫn khách hàng vào Cài đặt mạng chuyển sang chế độ 4G/LTE tự động; nếu vẫn chỉ lên 2G/3G thì mang SIM ra điểm giao dịch VinaPhone kiểm tra đổi SIM."
         },
         {
             "id": "KC_07_NO_4G_PROFILE",
             "name": "Không bắt được sóng 4G (chưa có HSS Profile 4G)",
             "conclusion": "CHƯA KHAI BÁO PROFILE 4G",
             "color": "FCE4D6",
-            "technical_analysis": "Kiểm tra trên hệ thống HSS Core, thuê bao chưa được mở profile dịch vụ 4G LTE, thiết bị chỉ kết nối được sóng 2G/3G.",
-            "action_plan": "Chuyển bộ phận IT/Khai thác mạng kiểm tra, bổ sung kích hoạt profile 4G cho thuê bao trên hệ thống."
+            "technical_analysis": "Hồ sơ HSS Core của thuê bao chưa khai báo gói dịch vụ 4G LTE nên thiết bị chỉ kết nối được sóng 2G/3G.",
+            "action_plan": "Nhờ VNP kiểm tra và kích hoạt bổ sung profile dịch vụ 4G cho thuê bao trên hệ thống."
         },
         {
             "id": "KC_02_WEAK_4G",
             "name": "Bắt sóng 4G kém / chập chờn (Thiết bị rớt về 2G/3G chiếm đa số)",
             "conclusion": "BẮT SÓNG 4G KÉM",
             "color": "FFF2CC",
-            "technical_analysis": "Thiết bị có kết nối 4G nhưng tần suất rớt về sóng 2G/3G chiếm đa số trong các ngày gần đây. Biểu hiện thuê bao ở khu vực sóng 4G yếu hoặc mép vùng phủ sóng.",
-            "action_plan": "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng tại khu vực khách hàng phản ánh."
+            "technical_analysis": "Thiết bị có kết nối 4G nhưng thường xuyên rớt về sóng 2G/3G do khách hàng đang ở khu vực sóng 4G yếu hoặc mép vùng phủ sóng.",
+            "action_plan": "Chuyển kỹ thuật địa bàn VTT kiểm tra chất lượng vùng phủ sóng 4G tại địa chỉ khách hàng phản ánh."
         },
         {
             "id": "KC_03_THROTTLED",
             "name": "Thuê bao bị bóp băng thông",
             "conclusion": "THUÊ BAO BỊ BÓP BĂNG THÔNG",
             "color": "F8CBAD",
-            "technical_analysis": "Hệ thống ghi nhận mã dịch vụ giới hạn băng thông (10002, 10003), thuê bao đã sử dụng hết dung lượng tốc độ cao và đang bị hạ băng thông.",
-            "action_plan": "Thông báo khách hàng đã sử dụng hết dung lượng tốc độ cao của gói cước. Tư vấn khách hàng mua thêm dung lượng data tốc độ cao để tiếp tục sử dụng."
+            "technical_analysis": "Hệ thống ghi nhận mã giới hạn băng thông (10002, 10003) do thuê bao đã dùng hết dung lượng tốc độ cao của gói cước.",
+            "action_plan": "Thông báo khách hàng đã dùng hết dung lượng tốc độ cao của gói và tư vấn mua thêm gói Data bổ sung nếu có nhu cầu truy cập nhanh."
         },
         {
             "id": "KC_04_PACKAGE_OR_DEVICE_HANG",
             "name": "Lỗi gói cước hoặc thiết bị treo/chưa bật data",
             "conclusion": "LỖI GÓI CƯỚC / THIẾT BỊ TREO",
             "color": "F2F2F2",
-            "technical_analysis": "Hệ thống chỉ ghi nhận các mã dịch vụ quản lý phiên, không phát sinh lưu lượng data thực tế. Nghi ngờ gói cước bị treo phiên hoặc thiết bị khách hàng tắt dữ liệu di động.",
-            "action_plan": "Kiểm tra thời hạn gói cước, hướng dẫn khách hàng bật/tắt lại Dữ liệu di động và khởi động lại thiết bị. Nếu không được, chuyển IT reset profile gói cước."
+            "technical_analysis": "Hệ thống chỉ ghi nhận kết nối phiên mà không phát sinh lưu lượng Data thực tế, do gói cước bị treo phiên hoặc máy khách hàng chưa bật Dữ liệu di động.",
+            "action_plan": "Kiểm tra hạn dùng gói cước, hướng dẫn khách hàng bật/tắt lại Dữ liệu di động và khởi động lại máy; nếu chưa được thì nhờ VNP reset lại profile gói cước."
         },
         {
             "id": "KC_06_VPN_OR_DEVICE_ISSUE",
             "name": "Lỗi thiết bị khách hàng hoặc sử dụng VPN",
             "conclusion": "ĐANG SỬ DỤNG VPN / 1.1.1.1",
             "color": "E2EFDA",
-            "technical_analysis": "Thiết bị truy cập qua RAT_TYPE mã 1, 6 ở nhiều phiên, dữ liệu data duy trì đều nhau một cách bất thường trong khoảng từ 5MB đến 11MB (khoảng 5,000,000 đến 11,500,000 Bytes).",
-            "action_plan": "Liên hệ hỗ trợ, nhờ Khách hàng kiểm tra các app VPN/1.1.1.1 cài đặt trên máy và tắt đi giúp."
+            "technical_analysis": "Thiết bị phát sinh nhiều phiên truy cập qua RAT_TYPE mã 1, 6 với lưu lượng đều bất thường (5MB - 11MB/phiên), dấu hiệu máy đang bật ứng dụng VPN hoặc đổi DNS (như 1.1.1.1).",
+            "action_plan": "Liên hệ hỗ trợ khách hàng kiểm tra và tắt các ứng dụng VPN / 1.1.1.1 đang chạy trên điện thoại để truy cập mạng ổn định hơn."
         },
         {
             "id": "KC_08_RESTRICTED_AREA_3G_BARRED",
             "name": "Thuê bao bị khóa sóng 3G / Vùng hạn chế (Sub State = RESTRICTED AREA)",
             "conclusion": "BỊ KHÓA SÓNG 3G (RESTRICTED AREA)",
             "color": "FCE4D6",
-            "technical_analysis": "Kiểm tra hệ thống Core HLR/HSS: Ghi nhận Sub State = RESTRICTED AREA. Thuê bao đang bị khóa sóng 3G / thuộc vùng hạn chế sóng nên không thể truy cập mạng Mobile Internet.",
-            "action_plan": "Chuyển IT/Khai thác mạng kiểm tra mở lại sóng 3G trên Core HLR/HSS cho thuê bao hoặc kích hoạt profile 4G LTE cho thuê bao."
+            "technical_analysis": "Hồ sơ Core HLR/HSS ghi nhận thuê bao đang ở trạng thái khóa sóng 3G / vùng hạn chế (Sub State = RESTRICTED AREA) nên không thể truy cập Internet.",
+            "action_plan": "Nhờ VNP mở lại sóng 3G trên Core HLR/HSS hoặc kích hoạt bổ sung profile 4G LTE cho thuê bao."
         }
     ]
 }

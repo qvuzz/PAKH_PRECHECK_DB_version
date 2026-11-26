@@ -34,6 +34,8 @@ KNOWN_APPS_AND_BANKS = [
     ("OCB", [r"\bocb\b", "omni"]),
     ("VIB", [r"\bvib\b", "myvib"]),
     ("Shinhan", ["shinhan", "shinhanbank"]),
+    ("Danske Bank", ["danske bank", "danskebank", "danske"]),
+    ("Số / Tin nhắn Quốc Tế", ["quốc tế", "quoc te", "international", "nước ngoài", "nuoc ngoai"]),
     ("MSB", [r"\bmsb\b"]),
     ("Eximbank", ["eximbank", "exim bank"]),
     ("Tinhte", ["tinhte", "tinhte.vn"]),
@@ -234,9 +236,9 @@ def extract_sms_prior_actions(text: str) -> list:
 def extract_target_fault_party(raw: str, low: str, app_brand: str = "", phone: str = "") -> str:
     """
     Bóc tách đối tượng phát sinh lỗi (Số gọi/nhận lỗi):
-    - "Tất cả các số": Nếu khách báo lỗi xảy ra với tất cả các số, toàn bộ, mọi số, hoặc báo lỗi chung chung không chỉ đích danh.
+    - Brandname / Tên đối tác / Quốc Tế: Nếu phản ánh nêu đích danh Brandname, Ngân hàng, hoặc tin nhắn Quốc Tế.
     - Số điện thoại cụ thể: Nếu khách báo lỗi với một số di động/cố định cụ thể (vd: 0912xxxxxx, 0837xxxxxx).
-    - Brandname / Đầu số: Nếu báo lỗi liên quan tới Brandname / Ngân hàng / Đầu số dịch vụ (Vietcombank, 1414, 9115, VNeID...).
+    - "Tất cả các số": Nếu khách báo lỗi xảy ra với tất cả các số, toàn bộ, mọi số, hoặc báo lỗi chung chung không chỉ đích danh.
     - "Không đề cập": Nếu là khiếu nại cước không chỉ rõ số phát sinh.
     """
     if not raw:
@@ -245,24 +247,15 @@ def extract_target_fault_party(raw: str, low: str, app_brand: str = "", phone: s
     clean_phone = re.sub(r'[^0-9]', '', str(phone or ''))
     clean_p9 = clean_phone[-9:] if len(clean_phone) >= 9 else ""
 
-    # 1. Quét từ khóa "Tất cả các số" / "Mọi số" / "Toàn bộ"
-    all_numbers_patterns = [
-        r'tất\s*cả\s*(?:các|mọi)?\s*(?:số|thuê\s*bao|cuộc\s*gọi|tin\s*nhắn|sms|người)',
-        r'toàn\s*bộ\s*(?:các|mọi)?\s*(?:số|thuê\s*bao|cuộc\s*gọi|tin\s*nhắn|sms)',
-        r'mọi\s*(?:số|thuê\s*bao|người)',
-        r'bất\s*kỳ\s*(?:số|thuê\s*bao|ai)',
-        r'không\s*(?:nhận|gửi|gọi|liên\s*lạc)\s*(?:được\s*)?(?:cho\s*)?ai',
-        r'ai\s*(?:gọi|nhắn|gửi)\s*(?:đến|tới)?\s*(?:cũng|đều)\s*(?:không|ko|báo|bị)',
-        r'(?:không|ko)\s*nhận\s*(?:được\s*)?(?:tin\s*nhắn|sms|cuộc\s*gọi)\s*(?:nào|từ\s*ai)',
-        r'tất\s*cả\s*đều\s*(?:bị|không|ko|lỗi)',
-        r'gửi\s*(?:đi\s*)?tất\s*cả',
-        r'nhận\s*(?:tất\s*cả|mọi)',
-    ]
-    for pat in all_numbers_patterns:
-        if re.search(pat, low):
-            return "Tất cả các số"
+    # 1. Ưu tiên hàng đầu: Brandname / Ứng dụng / Ngân hàng đã nhận diện
+    if app_brand and app_brand not in ("SMS thông thường", "Không đề cập", "--"):
+        return app_brand
 
-    # 2. Quét số điện thoại đối phương cụ thể trong nội dung (vd: 0912345678, 84912345678)
+    # 2. Ưu tiên Quốc tế: Nếu có từ khóa tin nhắn Quốc Tế / nước ngoài
+    if any(k in low for k in ["quốc tế", "quoc te", "international", "nước ngoài", "nuoc ngoai", "sim quốc tế", "sim quoc te"]):
+        return "Số / Đầu số Quốc Tế"
+
+    # 3. Quét số điện thoại đối phương cụ thể trong nội dung (vd: 0912345678, 84912345678)
     phone_candidates = re.findall(r'(?:\+?84|0)([35789]\d{8})\b', raw)
     if not phone_candidates:
         phone_candidates = re.findall(r'\b(0[1-9]\d{8,9})\b', raw)
@@ -285,18 +278,31 @@ def extract_target_fault_party(raw: str, low: str, app_brand: str = "", phone: s
     if valid_party_phone:
         return valid_party_phone
 
-    # 3. Quét Brandname / Tên đối tác / Đầu số ngắn
-    if app_brand and app_brand != "SMS thông thường":
-        return app_brand
-
-    # Quét đầu số ngắn cụ thể (vd: 1414, 9115, 129, 6089, 888, 900, 156...)
+    # 4. Quét đầu số ngắn cụ thể (vd: 1414, 9115, 129, 6089, 888, 900, 156...)
     short_match = re.search(r'(?:đầu\s*số|tới|đến|gửi|nhắn|số)\s*([0-9]{3,6})\b', raw, re.IGNORECASE)
     if short_match:
         s_code = short_match.group(1).strip()
         if s_code not in ("1800", "1900", "1091"):
             return s_code
 
-    # 4. Khiếu nại phát sinh cước thông thường không nêu đích danh số
+    # 5. Quét từ khóa "Tất cả các số" / "Mọi số" / "Toàn bộ" (khi không phải lỗi riêng biệt quốc tế/brand)
+    all_numbers_patterns = [
+        r'tất\s*cả\s*(?:các|mọi)?\s*(?:số|thuê\s*bao|cuộc\s*gọi|tin\s*nhắn|sms|người)',
+        r'toàn\s*bộ\s*(?:các|mọi)?\s*(?:số|thuê\s*bao|cuộc\s*gọi|tin\s*nhắn|sms)',
+        r'mọi\s*(?:số|thuê\s*bao|người)',
+        r'bất\s*kỳ\s*(?:số|thuê\s*bao|ai)',
+        r'không\s*(?:nhận|gửi|gọi|liên\s*lạc)\s*(?:được\s*)?(?:cho\s*)?ai',
+        r'ai\s*(?:gọi|nhắn|gửi)\s*(?:đến|tới)?\s*(?:cũng|đều)\s*(?:không|ko|báo|bị)',
+        r'(?:không|ko)\s*nhận\s*(?:được\s*)?(?:tin\s*nhắn|sms|cuộc\s*gọi)\s*(?:nào|từ\s*ai)',
+        r'tất\s*cả\s*đều\s*(?:bị|không|ko|lỗi)',
+        r'gửi\s*(?:đi\s*)?tất\s*cả',
+        r'nhận\s*(?:tất\s*cả|mọi)',
+    ]
+    for pat in all_numbers_patterns:
+        if re.search(pat, low):
+            return "Tất cả các số"
+
+    # 6. Khiếu nại phát sinh cước thông thường không nêu đích danh số
     if any(k in low for k in ["khiếu nại cước", "phát sinh cước", "trừ cước", "trừ tiền"]) and not any(k in low for k in ["không gửi được", "không nhận được", "lỗi gửi", "lỗi nhận"]):
         return "Không đề cập"
 
@@ -304,7 +310,7 @@ def extract_target_fault_party(raw: str, low: str, app_brand: str = "", phone: s
     return "Tất cả các số"
 
 
-def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_time_fallback: str = "", created_time: str = "", phone: str = "") -> dict:
+def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_time_fallback: str = "", created_time: str = "", phone: str = "", processing_content: str = "") -> dict:
     """
     Phân tích toàn diện nội dung phản ánh Tin nhắn (SMS):
     - Chuẩn hóa loại sự cố (mo_fail, otp, cost_issue, mt_fail, spam, other)
@@ -313,7 +319,14 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
     - Sinh summary 6 mục chuyên nghiệp chuẩn viễn thông
     - Dải ngày tra cứu CDR: từ ngày sự cố (-1 ngày) đến ngày tiếp nhận + 3 ngày
     """
-    raw = str(ticket_content or "").strip()
+    raw_content = str(ticket_content or "").strip()
+    proc_content = str(processing_content or "").strip()
+    # Hợp nhất nội dung phản ánh gốc và nội dung xử lý điều phối (processing_content)
+    if proc_content and proc_content not in raw_content:
+        raw = f"{raw_content}\n[Xử lý điều phối]: {proc_content}".strip()
+    else:
+        raw = raw_content
+
     low = raw.lower()
     title_low = str(package_title or "").lower()
 
@@ -325,8 +338,19 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
     time_range_desc = "3 ngày gần nhất"
     pad = lambda n: str(n).zfill(2)
 
-    fallback_year = now.year
+    # Parse ngày giờ sự cố gốc (incident_time_fallback) nếu có
+    incident_dt = None
     if incident_time_fallback:
+        inc_str = str(incident_time_fallback).strip().split(".")[0]
+        for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d/%m/%Y", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ"):
+            try:
+                incident_dt = datetime.strptime(inc_str, fmt)
+                break
+            except Exception:
+                pass
+
+    fallback_year = incident_dt.year if incident_dt else now.year
+    if not incident_dt and incident_time_fallback:
         y_match = re.search(r'\b(20\d{2})\b', str(incident_time_fallback))
         if y_match:
             fallback_year = int(y_match.group(1))
@@ -365,21 +389,21 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
         if t_h_only:
             time_str = f"{pad(int(t_h_only.group(1)))}:00"
 
-    # Nếu nội dung văn bản không có giờ, bổ sung quét giờ từ ngày tiếp nhận (created_time) hoặc incident_time_fallback
+    # Nếu nội dung văn bản không có giờ, bổ sung quét giờ từ incident_dt (ưu tiên 1) hoặc receipt_dt (ưu tiên 2)
     if not time_str:
-        if receipt_dt and (receipt_dt.hour or receipt_dt.minute):
+        if incident_dt and (incident_dt.hour or incident_dt.minute):
+            time_str = incident_dt.strftime("%H:%M")
+        elif receipt_dt and (receipt_dt.hour or receipt_dt.minute):
             time_str = receipt_dt.strftime("%H:%M")
             is_time_from_receipt = True
         elif incident_time_fallback:
             t_fb = re.search(r'\b([0-2]?[0-9])[:hH]([0-5][0-9])(?:\s*(?:phút|p))?\b', str(incident_time_fallback))
             if t_fb:
                 time_str = f"{pad(int(t_fb.group(1)))}:{pad(int(t_fb.group(2)))}"
-                is_time_from_receipt = True
             else:
                 t_fb_h = re.search(r'(?:lúc|vào|khoảng|tầm)?\s*\b([0-2]?[0-9])\s*(?:h|giờ|gio)\b', str(incident_time_fallback), re.IGNORECASE)
                 if t_fb_h:
                     time_str = f"{pad(int(t_fb_h.group(1)))}:00"
-                    is_time_from_receipt = True
 
     # 0. Quét Ngày tiếng Anh (vd: Sep 19, 2026 ... đến Sep 20, 2026 hoặc 19 Sep 2026)
     en_month_map = {
@@ -390,39 +414,47 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
     if not en_dates:
         en_dates = [(m[1], m[0], m[2]) for m in re.findall(r'\b([0-3]?[0-9])\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*,?\s+(20\d{2})\b', raw, re.IGNORECASE)]
 
-    # 0A. Quét Khoảng Ngày Cụ Thể (Date Range, vd: 13-09-2026 - 20-09-2026, từ 13/09 đến 20/09/2026, 08/10 → 11/10/2026)
+    # 0A. Quét Khoảng Ngày Cụ Thể (Date Range, vd: 13-09-2026 - 20-09-2026, từ 13/09 đến 20/09/2026, 08/10 → 11/10/2026, ngày 02 + 03/11)
     range_pat = re.compile(
         r'(?:từ\s+(?:ngày\s+)?)?([0-3]?[0-9])[/\-]([0-1]?[0-9])(?:[/\-](20\d{2}|\d{2}))?'
-        r'\s*(?:đến|\-|–|—|->|→|tới)\s*'
+        r'\s*(?:đến|\-|–|—|->|→|tới|\+|và|,|&)\s*'
         r'(?:ngày\s+)?([0-3]?[0-9])[/\-]([0-1]?[0-9])(?:[/\-](20\d{2}|\d{2}))?',
         re.IGNORECASE
     )
+    range_pat_same_month = re.compile(
+        r'(?:ngày|từ ngày)?\s*([0-3]?[0-9])\s*(?:\+|và|,|&)\s*([0-3]?[0-9])[/\-]([0-1]?[0-9])(?:[/\-](20\d{2}|\d{2}))?',
+        re.IGNORECASE
+    )
+
     m_range = range_pat.search(raw) or (range_pat.search(str(incident_time_fallback)) if incident_time_fallback else None)
+    m_range_same = None
+    if not m_range:
+        m_range_same = range_pat_same_month.search(raw)
 
     # 0B. Quét tất cả các mốc ngày đầy đủ dd/mm/yyyy trong văn bản (vd ECMS: 00:17:01 01-09-2026- 12:39:30 13-09-2026)
     all_full_dates = re.findall(r'\b([0-3]?[0-9])[/\-]([0-1]?[0-9])[/\-](20\d{2})\b', raw)
 
     # 1. Full date dd/mm/yyyy (vd: 14/10/2026, 05/10/2026)
     m_full = None
-    if not m_range and not en_dates and len(all_full_dates) < 2:
+    if not m_range and not m_range_same and not en_dates and len(all_full_dates) < 2:
         m_full = re.search(r'\b([0-3]?[0-9])[/\-]([0-1]?[0-9])[/\-](20\d{2}|\d{2})\b', raw)
 
     # 2. Month pattern (vd: cước tháng 09/2026, trong tháng 9, T09/2026, T9/2026, kỳ cước 09/2026, hoặc độc lập 09/2026)
     m_month = None
-    if not m_range and not m_full and not en_dates and len(all_full_dates) < 2:
+    if not m_range and not m_range_same and not m_full and not en_dates and len(all_full_dates) < 2:
         m_month = re.search(r'(?<![0-9/])(?:trong\s+tháng|cước\s+tháng|kỳ\s+cước|kỳ|tháng|t)\s*([0-1]?[0-9])(?:\s*[/\-]\s*(20\d{2}))?\b', raw, re.IGNORECASE)
         if not m_month:
             m_month = re.search(r'(?<![0-9/])([0-1]?[0-9])[/\-](20\d{2})\b', raw)
 
     # 3. Day/Month without year (vd: ngày 28/08, 14/10, lúc 14:00 ngày 28/08)
     m_dm = None
-    if not m_range and not m_full and not m_month and not en_dates and len(all_full_dates) < 2:
+    if not m_range and not m_range_same and not m_full and not m_month and not en_dates and len(all_full_dates) < 2:
         m_dm = re.search(r'(?:ngày|hôm|lúc|từ)\s*([0-3]?[0-9])[/\-]([0-1]?[0-9])\b', raw, re.IGNORECASE) or \
                re.search(r'(?<![0-9/])([0-3]?[0-9])[/\-]([0-1]?[0-9])(?![0-9/])', raw)
 
-    # 4. Fallback sang incident_time_fallback nếu nội dung hoàn toàn không có ngày tháng và không có ngày tiếp nhận (receipt_dt)
-    if not m_range and not m_full and not m_month and not m_dm and not en_dates and len(all_full_dates) < 2:
-        if not receipt_dt and incident_time_fallback:
+    # 4. Fallback sang incident_time_fallback nếu nội dung hoàn toàn không có ngày tháng
+    if not m_range and not m_range_same and not m_full and not m_month and not m_dm and not en_dates and len(all_full_dates) < 2:
+        if incident_time_fallback:
             fb_str = str(incident_time_fallback).strip()
             m_full = re.search(r'\b([0-3]?[0-9])[/\-]([0-1]?[0-9])[/\-](20\d{2}|\d{2})\b', fb_str)
             if not m_full:
@@ -452,7 +484,17 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
             time_range_desc = f"{pad(d1_val)}/{pad(m1_val)} → {pad(d2_val)}/{pad(m2_val)}/{y2_val}"
             detected_time = time_range_desc
 
-    elif len(all_full_dates) >= 2 and any(k in raw.lower() for k in ["đến", "den", "tới", "→", "->", "kỳ cước"]):
+    elif m_range_same:
+        d1, d2, m, y = m_range_same.groups()
+        y_val = int(f"20{y}") if y and len(y) == 2 else (int(y) if y else fallback_year)
+        d1_val, d2_val, m_val = int(d1), int(d2), int(m)
+        if 1 <= d1_val <= 31 and 1 <= d2_val <= 31 and 1 <= m_val <= 12:
+            from_date = f"{y_val}-{pad(m_val)}-{pad(d1_val)} 00:00:00"
+            to_date = f"{y_val}-{pad(m_val)}-{pad(d2_val)} 23:59:59"
+            time_range_desc = f"{pad(d1_val)}/{pad(m_val)} → {pad(d2_val)}/{pad(m_val)}/{y_val}"
+            detected_time = time_range_desc
+
+    elif len(all_full_dates) >= 2 and any(k in raw.lower() for k in ["đến", "den", "tới", "→", "->", "kỳ cước", "-", "–"]):
         d1_val, m1_val, y1_val = int(all_full_dates[0][0]), int(all_full_dates[0][1]), int(all_full_dates[0][2])
         d2_val, m2_val, y2_val = int(all_full_dates[-1][0]), int(all_full_dates[-1][1]), int(all_full_dates[-1][2])
         if (d1_val != d2_val or m1_val != m2_val or y1_val != y2_val):
@@ -460,6 +502,20 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
             to_date = f"{y2_val}-{pad(m2_val)}-{pad(d2_val)} 23:59:59"
             time_range_desc = f"{pad(d1_val)}/{pad(m1_val)}/{y1_val} → {pad(d2_val)}/{pad(m2_val)}/{y2_val}"
             detected_time = time_range_desc
+        else:
+            # Hai mốc ngày trùng nhau (vd ECMS: 20:16 16-10-2026 đến 20:17 16-10-2026) -> Quét khung 3 ngày từ ngày đó
+            try:
+                base_start = datetime(y1_val, m1_val, d1_val)
+                end_dt = base_start + timedelta(days=2)
+                from_date = base_start.strftime("%Y-%m-%d 00:00:00")
+                to_date = end_dt.strftime("%Y-%m-%d 23:59:59")
+                time_range_desc = f"{base_start.strftime('%d/%m/%Y')} → {end_dt.strftime('%d/%m/%Y')}"
+                detected_time = f"{pad(d1_val)}/{pad(m1_val)}/{y1_val}"
+            except Exception:
+                from_date = f"{y1_val}-{pad(m1_val)}-{pad(d1_val)} 00:00:00"
+                to_date = f"{y1_val}-{pad(m1_val)}-{pad(d1_val)} 23:59:59"
+                time_range_desc = f"{pad(d1_val)}/{pad(m1_val)}/{y1_val}"
+                detected_time = time_range_desc
 
     elif m_full:
         d_val = int(m_full.group(1))
@@ -474,8 +530,11 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
                 target_dt = datetime(y_val, m_val, d_val)
                 base_start = target_dt
                 from_date = base_start.strftime("%Y-%m-%d 00:00:00")
-                base_receipt = receipt_dt if receipt_dt else target_dt
-                end_dt = base_receipt + timedelta(days=3)
+                # Nếu receipt_dt nằm gần target_dt (trong vòng 3 ngày), dùng receipt_dt; nếu không lấy target_dt + 2 ngày
+                if receipt_dt and 0 <= (receipt_dt - target_dt).days <= 3:
+                    end_dt = receipt_dt + timedelta(days=1)
+                else:
+                    end_dt = target_dt + timedelta(days=2)
                 to_date = end_dt.strftime("%Y-%m-%d 23:59:59")
                 time_range_desc = f"{base_start.strftime('%d/%m/%Y')} → {end_dt.strftime('%d/%m/%Y')}"
             except Exception:
@@ -510,8 +569,10 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
                 target_dt = datetime(y_val, m_val, d_val)
                 base_start = target_dt
                 from_date = base_start.strftime("%Y-%m-%d 00:00:00")
-                base_receipt = receipt_dt if receipt_dt else target_dt
-                end_dt = base_receipt + timedelta(days=3)
+                if receipt_dt and 0 <= (receipt_dt - target_dt).days <= 3:
+                    end_dt = receipt_dt + timedelta(days=1)
+                else:
+                    end_dt = target_dt + timedelta(days=2)
                 to_date = end_dt.strftime("%Y-%m-%d 23:59:59")
                 time_range_desc = f"{base_start.strftime('%d/%m/%Y')} → {end_dt.strftime('%d/%m/%Y')}"
             except Exception:
@@ -521,8 +582,18 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
 
     if not from_date:
         base_target = None
-        # 🎯 ƯU TIÊN SỐ 1: NẾU KHÔNG CÓ NGÀY SỰ CỐ RIÊNG -> LẤY CHÍNH XÁC NGÀY TIẾP NHẬN PHIẾU (receipt_dt)
-        if receipt_dt:
+        # 🎯 ƯU TIÊN SỐ 1: THỜI ĐIỂM SỰ CỐ GỐC TRÊN PHIẾU ONEOSS (incident_dt)
+        if incident_dt:
+            base_target = incident_dt
+            if detected_time == "--":
+                if time_str:
+                    detected_time = f"{time_str} ngày {incident_dt.strftime('%d/%m/%Y')}"
+                elif incident_dt.hour or incident_dt.minute:
+                    detected_time = f"{incident_dt.strftime('%H:%M')} ngày {incident_dt.strftime('%d/%m/%Y')}"
+                else:
+                    detected_time = f"{incident_dt.strftime('%d/%m/%Y')}"
+        # 🎯 ƯU TIÊN SỐ 2: NGÀY TIẾP NHẬN PHIẾU (receipt_dt)
+        elif receipt_dt:
             base_target = receipt_dt
             if detected_time == "--":
                 if time_str:
@@ -531,24 +602,15 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
                     detected_time = f"{receipt_dt.strftime('%H:%M')} ngày {receipt_dt.strftime('%d/%m/%Y')} (Tiếp nhận)"
                 else:
                     detected_time = f"{receipt_dt.strftime('%d/%m/%Y')} (Tiếp nhận)"
-        elif incident_time_fallback:
-            for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d/%m/%Y", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S"):
-                try:
-                    base_target = datetime.strptime(str(incident_time_fallback).strip().split(".")[0], fmt)
-                    break
-                except Exception:
-                    pass
-            if detected_time == "--" and base_target:
-                if time_str:
-                    detected_time = f"{time_str} ngày {base_target.strftime('%d/%m/%Y')}"
-                else:
-                    detected_time = f"{base_target.strftime('%d/%m/%Y')}"
 
         if base_target:
             base_start = base_target
             from_date = base_start.strftime("%Y-%m-%d 00:00:00")
-            base_receipt = receipt_dt if receipt_dt else base_target
-            end_dt = base_receipt + timedelta(days=3)
+            # Khung tra cứu chuẩn: 3 ngày quanh thời điểm sự cố (vd 17/10 -> 20/10)
+            if incident_dt and receipt_dt and 0 <= (receipt_dt - incident_dt).days <= 3:
+                end_dt = receipt_dt + timedelta(days=1)
+            else:
+                end_dt = base_start + timedelta(days=3)
             to_date = end_dt.strftime("%Y-%m-%d 23:59:59")
             time_range_desc = f"{base_start.strftime('%d/%m/%Y')} → {end_dt.strftime('%d/%m/%Y')}"
             if detected_time == "--":
@@ -572,9 +634,16 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
             for kw in keywords:
                 if kw.startswith(r"\b"):
                     if re.search(kw, low):
+                        # Loại trừ thiết bị phần cứng
+                        if standard_name == "Apple" and re.search(r'(?:máy|sử dụng|thiết bị|đổi máy|dùng máy)\s+apple|apple\s+(?:iphone|ipad|watch|pro|promax|\d+)', low):
+                            continue
                         matched = True
                         break
                 elif kw in low:
+                    # Loại trừ trường hợp "Apple" xuất hiện dưới dạng tên thiết bị phần cứng (iPhone, iPad, v.v.)
+                    if standard_name == "Apple" and kw == "apple":
+                        if re.search(r'(?:máy|sử dụng|thiết bị|đổi máy|dùng máy)\s+apple|apple\s+(?:iphone|ipad|watch|pro|promax|\d+)', low):
+                            continue
                     matched = True
                     break
             if matched:
@@ -870,11 +939,12 @@ def interpret_sms_ticket(ticket_content: str, package_title: str = "", incident_
         "suggested_cause_name": suggested_cause_name,
         "suggested_conclusion": suggested_conclusion,
         "suggested_action_plan": suggested_action_plan,
+        "processing_content": proc_content,
         "summary_formatted": summary_formatted
     }
 
 
-def generate_sms_ticket_summary(arg1: str, arg2: str = "", phone: str = "", package_title: str = "", incident_time_fallback: str = "", created_time: str = "") -> str:
+def generate_sms_ticket_summary(arg1: str, arg2: str = "", phone: str = "", package_title: str = "", incident_time_fallback: str = "", created_time: str = "", processing_content: str = "") -> str:
     """
     Hàm entry point tạo tóm tắt chuẩn 7 mục SMS cho cơ sở dữ liệu và hiển thị UI.
     Hỗ trợ linh hoạt các kiểu gọi:
@@ -885,6 +955,7 @@ def generate_sms_ticket_summary(arg1: str, arg2: str = "", phone: str = "", pack
     inc_fallback = incident_time_fallback
     c_time = created_time
     p_phone = phone
+    proc_c = processing_content
 
     if not p_title:
         if len(str(arg1 or "")) > 50 and len(str(arg2 or "")) <= 30 and not any(k in str(arg1).lower() for k in ["tin nhắn", "sms", "cuộc gọi", "thoại"]):
@@ -900,7 +971,7 @@ def generate_sms_ticket_summary(arg1: str, arg2: str = "", phone: str = "", pack
         if not inc_fallback and arg2:
             inc_fallback = str(arg2).strip()
 
-    res = interpret_sms_ticket(t_content, package_title=p_title, incident_time_fallback=inc_fallback, created_time=c_time, phone=p_phone)
+    res = interpret_sms_ticket(t_content, package_title=p_title, incident_time_fallback=inc_fallback, created_time=c_time, phone=p_phone, processing_content=proc_c)
     return res.get("summary_formatted") or ""
 
 

@@ -22,6 +22,9 @@ def _get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "127.0.0.1"
 
 
+_OLD_TOKEN_MEM_CACHE = {"token": "", "user": {}, "ts": 0.0}
+
+
 @router.get("/current_user")
 def get_current_user_info(request: Request):
     client_ip = _get_client_ip(request)
@@ -41,13 +44,22 @@ def get_current_user_info(request: Request):
             lan_ttsnew_tok = cand_tok
             lan_ttsnew_usr = ACTIVE_LAN_SESSIONS[client_ip].get("ttsnew_user", {})
 
-    # Lấy token đang hoạt động từ máy chủ (TTS Cũ & TTS Mới)
+    # Lấy token đang hoạt động từ máy chủ (TTS Cũ & TTS Mới) - có cache 30s tránh chạm Chrome CDP liên tục
     srv_token, srv_user = "", {}
-    try:
-        from tts_old_api import extract_token_from_browser as extract_old_token
-        srv_token, srv_user = extract_old_token()
-    except Exception:
-        pass
+    if is_local:
+        now_ts = time.time()
+        if now_ts - _OLD_TOKEN_MEM_CACHE["ts"] < 30:
+            srv_token = _OLD_TOKEN_MEM_CACHE["token"]
+            srv_user = _OLD_TOKEN_MEM_CACHE["user"]
+        else:
+            try:
+                from tts_old_api import extract_token_from_browser as extract_old_token
+                srv_token, srv_user = extract_old_token()
+            except Exception:
+                pass
+            _OLD_TOKEN_MEM_CACHE["token"] = srv_token
+            _OLD_TOKEN_MEM_CACHE["user"] = srv_user
+            _OLD_TOKEN_MEM_CACHE["ts"] = now_ts
 
     srv_ttsnew_token = ""
     try:

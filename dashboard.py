@@ -151,6 +151,13 @@ async def lifespan(app: FastAPI):
     live_sync_thread = threading.Thread(target=_live_tts_new_sync_loop, daemon=True)
     live_sync_thread.start()
 
+    # Khởi chạy luồng nền tự động dọn file tạm (cem, number, output, result) cũ hơn 24 giờ
+    try:
+        from services.temp_cleaner import start_temp_cleaner_daemon
+        start_temp_cleaner_daemon(max_age_hours=24.0, interval_hours=6.0, initial_delay_sec=30.0)
+    except Exception as e:
+        print(f"[WARN] Khoi chay Temp Cleaner that bai: {e}")
+
     # Mở tab trên Chrome Debug
     open_in_chrome_debug(f"http://localhost:{PORT}")
 

@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import requests
 import urllib.request
 import urllib.parse
+import urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -298,7 +299,6 @@ def make_api_request(url: str, token: str, timeout: int = 15) -> dict:
                     os.remove(TOKEN_CACHE_FILE)
                 except Exception:
                     pass
-            import urllib.error
             raise urllib.error.HTTPError(url, 401, "Unauthorized", resp.headers, None)
         resp.raise_for_status()
         return resp.json()
@@ -311,7 +311,6 @@ def make_api_request(url: str, token: str, timeout: int = 15) -> dict:
                     os.remove(TOKEN_CACHE_FILE)
                 except Exception:
                     pass
-            import urllib.error
             raise urllib.error.HTTPError(url, 401, "Unauthorized", e.response.headers, None)
         raise
 
@@ -656,6 +655,7 @@ def enrich_ticket_customer(it: dict, token: str, assigned_region: str = None) ->
 
         # Lấy thông tin xử lý từ get-ticket-info nếu có
         processing_content = ""
+        info_data = {}
         try:
             resp_info = make_api_request(url_info, token, timeout=8)
             info_data = resp_info.get("data") or {}
@@ -665,12 +665,35 @@ def enrich_ticket_customer(it: dict, token: str, assigned_region: str = None) ->
                     last_reopened_date = str(lrd).strip()
                 processing_content = str(info_data.get("processingContent") or "").strip()
         except Exception:
+            info_data = {}
             pass
 
-        raw_inc_date = it.get("incidentDate", "") or it.get("requestDate", "")
-        raw_req_date = it.get("requestDate", "")
-        raw_dl_overall = it.get("deadlineOverall") or it.get("deadline_overall") or ""
-        raw_dl = it.get("deadline") or ""
+        raw_inc_date = (
+            it.get("incidentDate", "") or it.get("requestDate", "") or
+            (info_data.get("incidentDate") if isinstance(info_data, dict) else "") or
+            (info_data.get("requestDate") if isinstance(info_data, dict) else "") or ""
+        )
+        raw_req_date = (
+            it.get("requestDate", "") or
+            (info_data.get("requestDate") if isinstance(info_data, dict) else "") or ""
+        )
+        # Ưu tiên Thời hạn xử lý tại bước (Step Deadline):
+        raw_step_dl = (
+            it.get("deadline") or
+            (info_data.get("deadline") if isinstance(info_data, dict) else "") or
+            (info_data.get("slaDateStep") if isinstance(info_data, dict) else "") or ""
+        )
+        # Hạn xử lý hiển thị chính: Ưu tiên hạn bước, sau đó mới fallback sang hạn toàn trình
+        raw_dl_overall = (
+            raw_step_dl or
+            it.get("deadlineOverall") or it.get("deadline_overall") or
+            (info_data.get("slaDate") if isinstance(info_data, dict) else "") or
+            (info_data.get("deadlineOverall") if isinstance(info_data, dict) else "") or
+            (info_data.get("deadline_overall") if isinstance(info_data, dict) else "") or
+            (info_data.get("customerCompletionDate") if isinstance(info_data, dict) else "") or
+            it.get("customerCompletionDate") or ""
+        )
+        raw_dl = raw_step_dl
 
         return {
             "flow_id": flow_id,
@@ -701,8 +724,9 @@ def enrich_ticket_customer(it: dict, token: str, assigned_region: str = None) ->
         raw_fb = str(it.get("subscriberNumber") or it.get("customerPhone") or "").strip()
         raw_inc_date = it.get("incidentDate", "") or it.get("requestDate", "")
         raw_req_date = it.get("requestDate", "")
-        raw_dl_overall = it.get("deadlineOverall") or it.get("deadline_overall") or ""
-        raw_dl = it.get("deadline") or ""
+        raw_step_dl = it.get("deadline") or ""
+        raw_dl_overall = raw_step_dl or it.get("deadlineOverall") or it.get("deadline_overall") or it.get("customerCompletionDate") or ""
+        raw_dl = raw_step_dl
         return {
             "flow_id": flow_id,
             "ticket_id": it.get("ticketId"),
@@ -982,6 +1006,51 @@ def api_transfer_ttsnew_ticket(token: str, ticket_flow_id: int, ticket_id: int,
         step_data = res_step.get("data") or {}
         curr_nodes = step_data.get("currentNodes") or []
         if not curr_nodes:
+            # 🎯 Đối soát OneOSS: Phiếu có thể đã được đóng dứt điểm từ trước
+            try:
+                url_chk_closed = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/Ticket/get-editable-ticket/{ticket_id}"
+                r_chk = requests.get(url_chk_closed, headers=headers, timeout=5)
+                if r_chk.status_code == 200:
+                    d_chk = (r_chk.json().get("data") or r_chk.json().get("responseData") or {})
+                    s_name = str(d_chk.get("statusName") or "").strip().lower()
+                    c_status = d_chk.get("clTicketStatusId") or d_chk.get("closingStatusId")
+                    raw_s = d_chk.get("status")
+                    tf_id = d_chk.get("ticketFlowStatusId")
+                    is_closed = (
+                        s_name in ("đã đóng", "da dong", "chờ đóng", "cho dong", "hoàn thành", "hoan thanh", "đã xử lý", "da xu ly", "closed", "completed") or
+                        c_status in (100, 3, 4, 5) or
+                        raw_s in (100, 3, 4, 5) or
+                        tf_id == 3 or
+                        (tf_id is None and s_name in ("chờ đóng", "cho dong", "đã đóng", "da dong", ""))
+                    )
+                    if is_closed:
+                        closer = str(d_chk.get("assigneeName") or d_chk.get("assignee") or actor_name or "Đóng trên OneOSS").strip()
+                        close_date = d_chk.get("closingDate") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        from db_manager import get_db_connection
+                        conn_c = get_db_connection()
+                        try:
+                            with conn_c:
+                                conn_c.execute("""
+                                    UPDATE tickets 
+                                    SET ticket_status = 'Đã đóng 2.6', 
+                                        closed_at = ?, 
+                                        closed_by = ?, 
+                                        updated_at = CURRENT_TIMESTAMP 
+                                    WHERE ticket_id = ? AND source = 'tts_new'
+                                """, (close_date, closer, ticket_id))
+                        finally:
+                            conn_c.close()
+                        return {
+                            "success": True, 
+                            "already_closed": True,
+                            "round": 2,
+                            "step_name": "2.6 Đóng phiếu Trên TTS",
+                            "action_label": "Đã đóng hoàn tất trước đó",
+                            "message": f"✅ Phiếu {ticket_code or ticket_id} đã được đóng hoàn tất trước đó trên hệ thống TTS (OneOSS) bởi [{closer}] lúc {close_date}!"
+                        }
+            except Exception:
+                pass
+
             return {
                 "success": False,
                 "message": f"⚠️ Không tìm thấy bước xử lý hiện tại của phiếu (Flow ID: {ticket_flow_id}). Phiếu có thể đã được chuyển bước bởi KTV khác, hoặc tài khoản [{actor_name}] không có quyền xử lý luồng phiếu này!"
@@ -1445,6 +1514,51 @@ def api_move_step_2_3_to_2_4(token: str, ticket_flow_id: int, ticket_id: int,
         step_data = res_step.get("data") or {}
         curr_nodes = step_data.get("currentNodes") or []
         if not curr_nodes:
+            # 🎯 Đối soát OneOSS: Phiếu có thể đã được đóng dứt điểm từ trước
+            try:
+                url_chk_closed = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/Ticket/get-editable-ticket/{ticket_id}"
+                r_chk = requests.get(url_chk_closed, headers=headers, timeout=5)
+                if r_chk.status_code == 200:
+                    d_chk = (r_chk.json().get("data") or r_chk.json().get("responseData") or {})
+                    s_name = str(d_chk.get("statusName") or "").strip().lower()
+                    c_status = d_chk.get("clTicketStatusId") or d_chk.get("closingStatusId")
+                    raw_s = d_chk.get("status")
+                    tf_id = d_chk.get("ticketFlowStatusId")
+                    is_closed = (
+                        s_name in ("đã đóng", "da dong", "chờ đóng", "cho dong", "hoàn thành", "hoan thanh", "đã xử lý", "da xu ly", "closed", "completed") or
+                        c_status in (100, 3, 4, 5) or
+                        raw_s in (100, 3, 4, 5) or
+                        tf_id == 3 or
+                        (tf_id is None and s_name in ("chờ đóng", "cho dong", "đã đóng", "da dong", ""))
+                    )
+                    if is_closed:
+                        closer = str(d_chk.get("assigneeName") or d_chk.get("assignee") or actor_name or "Đóng trên OneOSS").strip()
+                        close_date = d_chk.get("closingDate") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        from db_manager import get_db_connection
+                        conn_c = get_db_connection()
+                        try:
+                            with conn_c:
+                                conn_c.execute("""
+                                    UPDATE tickets 
+                                    SET ticket_status = 'Đã đóng 2.6', 
+                                        closed_at = ?, 
+                                        closed_by = ?, 
+                                        updated_at = CURRENT_TIMESTAMP 
+                                    WHERE ticket_id = ? AND source = 'tts_new'
+                                """, (close_date, closer, ticket_id))
+                        finally:
+                            conn_c.close()
+                        return {
+                            "success": True, 
+                            "already_closed": True,
+                            "round": 2,
+                            "step_name": "2.6 Đóng phiếu Trên TTS",
+                            "action_label": "Đã đóng hoàn tất trước đó",
+                            "message": f"✅ Phiếu {ticket_code or ticket_id} đã được đóng hoàn tất trước đó trên hệ thống TTS (OneOSS) bởi [{closer}] lúc {close_date}!"
+                        }
+            except Exception:
+                pass
+
             return {
                 "success": False,
                 "message": f"⚠️ Không tìm thấy bước xử lý hiện tại của phiếu (Flow ID: {ticket_flow_id}). Phiếu có thể đã được chuyển bước bởi KTV khác, hoặc tài khoản [{actor_name}] không có quyền xử lý luồng phiếu này!"
@@ -1686,7 +1800,7 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
         token = "Bearer " + token
 
     try:
-        active_list = fetch_active_tickets(token, limit=300)
+        active_list = fetch_active_tickets(token, limit=1000)
     except Exception as e:
         return {"success": False, "message": f"Lỗi fetch active tickets: {e}"}
 
@@ -1714,7 +1828,7 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
             # CHỈ lấy các phiếu chưa đóng thuộc đúng sync_reg (nếu xác định được sync_reg)
             if sync_reg in ("MN", "MT", "MB"):
                 db_rows = conn.execute("""
-                    SELECT ticket_id, ticket_code, phone, flow_id, ticket_status, region 
+                    SELECT ticket_id, ticket_code, phone, flow_id, ticket_status, region, processing_content 
                     FROM tickets 
                     WHERE source = 'tts_new' 
                       AND region = ? 
@@ -1724,7 +1838,7 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
                 # Nếu chưa xác định được vùng (ví dụ active_list rỗng),
                 # lấy tất cả nhưng TUYỆT ĐỐI KHÔNG tự động đóng phiếu để bảo vệ dữ liệu
                 db_rows = conn.execute("""
-                    SELECT ticket_id, ticket_code, phone, flow_id, ticket_status, region 
+                    SELECT ticket_id, ticket_code, phone, flow_id, ticket_status, region, processing_content 
                     FROM tickets 
                     WHERE source = 'tts_new' 
                       AND (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%')
@@ -1747,6 +1861,21 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
                 clean_c = code.split("\n")[0].strip()
                 active_map[clean_c] = it
 
+        # 🎯 Lấy nhanh top 100 phiếu vừa đóng/hoàn tất gần nhất trên OneOSS (ticketFlowStatusId=3)
+        closed_map = {}
+        try:
+            url_closed = f"{API_BASE_URL}/get-list?limit=100&offset=0&ticketFlowStatusId=3"
+            resp_closed = make_api_request(url_closed, token)
+            for c_it in (resp_closed.get("data") or []):
+                c_tid = str(c_it.get("ticketId") or c_it.get("id") or "")
+                c_code = str(c_it.get("ticketCode") or "").split("\n")[0].strip()
+                if c_tid:
+                    closed_map[c_tid] = c_it
+                if c_code:
+                    closed_map[c_code] = c_it
+        except Exception:
+            pass
+
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Authorization": token,
@@ -1764,7 +1893,10 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
         known_codes = set()
         pending_updates = []
         pending_closes = []
+        pending_proc_updates = []
+        unverified_missing = []
         step_call_budget = 5
+        proc_call_budget = 5
 
         for row in cached_rows:
             tid_str = str(row["ticket_id"] or "")
@@ -1776,6 +1908,7 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
                 known_codes.add(clean_c)
 
             matched_it = active_map.get(tid_str) or active_map.get(clean_c)
+            matched_closed = closed_map.get(tid_str) or closed_map.get(clean_c)
             if matched_it:
                 latest_flow_id = matched_it.get("id")
                 c_name = str(matched_it.get("stepName") or matched_it.get("processNodeName") or "").strip()
@@ -1794,6 +1927,20 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
                     except Exception:
                         pass
 
+                # 🎯 Tự động bù đắp Nội dung xử lý CCOS (processing_content) nếu phiếu chưa có trong DB
+                if not row.get("processing_content") and latest_flow_id and proc_call_budget > 0:
+                    proc_call_budget -= 1
+                    try:
+                        url_pinfo = f"{API_BASE_URL}/get-ticket-info?ticketTypeId=2&ticketFlowId={latest_flow_id}"
+                        resp_pinfo = make_api_request(url_pinfo, token, timeout=3)
+                        pinfo_data = resp_pinfo.get("data") or {}
+                        if isinstance(pinfo_data, dict):
+                            p_cnt = str(pinfo_data.get("processingContent") or "").strip()
+                            if p_cnt:
+                                pending_proc_updates.append((p_cnt, row["ticket_id"]))
+                    except Exception:
+                        pass
+
                 new_code_lines = [clean_c]
                 if c_proc:
                     new_code_lines.append(f"[{c_proc}]")
@@ -1803,20 +1950,63 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
 
                 if str(row["flow_id"]) != str(latest_flow_id) or raw_code != new_ticket_code:
                     pending_updates.append((latest_flow_id, new_ticket_code, row["ticket_id"]))
+            elif matched_closed:
+                # 🎯 Phiếu đã đóng/hoàn tất trên OneOSS (nằm trong top 100 phiếu đóng gần nhất)
+                closer = str(matched_closed.get("assigneeName") or matched_closed.get("assignee") or "Đóng trên OneOSS").strip()
+                if closer and not closer.endswith("(OneOSS)"):
+                    closer = f"{closer} (OneOSS)"
+                close_time = matched_closed.get("closingDate") or matched_closed.get("requestDate") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                pending_closes.append((row["ticket_id"], closer, close_time))
             else:
-                # 🎯 PHIẾU ĐÃ BỊ ĐÓNG TRỰC TIẾP TRÊN ONEOSS (Không còn trong active_list)
-                # CHỈ ĐÓNG KHI:
-                # 1. Token là của SuperAdmin toàn quyền (quangvu) có tầm nhìn bao quát toàn bộ Miền
-                # 2. Xác định được vùng miền cụ thể (sync_reg là 'MN', 'MT' hoặc 'MB')
-                # 3. Phiếu trong DB thuộc đúng vùng miền này (row['region'] == sync_reg)
-                # TUYỆT ĐỐI KHÔNG cho phép KTV lẻ tự ý đóng phiếu của đồng nghiệp trong cùng miền!
-                user_info_sync = decode_jwt_user(token)
-                from region_detector import is_superadmin
-                if is_superadmin(user_info_sync) and sync_reg in ("MN", "MT", "MB") and row.get("region") == sync_reg and row.get("ticket_id"):
-                    pending_closes.append(row["ticket_id"])
+                # 🎯 Phiếu vắng mặt trong active_list và không có trong top 100 closed_list
+                # Thu thập để kiểm tra đối soát trực tiếp với OneOSS Gateway
+                if tid_str:
+                    unverified_missing.append(row)
+
+        # Rà soát đối soát song song các phiếu vắng mặt để kiểm tra OneOSS Gateway
+        if unverified_missing:
+            to_verify = unverified_missing[:50]
+            def _check_ticket(r_item):
+                t_id = r_item.get("ticket_id")
+                if not t_id:
+                    return None
+                try:
+                    url_check = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/Ticket/get-editable-ticket/{t_id}"
+                    res_chk = requests.get(url_check, headers=headers, timeout=3)
+                    if res_chk.status_code == 200:
+                        d = (res_chk.json().get("data") or res_chk.json().get("responseData") or {})
+                        s_name = str(d.get("statusName") or "").strip().lower()
+                        c_status = d.get("clTicketStatusId") or d.get("closingStatusId")
+                        raw_s = d.get("status")
+                        tf_id = d.get("ticketFlowStatusId")
+                        is_closed = (
+                            s_name in ("đã đóng", "da dong", "chờ đóng", "cho dong", "hoàn thành", "hoan thanh", "đã xử lý", "da xu ly", "closed", "completed") or
+                            c_status in (100, 3, 4, 5) or
+                            raw_s in (100, 3, 4, 5) or
+                            tf_id == 3 or
+                            (tf_id is None and s_name in ("chờ đóng", "cho dong", "đã đóng", "da dong", ""))
+                        )
+                        if is_closed:
+                            c_by = str(d.get("assigneeName") or d.get("assignee") or "Đóng trên OneOSS").strip()
+                            if c_by and not c_by.endswith("(OneOSS)"):
+                                c_by = f"{c_by} (OneOSS)"
+                            c_date = d.get("closingDate") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            return (t_id, c_by, c_date)
+                except Exception:
+                    pass
+                return None
+
+            try:
+                with ThreadPoolExecutor(max_workers=10) as pool:
+                    verify_results = list(pool.map(_check_ticket, to_verify))
+                    for v_res in verify_results:
+                        if v_res:
+                            pending_closes.append(v_res)
+            except Exception as e_verify:
+                print(f"[LIVE SYNC] Lỗi rà soát phiếu đóng OneOSS: {e_verify}", flush=True)
 
         # Thực thi cập nhật DB thần tốc (< 5ms)
-        if pending_updates or pending_closes:
+        if pending_updates or pending_closes or pending_proc_updates:
             conn_w = get_db_connection()
             try:
                 with conn_w:
@@ -1828,16 +2018,37 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
                         """, (l_flow_id, n_code, t_id))
                         updated_count += 1
 
+                    for p_cnt, t_id in pending_proc_updates:
+                        conn_w.execute("""
+                            UPDATE tickets 
+                            SET processing_content = ?, updated_at = CURRENT_TIMESTAMP 
+                            WHERE ticket_id = ? AND source = 'tts_new'
+                        """, (p_cnt, t_id))
+
                     if pending_closes:
-                        for t_id in pending_closes:
-                            conn_w.execute("""
-                                UPDATE tickets 
-                                SET ticket_status = 'Đã đóng 2.6', 
-                                    closed_at = datetime('now', '+7 hours'), 
-                                    closed_by = 'Đóng trên OneOSS', 
-                                    updated_at = CURRENT_TIMESTAMP 
-                                WHERE ticket_id = ? AND source = 'tts_new' AND region = ?
-                            """, (t_id, sync_reg))
+                        for item in pending_closes:
+                            if isinstance(item, (tuple, list)):
+                                t_id, closer, close_time = item[0], item[1], item[2]
+                            else:
+                                t_id, closer, close_time = item, "Đóng trên OneOSS", None
+                            if close_time:
+                                conn_w.execute("""
+                                    UPDATE tickets 
+                                    SET ticket_status = 'Đã đóng 2.6', 
+                                        closed_at = ?, 
+                                        closed_by = ?, 
+                                        updated_at = CURRENT_TIMESTAMP 
+                                    WHERE ticket_id = ? AND source = 'tts_new'
+                                """, (close_time, closer, t_id))
+                            else:
+                                conn_w.execute("""
+                                    UPDATE tickets 
+                                    SET ticket_status = 'Đã đóng 2.6', 
+                                        closed_at = datetime('now', '+7 hours'), 
+                                        closed_by = ?, 
+                                        updated_at = CURRENT_TIMESTAMP 
+                                    WHERE ticket_id = ? AND source = 'tts_new'
+                                """, (closer, t_id))
                             closed_count += 1
                         print(f"[LIVE SYNC] 🎯 Đã đồng bộ đóng {closed_count} phiếu Miền {sync_reg} (đóng trực tiếp trên OneOSS)", flush=True)
             finally:
@@ -1901,6 +2112,7 @@ def sync_tts_new_live_steps(token: str = "", target_region: str = "") -> dict:
                         "reopen_count": rec_rc,
                         "last_reopened_date": str(en_ticket.get("last_reopened_date") or it.get("lastReopenedDate") or "").strip(),
                         "region": t_reg,
+                        "processing_content": str(en_ticket.get("processing_content") or "").strip(),
                         "deadline_overall": en_ticket.get("deadline_overall", "")
                     }
                     save_or_update_ticket(rec)

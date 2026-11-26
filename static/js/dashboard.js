@@ -123,6 +123,30 @@ function escapeHtml(str) {
         .replace(/'/g, '&#039;');
 }
 
+function decodeHtmlEntities(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#039;/g, "'")
+        .replace(/&#39;/g, "'")
+        .replace(/&#128681;/g, '🚩');
+}
+
+// Định dạng hiển thị số thuê bao 9 số (ví dụ: 84917969796 / 0917969796 -> 917969796)
+function formatPhone9Digits(phone) {
+    if (!phone) return '--';
+    let clean = String(phone).trim().replace(/\D/g, '');
+    if (clean.startsWith('84') && clean.length >= 11) {
+        clean = clean.slice(2);
+    } else if (clean.startsWith('0') && clean.length >= 10) {
+        clean = clean.slice(1);
+    }
+    return clean || phone;
+}
+
 // Cập nhật số lượng và hiệu ứng chớp đỏ khi có phiếu mới ở từng module Loại PAKH
 function updateNavBadge(elem, count) {
     if (!elem) return;
@@ -795,16 +819,10 @@ function formatIncidentTimeDisplay(timeStr, ticketCode = '') {
 
         let d = p1;
         let m = p2;
-        if (p1 > 12) {
-            d = p1; m = p2;
-        } else if (p2 > 12) {
-            d = p2; m = p1;
-        } else {
-            if (tcMonth && p1 === tcMonth && p2 !== tcMonth) {
-                d = p2; m = p1;
-            } else if (tcMonth && p2 === tcMonth && p1 !== tcMonth) {
-                d = p1; m = p2;
-            }
+        if (p2 > 12) {
+            // Trường hợp MM/DD/YYYY từ OneOSS API US -> chuyển về DD/MM/YYYY chuẩn Việt Nam
+            d = p2;
+            m = p1;
         }
         return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}${t}`.trim();
     }
@@ -818,8 +836,14 @@ function parseIncidentDate(dateStr, ticketCode = '') {
     // 1. DD/MM/YYYY HH:mm[:ss] hoặc DD/MM/YYYY
     const dmyMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
     if (dmyMatch) {
-        const day = parseInt(dmyMatch[1], 10);
-        const month = parseInt(dmyMatch[2], 10) - 1;
+        let p1 = parseInt(dmyMatch[1], 10);
+        let p2 = parseInt(dmyMatch[2], 10);
+        let day = p1;
+        let month = p2 - 1;
+        if (p2 > 12) {
+            day = p2;
+            month = p1 - 1;
+        }
         const year = parseInt(dmyMatch[3], 10);
         const hour = parseInt(dmyMatch[4] || 0, 10);
         const minute = parseInt(dmyMatch[5] || 0, 10);
@@ -840,6 +864,52 @@ function parseIncidentDate(dateStr, ticketCode = '') {
     const ts = Date.parse(str);
     return isNaN(ts) ? 0 : ts;
 }
+
+function getTicketReceiptTimestamp(t) {
+    if (!t) return 0;
+    // 1. Ưu tiên created_time nếu có (thời điểm tiếp nhận chuẩn OneOSS)
+    const createdStr = String(t.created_time || '').trim();
+    if (createdStr && createdStr !== '--' && createdStr !== 'null') {
+        const ts = parseIncidentDate(createdStr, t.ticket_code);
+        if (ts > 0) return ts;
+    }
+    // 2. Trích xuất từ mã phiếu HT/YYYY/MM/DD/ID (chuẩn 100% thời điểm tạo trên OneOSS)
+    const codeStr = String(t.ticket_code || '').trim();
+    const mCode = codeStr.match(/HT\/(\d{4})\/(\d{2})\/(\d{2})(?:\/(\d+))?/);
+    if (mCode) {
+        const y = parseInt(mCode[1], 10);
+        const m = parseInt(mCode[2], 10) - 1;
+        const d = parseInt(mCode[3], 10);
+        const seqId = parseInt(mCode[4] || 0, 10);
+        return new Date(y, m, d).getTime() + (seqId % 86400) * 1000;
+    }
+    // 3. Fallback incident_time nếu không có mã phiếu chuẩn
+    const incStr = String(t.incident_time || '').trim();
+    if (incStr && incStr !== '--' && incStr !== 'null') {
+        const ts = parseIncidentDate(incStr, t.ticket_code);
+        if (ts > 0) return ts;
+    }
+    return 0;
+}
+window.getTicketReceiptTimestamp = getTicketReceiptTimestamp;
+
+function getTicketReceiptDisplay(t) {
+    if (!t) return '--';
+    const cStr = String(t.created_time || '').trim();
+    if (cStr && cStr !== '--' && cStr !== 'null') {
+        return formatIncidentTimeDisplay(cStr, t.ticket_code);
+    }
+    const mCode = String(t.ticket_code || '').match(/HT\/(\d{4})\/(\d{2})\/(\d{2})/);
+    if (mCode) {
+        return `${mCode[3]}/${mCode[2]}/${mCode[1]}`;
+    }
+    const incStr = String(t.incident_time || '').trim();
+    if (incStr && incStr !== '--' && incStr !== 'null') {
+        return formatIncidentTimeDisplay(incStr, t.ticket_code);
+    }
+    return '--';
+}
+window.getTicketReceiptDisplay = getTicketReceiptDisplay;
 
 function toggleIncidentTimeSort() {
     if (sortIncidentTimeOrder === 'asc') {
@@ -1694,8 +1764,6 @@ function selectModule(sys, srv, updateUrl = true) {
     if (btnRecheck) btnRecheck.style.display = (srv === 'call' || srv === 'sms') ? 'none' : 'inline-block';
 
     // Ẩn bộ lọc nguồn & loại PAKH vì đây là menu chuyên biệt của TTS
-    const srcSel = document.getElementById('filterSourceSelect');
-    if (srcSel) srcSel.style.display = 'none';
     const catSel = document.getElementById('filterCategorySelect');
     if (catSel) catSel.style.display = 'none';
 
@@ -1763,11 +1831,7 @@ function selectHistoryModule(tab = 'all', updateUrl = true) {
     const ctrlAutoClose = document.getElementById('ctrlAutoCloseUnified');
     if (ctrlAutoClose) ctrlAutoClose.style.display = 'none';
 
-    const srcSel = document.getElementById('filterSourceSelect');
-    if (srcSel) {
-        srcSel.style.display = 'inline-block';
-        srcSel.value = 'all';
-    }
+
     const catSel = document.getElementById('filterCategorySelect');
     if (catSel) {
         catSel.style.display = 'inline-block';
@@ -2116,6 +2180,45 @@ function switchTableTab(tab) {
         titleElem.innerHTML = `<span>${escapeHtml(title)}</span>`;
     }
 
+    // Điều khiển nút Kiểm Tra CCOS: CHỈ HIỂN THỊ Ở TAB LỊCH SỬ ĐÃ ĐÓNG ('da_dong')
+    const btnScanCcos = document.getElementById('btnScanCcosSync');
+    const filterDateRange = document.getElementById('filterDateRange');
+    const filterFromDate = document.getElementById('filterFromDate');
+    const filterToDate = document.getElementById('filterToDate');
+
+    if (tab === 'da_dong') {
+        if (btnScanCcos) btnScanCcos.style.display = 'inline-flex';
+        if (filterDateRange) filterDateRange.title = 'Lọc theo thời điểm đóng phiếu trên CSDL';
+        if (filterFromDate) filterFromDate.title = 'Từ ngày đóng phiếu';
+        if (filterToDate) filterToDate.title = 'Đến ngày đóng phiếu';
+
+        // Mặc định khi chuyển sang Lịch Sử Đã Đóng: chọn "Hôm nay" để tải siêu tốc, tránh load hàng nghìn phiếu cũ
+        if (filterDateRange) {
+            filterDateRange.value = 'today';
+            const pad = (n) => String(n).padStart(2, '0');
+            const now = new Date();
+            const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+            if (filterFromDate) filterFromDate.value = todayStr;
+            if (filterToDate) filterToDate.value = todayStr;
+            const customBox = document.getElementById('customDateRangeBox');
+            if (customBox) customBox.style.display = 'none';
+        }
+    } else {
+        if (btnScanCcos) btnScanCcos.style.display = 'none';
+        if (filterDateRange) filterDateRange.title = 'Lọc theo thời gian tiếp nhận trên CSDL';
+        if (filterFromDate) filterFromDate.title = 'Từ ngày tiếp nhận';
+        if (filterToDate) filterToDate.title = 'Đến ngày tiếp nhận';
+
+        // Khi quay về Phiếu cần xử lý hoặc Tất cả phiếu: đưa về 'all' để không bị sót phiếu cần xử lý
+        if (filterDateRange && filterDateRange.value === 'today') {
+            filterDateRange.value = 'all';
+            if (filterFromDate) filterFromDate.value = '';
+            if (filterToDate) filterToDate.value = '';
+            const customBox = document.getElementById('customDateRangeBox');
+            if (customBox) customBox.style.display = 'none';
+        }
+    }
+
     // Đồng bộ ngay tiêu đề cột Tóm tắt / Thời điểm đóng
     const thAiSummary = document.getElementById('thAiSummary');
     if (thAiSummary) {
@@ -2178,7 +2281,11 @@ function switchTableTab(tab) {
 
     const searchInputVal = document.getElementById('searchInput') ? document.getElementById('searchInput').value.trim() : '';
     const curStatusFilterVal = filterStatus ? filterStatus.value : 'all';
-    const expectedCacheKey = `${tab}_${currentSystem}_${currentService}_${currentRegion || 'ALL'}_${curStatusFilterVal}_${searchInputVal}`;
+    const fromDateElem = document.getElementById('filterFromDate');
+    const toDateElem = document.getElementById('filterToDate');
+    const fromDateVal = fromDateElem ? fromDateElem.value.trim() : '';
+    const toDateVal = toDateElem ? toDateElem.value.trim() : '';
+    const expectedCacheKey = `${tab}_${currentSystem}_${currentService}_${currentRegion || 'ALL'}_${curStatusFilterVal}_${fromDateVal}_${toDateVal}_${searchInputVal}`;
     const cachedItem = window.ticketsModuleCache ? window.ticketsModuleCache[expectedCacheKey] : null;
     const hasFreshModuleCache = cachedItem && (Date.now() - cachedItem.timestamp < 35000);
 
@@ -2187,16 +2294,21 @@ function switchTableTab(tab) {
         tbody.style.opacity = '1';
         applyTicketsData(cachedItem.data, false);
     } else if (tbody) {
-        // Chưa có sẵn: Render ngay Skeleton đúng số cột của module mới, dọn sạch hàng của module trước
-        renderTicketsSkeleton(tbody, totalCols);
-        tbody.style.opacity = '1';
+        // Chưa có sẵn: Nếu bảng đã có hàng, làm mờ nhẹ (0.65) để chuyển tab mượt mà, không giật chớp 10 hàng skeleton
+        if (tbody.children.length > 0) {
+            tbody.style.transition = 'opacity 0.15s ease';
+            tbody.style.opacity = '0.65';
+        } else {
+            renderTicketsSkeleton(tbody, totalCols);
+            tbody.style.opacity = '1';
+        }
     }
 
     lastTicketsSignature = "";
     loadTickets(false, true);
 }
 
-async function precheckSingleTicket(phone, incidentTime, btnElem) {
+async function precheckSingleTicket(phone, incidentTime, btnElem, customIncidentTime) {
     if (btnElem) {
         btnElem.disabled = true;
         btnElem.innerHTML = 'Đang kiểm...';
@@ -2208,10 +2320,15 @@ async function precheckSingleTicket(phone, incidentTime, btnElem) {
         if (!cleanP.startsWith('84') && cleanP.length === 9) cleanP = '84' + cleanP;
         if (window.smsCdrSummaryCache) delete window.smsCdrSummaryCache[cleanP];
 
+        const reqBody = { phone, incident_time: incidentTime, service_type: currentService, region: currentRegion };
+        if (customIncidentTime) {
+            reqBody.custom_incident_time = customIncidentTime;
+        }
+
         const res = await fetch('/api/tickets/precheck_one', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ phone, incident_time: incidentTime, service_type: currentService, region: currentRegion })
+            body: JSON.stringify(reqBody)
         });
         const data = await res.json();
         if (data.success) {
@@ -2271,16 +2388,20 @@ async function runBatchAiSmsAnalysis(btn) {
     // Phân tích bóc tách siêu tốc trong bộ nhớ (< 0.1ms/phiếu)
     for (let i = 0; i < total; i++) {
         const t = tickets[i];
-        const parsed = extractSmsIncidentDetails(t.ticket_content || t.ai_summary || '', t.incident_time || '', t.created_time || '');
-        t.sms_incident_time = parsed.incidentTime;
-        t.sms_problem = parsed.problemSummary;
+        const parsed = extractSmsIncidentDetails(t.ai_summary || t.ticket_content || '', t.incident_time || '', t.created_time || '');
+        if (!t.sms_incident_time || t.sms_incident_time === '--') {
+            t.sms_incident_time = parsed.incidentTime;
+        }
+        if (!t.sms_problem || t.sms_problem === '--') {
+            t.sms_problem = parsed.problemSummary;
+        }
 
         batchItems.push({
             phone: t.phone,
             incident_time: t.incident_time,
             ticket_code: t.ticket_code,
-            sms_incident_time: parsed.incidentTime,
-            sms_problem: parsed.problemSummary
+            sms_incident_time: t.sms_incident_time,
+            sms_problem: t.sms_problem
         });
     }
 
@@ -2323,6 +2444,48 @@ function handleAiSmsToggle(checked) {
 }
 window.handleAiSmsToggle = handleAiSmsToggle;
 
+function syncEditTimeInputsFromCalendar() {
+    const elFrom = document.getElementById('editTimeFromDate');
+    const elTo = document.getElementById('editTimeToDate');
+    const elPreview = document.getElementById('editTimePreviewText');
+    const elInput = document.getElementById('editTimeInput');
+    if (!elFrom || !elTo) return;
+
+    let fromVal = elFrom.value;
+    let toVal = elTo.value;
+
+    if (!fromVal && toVal) { fromVal = toVal; elFrom.value = fromVal; }
+    if (fromVal && !toVal) { toVal = fromVal; elTo.value = toVal; }
+
+    if (!fromVal || !toVal) {
+        if (elPreview) elPreview.innerText = '--';
+        if (elInput) elInput.value = '';
+        return;
+    }
+
+    if (fromVal > toVal) {
+        toVal = fromVal;
+        elTo.value = toVal;
+    }
+
+    const fmtVn = (isoStr) => {
+        const parts = isoStr.split('-');
+        if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+        return isoStr;
+    };
+
+    let result = '';
+    if (fromVal === toVal) {
+        result = fmtVn(fromVal);
+    } else {
+        result = `${fmtVn(fromVal)} → ${fmtVn(toVal)}`;
+    }
+
+    if (elPreview) elPreview.innerText = result;
+    if (elInput) elInput.value = result;
+}
+window.syncEditTimeInputsFromCalendar = syncEditTimeInputsFromCalendar;
+
 function openEditIncidentTimeModal(event, phone, incidentTime, ticketId, currentTimeVal) {
     if (event) {
         event.stopPropagation();
@@ -2348,13 +2511,31 @@ function openEditIncidentTimeModal(event, phone, incidentTime, ticketId, current
     const elOrigIncTime = document.getElementById('editTimeOrigIncidentTime');
     if (elOrigIncTime) elOrigIncTime.value = incidentTime || '';
 
-    let defaultVal = String(currentTimeVal || '').trim();
+    let defaultVal = String(currentTimeVal || incidentTime || '').trim();
     if (defaultVal === '--' || defaultVal === 'undefined') defaultVal = '';
-    const elInput = document.getElementById('editTimeInput');
-    if (elInput) {
-        elInput.value = defaultVal;
-        setTimeout(() => elInput.focus(), 50);
+
+    const pad = (n) => String(n).padStart(2, '0');
+    const toIso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const now = new Date();
+
+    const elFrom = document.getElementById('editTimeFromDate');
+    const elTo = document.getElementById('editTimeToDate');
+
+    const dMatches = Array.from(defaultVal.matchAll(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/g));
+    if (dMatches.length >= 2) {
+        const d1 = `${dMatches[0][3]}-${pad(dMatches[0][2])}-${pad(dMatches[0][1])}`;
+        const d2 = `${dMatches[1][3]}-${pad(dMatches[1][2])}-${pad(dMatches[1][1])}`;
+        if (elFrom) elFrom.value = d1;
+        if (elTo) elTo.value = d2;
+    } else if (dMatches.length === 1) {
+        const d1 = `${dMatches[0][3]}-${pad(dMatches[0][2])}-${pad(dMatches[0][1])}`;
+        if (elFrom) elFrom.value = d1;
+        if (elTo) elTo.value = d1;
+    } else {
+        if (elFrom) elFrom.value = toIso(now);
+        if (elTo) elTo.value = toIso(now);
     }
+    syncEditTimeInputsFromCalendar();
 
     modal.style.display = 'flex';
 }
@@ -2367,26 +2548,35 @@ function closeEditIncidentTimeModal() {
 window.closeEditIncidentTimeModal = closeEditIncidentTimeModal;
 
 function setEditTimePreset(type) {
-    const elInput = document.getElementById('editTimeInput');
-    if (!elInput) return;
+    const elFrom = document.getElementById('editTimeFromDate');
+    const elTo = document.getElementById('editTimeToDate');
+    if (!elFrom || !elTo) return;
+
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
-    const fmtDate = (d) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+    const toIso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
     if (type === 'today') {
-        elInput.value = fmtDate(now);
+        elFrom.value = toIso(now);
+        elTo.value = toIso(now);
     } else if (type === '24h') {
         const prev = new Date(now.getTime() - 86400000);
-        elInput.value = `${fmtDate(prev)} → ${fmtDate(now)}`;
+        elFrom.value = toIso(prev);
+        elTo.value = toIso(now);
     } else if (type === '3days') {
         const p3 = new Date(now.getTime() - 3 * 86400000);
-        elInput.value = `${fmtDate(p3)} → ${fmtDate(now)}`;
+        elFrom.value = toIso(p3);
+        elTo.value = toIso(now);
     } else if (type === '7days') {
         const p7 = new Date(now.getTime() - 7 * 86400000);
-        elInput.value = `${fmtDate(p7)} → ${fmtDate(now)}`;
+        elFrom.value = toIso(p7);
+        elTo.value = toIso(now);
     } else if (type === 'month') {
-        elInput.value = `Tháng ${pad(now.getMonth() + 1)}/${now.getFullYear()}`;
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        elFrom.value = toIso(firstDay);
+        elTo.value = toIso(now);
     }
+    syncEditTimeInputsFromCalendar();
 }
 window.setEditTimePreset = setEditTimePreset;
 
@@ -2394,21 +2584,28 @@ async function saveIncidentTimeAdjustment(andPrecheck) {
     const phone = document.getElementById('editTimePhone').value;
     const ticketId = document.getElementById('editTimeTicketId').value;
     const incidentTime = document.getElementById('editTimeOrigIncidentTime').value;
+    syncEditTimeInputsFromCalendar();
     const newTime = document.getElementById('editTimeInput').value.trim();
 
     if (!newTime) {
-        alert('Vui lòng nhập mốc thời gian sự cố!');
+        alert('Vui lòng chọn khoảng ngày xảy ra sự cố!');
         return;
     }
 
     const btnOnly = document.getElementById('btnSaveIncidentTimeOnly');
     const btnPrecheck = document.getElementById('btnSaveAndPrecheckNow');
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+
     try {
-        if (btnOnly) btnOnly.disabled = true;
+        if (btnOnly) {
+            btnOnly.disabled = true;
+            if (!andPrecheck) btnOnly.innerText = 'Đang lưu...';
+        }
         if (btnPrecheck) {
             btnPrecheck.disabled = true;
-            btnPrecheck.innerText = 'Đang lưu...';
+            if (andPrecheck) btnPrecheck.innerText = 'Đang lưu...';
         }
 
         const res = await fetch('/api/tickets/update-incident-time', {
@@ -2419,12 +2616,17 @@ async function saveIncidentTimeAdjustment(andPrecheck) {
                 ticket_id: ticketId ? parseInt(ticketId) : null,
                 incident_time: incidentTime,
                 new_time: newTime
-            })
+            }),
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
         const data = await res.json();
         if (data.success) {
+            // Đóng modal ngay lập tức để KTV không phải chờ
             closeEditIncidentTimeModal();
+            if (btnOnly) { btnOnly.disabled = false; btnOnly.innerText = 'Lưu'; }
+            if (btnPrecheck) { btnPrecheck.disabled = false; btnPrecheck.innerText = 'Lưu & Tiền kiểm ngay'; }
 
             // Xóa cache cũ của số này để đảm bảo nạp kết quả mới nhất theo mốc thời gian vừa đổi
             let cleanAdjP = String(phone || '').trim().replace(/\D/g, '');
@@ -2450,20 +2652,28 @@ async function saveIncidentTimeAdjustment(andPrecheck) {
             renderTicketsTable(true);
 
             if (andPrecheck) {
-                // Tự động kích hoạt tiền kiểm lại để CDR search theo ngày mới ngay lập tức
+                // Tự động kích hoạt tiền kiểm lại để CDR search theo ngày mới ngay lập tức trên dòng phiếu
                 if (typeof precheckSingleTicket === 'function') {
-                    await precheckSingleTicket(phone, incidentTime, null);
+                    precheckSingleTicket(phone, incidentTime, null, data.sms_incident_time || newTime);
                 }
             } else {
-                await fetchStatus();
+                fetchStatus();
             }
         } else {
             alert('Lỗi khi lưu mốc thời gian: ' + (data.error || 'Không xác định'));
         }
     } catch (err) {
-        alert('Lỗi kết nối máy chủ: ' + err.message);
+        if (err.name === 'AbortError') {
+            alert('Quá thời gian phản hồi từ máy chủ (Timeout 60s). Vui lòng thử lại!');
+        } else {
+            alert('Lỗi kết nối máy chủ: ' + err.message);
+        }
     } finally {
-        if (btnOnly) btnOnly.disabled = false;
+        clearTimeout(timeoutId);
+        if (btnOnly) {
+            btnOnly.disabled = false;
+            btnOnly.innerText = 'Lưu';
+        }
         if (btnPrecheck) {
             btnPrecheck.disabled = false;
             btnPrecheck.innerText = 'Lưu & Tiền kiểm ngay';
@@ -2476,8 +2686,8 @@ function extractSmsIncidentDetails(content, incidentTimeFallback, createdTimeFal
     const raw = String(content || '').trim();
     const pad = (n) => String(n).padStart(2, '0');
 
-    // Ưu tiên mốc Ngày tiếp nhận (createdTimeFallback), nếu không có thì fallback sang incidentTimeFallback
-    const refDateStr = createdTimeFallback || incidentTimeFallback || '';
+    // Ưu tiên mốc Thời điểm sự cố (incidentTimeFallback), nếu không có mới fallback sang Ngày tiếp nhận (createdTimeFallback)
+    const refDateStr = incidentTimeFallback || createdTimeFallback || '';
     let fallbackYear = 2026;
     let fallbackMonth = 10;
     let fallbackDay = 1;
@@ -2642,7 +2852,7 @@ function extractSmsIncidentDetails(content, incidentTimeFallback, createdTimeFal
             fromDate = `${fallbackYear}-${pad(fallbackMonth)}-${pad(fallbackDay)} 00:00:00`;
             toDate = `${next3Days.getFullYear()}-${pad(next3Days.getMonth() + 1)}-${pad(next3Days.getDate())} 23:59:59`;
             timeRangeDesc = `${pad(fallbackDay)}/${pad(fallbackMonth)}/${fallbackYear} → ${pad(next3Days.getDate())}/${pad(next3Days.getMonth() + 1)}/${next3Days.getFullYear()}`;
-            detectedTime = createdTimeFallback ? `${pad(fallbackDay)}/${pad(fallbackMonth)}/${fallbackYear} (Tiếp nhận)` : (refDateStr.split(' ')[0] || refDateStr);
+            detectedTime = incidentTimeFallback ? (incidentTimeFallback.split(' ')[0] || incidentTimeFallback) : (createdTimeFallback ? `${pad(fallbackDay)}/${pad(fallbackMonth)}/${fallbackYear} (Tiếp nhận)` : refDateStr);
         } else {
             detectedTime = '--';
             const now = new Date();
@@ -2821,7 +3031,7 @@ async function fetchInlineSmsCdr(phone, incidentTime, ticketKey, btnElem, event,
                 }
                 if (!fromDateVal || !toDateVal) {
                     const ticketContent = tObj.ticket_content || tObj.ai_summary || '';
-                    const parsed = extractSmsIncidentDetails(ticketContent, smsIncTime || incidentTime, tObj.created_time || '');
+                    const parsed = extractSmsIncidentDetails(ticketContent, tObj.incident_time || smsIncTime || incidentTime, tObj.created_time || '');
                     fromDateVal = parsed.fromDate;
                     toDateVal = parsed.toDate;
                     timeRangeDesc = parsed.timeRangeDesc;
@@ -2839,18 +3049,10 @@ async function fetchInlineSmsCdr(phone, incidentTime, ticketKey, btnElem, event,
             }
         }
 
-        // Xác định chiều thông minh theo loại sự cố để tăng tốc độ và tránh nghẽn
+        // Luôn tra cứu cả hai chiều (both) để có bức tranh toàn diện và không bỏ sót bản ghi
+        // LƯU Ý: Tuyệt đối không truyền ticket_code để tránh bị lọc nhầm hoặc sót CDR của thuê bao
         let qDir = 'both';
-        if (tObj) {
-            const pTitle = (tObj.sms_problem || tObj.package_title || tObj.ticket_content || '').toLowerCase();
-            if (pTitle.includes('nhận') || pTitle.includes('otp') || pTitle.includes('mt')) {
-                qDir = 'mt';
-            } else if (pTitle.includes('gửi') || pTitle.includes('mo') || pTitle.includes('spam') || pTitle.includes('smo')) {
-                qDir = 'mo';
-            }
-        }
         let url = `/api/cdr/sms?phone=${encodeURIComponent(cleanPhone)}&direction=${qDir}&limit=10000`;
-        if (ticketCodeVal) url += `&ticket_code=${encodeURIComponent(ticketCodeVal)}`;
         if (incidentTime) url += `&incident_time=${encodeURIComponent(incidentTime)}`;
         if (fromDateVal && toDateVal) {
             url += `&from_date=${encodeURIComponent(fromDateVal)}&to_date=${encodeURIComponent(toDateVal)}`;
@@ -2865,28 +3067,68 @@ async function fetchInlineSmsCdr(phone, incidentTime, ticketKey, btnElem, event,
             const recs = data.records;
             let moCount = 0;
             let moOk = 0;
+            let moFail = 0;
+            let moRate = 0;
             let mtCount = 0;
             let mtOk = 0;
+            let mtFail = 0;
+            let mtRate = 0;
             const causeMap = {};
 
+            const isIntermFn = (typeof isCdrRecordIntermediate === 'function') ? isCdrRecordIntermediate : ((r) => String(r.termination_cause || '').toUpperCase() === '199C' || String(r.attempts) === '0');
+            const isOkFn = (typeof isCdrRecordSuccess === 'function') ? isCdrRecordSuccess : ((r) => r.status_type === 'success' || ['100C', '133C', '4108'].includes(String(r.termination_cause || '').toUpperCase()) || String(r.status_code) === '2');
+
+            // Đồng bộ thuật toán gộp nhóm Call Reference với Modal SMSC CDR và Core Precheck
+            if (typeof calculateCdrGroupStats === 'function') {
+                const stats = calculateCdrGroupStats(recs);
+                moCount = stats.moTotal;
+                moOk = stats.moOk;
+                moFail = stats.moFail;
+                moRate = stats.moRate;
+                mtCount = stats.mtTotal;
+                mtOk = stats.mtOk;
+                mtFail = stats.mtFail;
+                mtRate = stats.mtRate;
+            } else {
+                const moGroups = new Map();
+                const mtGroups = new Map();
+                recs.forEach(r => {
+                    if (isIntermFn(r)) return;
+                    const dir = String(r.direction || '').toUpperCase();
+                    const isMo = dir.includes('MO') || (r.calling_number === cleanPhone);
+                    const targetMap = isMo ? moGroups : mtGroups;
+                    let cRef = String(r.call_reference || '').trim();
+                    if (!cRef || cRef === '--' || cRef === 'None' || cRef === 'null') {
+                        cRef = `${r.calling_number}_${r.called_number}_${r.submission_time || r.delivery_time || ''}`;
+                    }
+                    if (!targetMap.has(cRef)) targetMap.set(cRef, []);
+                    targetMap.get(cRef).push(r);
+                });
+                moCount = moGroups.size;
+                moGroups.forEach(rows => { if (rows.some(isOkFn)) moOk++; });
+                moFail = moCount - moOk;
+                moRate = moCount > 0 ? Math.round((moOk / moCount) * 100) : 0;
+
+                mtCount = mtGroups.size;
+                mtGroups.forEach(rows => { if (rows.some(isOkFn)) mtOk++; });
+                mtFail = mtCount - mtOk;
+                mtRate = mtCount > 0 ? Math.round((mtOk / mtCount) * 100) : 0;
+            }
+
+            // Tổng hợp nguyên nhân lỗi cho Card chi tiết (loại trừ bản ghi intermediate)
             recs.forEach(r => {
-                const isMo = (r.direction && r.direction.toUpperCase().includes('MO')) || (r.calling_number === cleanPhone);
-                const isOk = (r.status_type === 'success');
-                if (isMo) {
-                    moCount++;
-                    if (isOk) moOk++;
-                } else {
-                    mtCount++;
-                    if (isOk) mtOk++;
-                }
-                if (!isOk) {
-                    const cause = r.termination_cause_info || r.termination_cause || r.status_desc || 'Lỗi không xác định';
+                if (isIntermFn(r)) return;
+                if (!isOkFn(r)) {
+                    let cause = r.termination_cause_info || r.termination_cause || r.status_desc || 'Lỗi không xác định';
+                    if (String(r.termination_cause || '').toUpperCase() === '136C') {
+                        cause = 'Anti-Spam Policy Rejection (Spam Retry Loop)';
+                    } else if (String(r.termination_cause || '').toUpperCase() === '130C') {
+                        cause = 'SRI-for-SM / Absent Subscriber';
+                    }
                     causeMap[cause] = (causeMap[cause] || 0) + 1;
                 }
             });
 
-            const moRate = moCount > 0 ? Math.round((moOk / moCount) * 100) : 0;
-            const mtRate = mtCount > 0 ? Math.round((mtOk / mtCount) * 100) : 0;
             const topErrors = Object.entries(causeMap)
                 .sort((a, b) => b[1] - a[1])
                 .slice(0, 3)
@@ -2897,11 +3139,11 @@ async function fetchInlineSmsCdr(phone, incidentTime, ticketKey, btnElem, event,
                 totalHits: data.total_hits || recs.length,
                 moCount,
                 moOk,
-                moFail: moCount - moOk,
+                moFail,
                 moRate,
                 mtCount,
                 mtOk,
-                mtFail: mtCount - mtOk,
+                mtFail,
                 mtRate,
                 fromDate: fromDateVal,
                 toDate: toDateVal,
@@ -2955,7 +3197,7 @@ async function fetchInlineSmsCdr(phone, incidentTime, ticketKey, btnElem, event,
                 }
                 if (detailCardContainer) {
                     detailCardContainer.innerHTML = `
-                        <div style="text-align:center; padding:18px 12px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px;">
+                        <div style="text-align:center; padding:18px 12px; background:#fef2f2; border:1px solid #fecaca; border-radius:2px;">
                             <div style="font-size:11.5px; font-weight:700; color:#dc2626; margin-bottom:4px;">Không tìm thấy bản ghi SMSC CDR</div>
                             <div style="font-size:10.5px; color:#64748b; margin-bottom:10px;">Dải thời gian: ${escapeHtml(timeRangeDesc || fromDateVal + ' - ' + toDateVal)}</div>
                             <button type="button" class="btn btn-sm" onclick="fetchInlineSmsCdr('${escapeHtml(phone)}', '${escapeHtml(incidentTime)}', '${escapeHtml(ticketKey)}', this, event)" style="padding:3px 10px; font-size:11px; cursor:pointer;">Thử lại</button>
@@ -2992,7 +3234,7 @@ function renderSmsCdrDetailContent(ticketKey, phone, incidentTime, ticketContent
     });
 
     const finalContent = ticketContent || (tObj ? (tObj.ticket_content || tObj.ai_summary || '') : '');
-    const finalIncidentTime = (tObj && tObj.sms_incident_time) ? tObj.sms_incident_time : incidentTime;
+    const finalIncidentTime = tObj ? (tObj.sms_incident_time || tObj.incident_time || incidentTime) : incidentTime;
     const parsed = extractSmsIncidentDetails(finalContent, finalIncidentTime, tObj ? (tObj.created_time || '') : '');
 
     let cached = window.smsCdrSummaryCache[cleanP];
@@ -3005,7 +3247,7 @@ function renderSmsCdrDetailContent(ticketKey, phone, incidentTime, ticketContent
 
     if (!cached) {
         return `
-            <div style="padding:14px 10px; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:6px; text-align:center;">
+            <div style="padding:14px 10px; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:2px; text-align:center;">
                 <div style="font-size:11.5px; font-weight:700; color:#1e293b; margin-bottom:4px;">
                     Chưa có dữ liệu thống kê SMSC CDR
                 </div>
@@ -3013,7 +3255,7 @@ function renderSmsCdrDetailContent(ticketKey, phone, incidentTime, ticketContent
                     Thời điểm phản ánh: <strong style="color:#0f172a;">${escapeHtml(parsed.incidentTime)}</strong><br>
                     <span style="font-size:10.5px; color:#64748b; font-family:'JetBrains Mono', monospace;">(${escapeHtml(parsed.timeRangeDesc)})</span>
                 </div>
-                <button type="button" class="btn btn-sm" onclick="fetchInlineSmsCdr('${escapeHtml(phone)}', '${escapeHtml(incidentTime)}', '${escapeHtml(ticketKey)}', this, event)" style="padding:4px 14px; font-size:11.5px; font-weight:700; color:#0d9488; background:#f0fdfa; border:1px solid #99f6e4; border-radius:4px; cursor:pointer;">
+                <button type="button" class="btn btn-sm" onclick="fetchInlineSmsCdr('${escapeHtml(phone)}', '${escapeHtml(incidentTime)}', '${escapeHtml(ticketKey)}', this, event)" style="padding:4px 14px; font-size:11.5px; font-weight:700; color:#0d9488; background:#f0fdfa; border:1px solid #99f6e4; border-radius:2px; cursor:pointer;">
                     Tra cứu SMSC CDR theo thời điểm phản ánh
                 </button>
             </div>
@@ -3047,12 +3289,12 @@ function renderSmsCdrDetailContent(ticketKey, phone, incidentTime, ticketContent
     return `
         <div style="display:flex; flex-direction:column; gap:8px;">
             <!-- Header dải thời gian tra cứu -->
-            <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:4px 8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:2px; padding:4px 8px;">
                 <div style="font-size:11px; color:#475569; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
                     <span style="color:#64748b;">Thời gian:</span>
                     <strong style="color:#0f172a; font-family:'JetBrains Mono', monospace; font-size:10.5px;">${escapeHtml(displayRange)}</strong>
                 </div>
-                <button type="button" onclick="fetchInlineSmsCdr('${escapeHtml(phone)}', '${escapeHtml(incidentTime)}', '${escapeHtml(ticketKey)}', this, event)" style="background:#ffffff; border:1px solid #cbd5e1; border-radius:3px; padding:1px 6px; font-size:10px; font-weight:600; color:#0284c7; cursor:pointer;" title="Truy vấn lại dữ liệu SMSC CDR">
+                <button type="button" onclick="fetchInlineSmsCdr('${escapeHtml(phone)}', '${escapeHtml(incidentTime)}', '${escapeHtml(ticketKey)}', this, event)" style="background:#ffffff; border:1px solid #cbd5e1; border-radius:2px; padding:1px 6px; font-size:10px; font-weight:600; color:#0284c7; cursor:pointer;" title="Truy vấn lại dữ liệu SMSC CDR">
                     Tra cứu lại
                 </button>
             </div>
@@ -3060,7 +3302,7 @@ function renderSmsCdrDetailContent(ticketKey, phone, incidentTime, ticketContent
             <!-- Khối thống kê 2 cột MO & MT -->
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
                 <!-- Khối Tin gửi đi MO -->
-                <div style="background:#f8fafc; border:1px solid ${moFail > 0 ? '#fca5a5' : '#e2e8f0'}; border-radius:5px; padding:6px 8px;">
+                <div style="background:#f8fafc; border:1px solid ${moFail > 0 ? '#fca5a5' : '#e2e8f0'}; border-radius:2px; padding:6px 8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:3px; margin-bottom:5px;">
                         <span style="font-weight:700; font-size:10.5px; color:#1e293b;">TIN GỬI ĐI (MO)</span>
                         <span style="font-weight:800; font-size:11px; font-family:'JetBrains Mono', monospace; color:${cached.moCount === 0 ? '#64748b' : (cached.moRate >= 90 ? '#15803d' : '#b91c1c')};">
@@ -3084,7 +3326,7 @@ function renderSmsCdrDetailContent(ticketKey, phone, incidentTime, ticketContent
                 </div>
 
                 <!-- Khối Tin nhận vào MT -->
-                <div style="background:#f8fafc; border:1px solid ${mtFail > 0 ? '#fca5a5' : '#e2e8f0'}; border-radius:5px; padding:6px 8px;">
+                <div style="background:#f8fafc; border:1px solid ${mtFail > 0 ? '#fca5a5' : '#e2e8f0'}; border-radius:2px; padding:6px 8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:3px; margin-bottom:5px;">
                         <span style="font-weight:700; font-size:10.5px; color:#1e293b;">TIN NHẬN VÀO (MT)</span>
                         <span style="font-weight:800; font-size:11px; font-family:'JetBrains Mono', monospace; color:${cached.mtCount === 0 ? '#64748b' : (cached.mtRate >= 90 ? '#0284c7' : '#b91c1c')};">
@@ -3110,7 +3352,7 @@ function renderSmsCdrDetailContent(ticketKey, phone, incidentTime, ticketContent
 
             <!-- Tóm tắt nguyên nhân lỗi nếu có -->
             ${(cached.topErrors && cached.topErrors.length > 0) ? `
-                <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:5px; padding:5px 8px; font-size:10px;">
+                <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:2px; padding:5px 8px; font-size:10px;">
                     <strong style="color:#9a3412; display:block; margin-bottom:3px;">Nguyên nhân lỗi ghi nhận từ SMSC:</strong>
                     ${cached.topErrors.map(e => `
                         <div style="display:flex; justify-content:space-between; margin-bottom:1px; color:#7c2d12;">
@@ -3120,7 +3362,7 @@ function renderSmsCdrDetailContent(ticketKey, phone, incidentTime, ticketContent
                     `).join('')}
                 </div>
             ` : (moFail === 0 && mtFail === 0) ? `
-                <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:5px; padding:5px 8px; font-size:10.5px; color:#15803d; font-weight:600;">
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:2px; padding:5px 8px; font-size:10.5px; color:#15803d; font-weight:600;">
                     Không ghi nhận bản ghi lỗi gửi hoặc nhận tin trong khoảng thời gian này.
                 </div>
             ` : ''}
@@ -3132,7 +3374,7 @@ function renderSmsCdrDetailContent(ticketKey, phone, incidentTime, ticketContent
                         <strong style="color:#0f172a; font-size:10.5px;">HỒ SƠ CORE & DỊCH VỤ GW:</strong>
                         <a href="http://10.165.15.29:8080/VNPT-GW/client/search" target="_blank" style="font-size:10px; color:#0284c7; font-weight:700; text-decoration:none;" title="Mở cổng web VNPT-GW (10.165.15.29:8080)">GW ↗</a>
                     </div>
-                    <button type="button" onclick="fetchGwSubscriberData('${cleanP}', '${ticketKey}', this)" style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:3px; padding:1px 6px; font-size:10px; font-weight:600; color:#0284c7; cursor:pointer;" title="Tra cứu lại thông tin profile từ cổng GW">
+                    <button type="button" onclick="fetchGwSubscriberData('${cleanP}', '${ticketKey}', this)" style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:2px; padding:1px 6px; font-size:10px; font-weight:600; color:#0284c7; cursor:pointer;" title="Tra cứu lại thông tin profile từ cổng GW">
                         Tra cứu GW
                     </button>
                 </div>
@@ -3170,9 +3412,9 @@ function renderGwDetailContent(phone, ticketKey) {
         }, 60);
 
         return `
-            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; font-size:10.5px; color:#64748b; display:flex; justify-content:space-between; align-items:center;">
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:2px; padding:6px 8px; font-size:10.5px; color:#64748b; display:flex; justify-content:space-between; align-items:center;">
                 <span>Chưa có dữ liệu GW cho thuê bao này</span>
-                <button type="button" onclick="fetchGwSubscriberData('${cleanP}', '${ticketKey}', this)" style="background:#ffffff; border:1px solid #cbd5e1; border-radius:3px; padding:2px 8px; font-size:10.5px; font-weight:700; color:#0d9488; cursor:pointer;">
+                <button type="button" onclick="fetchGwSubscriberData('${cleanP}', '${ticketKey}', this)" style="background:#ffffff; border:1px solid #cbd5e1; border-radius:2px; padding:2px 8px; font-size:10.5px; font-weight:700; color:#0d9488; cursor:pointer;">
                     Nạp dữ liệu GW
                 </button>
             </div>
@@ -3181,15 +3423,15 @@ function renderGwDetailContent(phone, ticketKey) {
 
     if (!cached.success) {
         return `
-            <div style="background:#fff1f2; border:1px solid #fecdd3; border-radius:4px; padding:6px 10px; font-size:10.5px; color:#be123c; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <div style="background:#fff1f2; border:1px solid #fecdd3; border-radius:2px; padding:6px 10px; font-size:10.5px; color:#be123c; display:flex; justify-content:space-between; align-items:center; gap:8px;">
                 <div style="font-weight:600; line-height:1.3;">
                     ${escapeHtml(cached.message || 'Chưa kết nối được máy chủ GW')}
                 </div>
                 <div style="display:flex; gap:6px; flex-shrink:0;">
-                    <button type="button" onclick="if(typeof openGwModal === 'function') openGwModal();" style="background:#dc2626; color:#ffffff; border:none; border-radius:3px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer;" title="Mở hộp thoại đăng nhập CAS VNPT-GW hoặc dán JSESSIONID">
+                    <button type="button" onclick="if(typeof openGwModal === 'function') openGwModal();" style="background:#dc2626; color:#ffffff; border:none; border-radius:2px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer;" title="Mở hộp thoại đăng nhập CAS VNPT-GW hoặc dán JSESSIONID">
                         Đăng nhập GW
                     </button>
-                    <button type="button" onclick="fetchGwSubscriberData('${cleanP}', '${ticketKey}', this)" style="background:#ffffff; border:1px solid #cbd5e1; border-radius:3px; padding:2px 8px; font-size:10px; font-weight:600; color:#334155; cursor:pointer;" title="Gửi lại yêu cầu tra cứu tới cổng GW">
+                    <button type="button" onclick="fetchGwSubscriberData('${cleanP}', '${ticketKey}', this)" style="background:#ffffff; border:1px solid #cbd5e1; border-radius:2px; padding:2px 8px; font-size:10px; font-weight:600; color:#334155; cursor:pointer;" title="Gửi lại yêu cầu tra cứu tới cổng GW">
                         Thử lại
                     </button>
                 </div>
@@ -3205,13 +3447,13 @@ function renderGwDetailContent(phone, ticketKey) {
     const allTables = [ ...(smsData.tables || []), ...(ocsData.tables || []), ...(volteData.tables || []) ];
     if (allTables.length === 0) {
         return `
-            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 10px; font-size:10.5px; color:#475569; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:2px; padding:6px 10px; font-size:10.5px; color:#475569; display:flex; justify-content:space-between; align-items:center; gap:8px;">
                 <span>Cổng GW không trả về bảng dữ liệu nào cho thuê bao này (hoặc phiên làm việc chưa xác thực).</span>
                 <div style="display:flex; gap:6px; flex-shrink:0;">
-                    <button type="button" onclick="if(typeof openGwModal === 'function') openGwModal();" style="background:#0284c7; color:#ffffff; border:none; border-radius:3px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer;" title="Mở hộp thoại đăng nhập CAS VNPT-GW">
+                    <button type="button" onclick="if(typeof openGwModal === 'function') openGwModal();" style="background:#0284c7; color:#ffffff; border:none; border-radius:2px; padding:2px 8px; font-size:10px; font-weight:700; cursor:pointer;" title="Mở hộp thoại đăng nhập CAS VNPT-GW">
                         Đăng nhập GW
                     </button>
-                    <button type="button" onclick="fetchGwSubscriberData('${cleanP}', '${ticketKey}', this)" style="background:#ffffff; border:1px solid #cbd5e1; border-radius:3px; padding:2px 8px; font-size:10px; font-weight:600; color:#334155; cursor:pointer;">
+                    <button type="button" onclick="fetchGwSubscriberData('${cleanP}', '${ticketKey}', this)" style="background:#ffffff; border:1px solid #cbd5e1; border-radius:2px; padding:2px 8px; font-size:10px; font-weight:600; color:#334155; cursor:pointer;">
                         Thử lại
                     </button>
                 </div>
@@ -3363,25 +3605,25 @@ function renderGwDetailContent(phone, ticketKey) {
     if (!hasVolteConfig && !hssProfile) {
         volteHtml = `<span style="font-weight:600; color:#94a3b8; font-size:10px;">VoLTE: --</span>`;
     } else if (hasVolteErrors || isProfile65) {
-        volteHtml = `<span style="font-weight:700; color:#dc2626; background:#fee2e2; border:1px solid #fca5a5; padding:1px 5px; border-radius:3px; font-size:10px;" title="${escapeHtml(volteErrorDesc || 'VoLTE có lỗi')}">VoLTE có lỗi</span>`;
+        volteHtml = `<span style="font-weight:700; color:#dc2626; background:#fee2e2; border:1px solid #fca5a5; padding:1px 5px; border-radius:2px; font-size:10px;" title="${escapeHtml(volteErrorDesc || 'VoLTE có lỗi')}">VoLTE có lỗi</span>`;
     } else {
-        volteHtml = `<span style="font-weight:700; color:#15803d; background:#ecfdf5; border:1px solid #a7f3d0; padding:1px 5px; border-radius:3px; font-size:10px;">VoLTE: OK</span>`;
+        volteHtml = `<span style="font-weight:700; color:#15803d; background:#ecfdf5; border:1px solid #a7f3d0; padding:1px 5px; border-radius:2px; font-size:10px;">VoLTE: OK</span>`;
     }
 
     const ocsDisplay = smsPkg ? `${escapeHtml(ocsStatus)} (${escapeHtml(smsPkg)})` : escapeHtml(ocsStatus);
 
     return `
-        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:5px; padding:6px 8px; font-size:10.5px; display:flex; flex-direction:column; gap:4px;">
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:2px; padding:6px 8px; font-size:10.5px; display:flex; flex-direction:column; gap:4px;">
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <span style="color:#64748b;">Gửi SMO (2G/3G):</span>
-                    <span style="font-weight:700; color:${isSmoOk ? '#15803d' : (smoStatus === '--' ? '#94a3b8' : '#dc2626')}; background:${isSmoOk ? '#ecfdf5' : (smoStatus === '--' ? '#f1f5f9' : '#fee2e2')}; border:1px solid ${isSmoOk ? '#a7f3d0' : (smoStatus === '--' ? '#cbd5e1' : '#fca5a5')}; padding:1px 5px; border-radius:3px; font-size:10px;">
+                    <span style="font-weight:700; color:${isSmoOk ? '#15803d' : (smoStatus === '--' ? '#94a3b8' : '#dc2626')}; background:${isSmoOk ? '#ecfdf5' : (smoStatus === '--' ? '#f1f5f9' : '#fee2e2')}; border:1px solid ${isSmoOk ? '#a7f3d0' : (smoStatus === '--' ? '#cbd5e1' : '#fca5a5')}; padding:1px 5px; border-radius:2px; font-size:10px;">
                         ${escapeHtml(smoStatus)}
                     </span>
                 </div>
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <span style="color:#64748b;" title="Dịch vụ SMO trên miền VoLTE: SMSBarring kiểm soát chặn gửi tin nhắn khi kết nối 4G/VoLTE">Gửi VoLTE (Barring):</span>
-                    <span style="font-weight:700; color:${isSmsBarringBlocked ? '#dc2626' : (smsBarringStatus === '--' ? '#94a3b8' : '#15803d')}; background:${isSmsBarringBlocked ? '#fee2e2' : (smsBarringStatus === '--' ? '#f1f5f9' : '#ecfdf5')}; border:1px solid ${isSmsBarringBlocked ? '#fca5a5' : (smsBarringStatus === '--' ? '#cbd5e1' : '#a7f3d0')}; padding:1px 5px; border-radius:3px; font-size:10px;">
+                    <span style="font-weight:700; color:${isSmsBarringBlocked ? '#dc2626' : (smsBarringStatus === '--' ? '#94a3b8' : '#15803d')}; background:${isSmsBarringBlocked ? '#fee2e2' : (smsBarringStatus === '--' ? '#f1f5f9' : '#ecfdf5')}; border:1px solid ${isSmsBarringBlocked ? '#fca5a5' : (smsBarringStatus === '--' ? '#cbd5e1' : '#a7f3d0')}; padding:1px 5px; border-radius:2px; font-size:10px;">
                         ${escapeHtml(smsBarringStatus)}
                     </span>
                 </div>
@@ -3389,13 +3631,13 @@ function renderGwDetailContent(phone, ticketKey) {
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <span style="color:#64748b;">Nhận SMT (2G/3G):</span>
-                    <span style="font-weight:700; color:${isSmtOk ? '#15803d' : (smtStatus === '--' ? '#94a3b8' : '#dc2626')}; background:${isSmtOk ? '#ecfdf5' : (smtStatus === '--' ? '#f1f5f9' : '#fee2e2')}; border:1px solid ${isSmtOk ? '#a7f3d0' : (smtStatus === '--' ? '#cbd5e1' : '#fca5a5')}; padding:1px 5px; border-radius:3px; font-size:10px;">
+                    <span style="font-weight:700; color:${isSmtOk ? '#15803d' : (smtStatus === '--' ? '#94a3b8' : '#dc2626')}; background:${isSmtOk ? '#ecfdf5' : (smtStatus === '--' ? '#f1f5f9' : '#fee2e2')}; border:1px solid ${isSmtOk ? '#a7f3d0' : (smtStatus === '--' ? '#cbd5e1' : '#fca5a5')}; padding:1px 5px; border-radius:2px; font-size:10px;">
                         ${escapeHtml(smtStatus)}
                     </span>
                 </div>
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <span style="color:#64748b;" title="Barring of All Incoming Calls/SMS: Khách hàng tự kích hoạt chặn tin nhắn đến trên thiết bị / USSD">Tự chặn (BAIC):</span>
-                    <span style="font-weight:700; color:${isBaicBlocked ? '#dc2626' : (baicStatus === '--' ? '#94a3b8' : '#15803d')}; background:${isBaicBlocked ? '#fee2e2' : (baicStatus === '--' ? '#f1f5f9' : '#ecfdf5')}; border:1px solid ${isBaicBlocked ? '#fca5a5' : (baicStatus === '--' ? '#cbd5e1' : '#a7f3d0')}; padding:1px 5px; border-radius:3px; font-size:10px;">
+                    <span style="font-weight:700; color:${isBaicBlocked ? '#dc2626' : (baicStatus === '--' ? '#94a3b8' : '#15803d')}; background:${isBaicBlocked ? '#fee2e2' : (baicStatus === '--' ? '#f1f5f9' : '#ecfdf5')}; border:1px solid ${isBaicBlocked ? '#fca5a5' : (baicStatus === '--' ? '#cbd5e1' : '#a7f3d0')}; padding:1px 5px; border-radius:2px; font-size:10px;">
                         ${escapeHtml(baicStatus)}
                     </span>
                 </div>
@@ -3446,7 +3688,7 @@ async function fetchGwSubscriberData(phone, ticketKey, btn) {
     } catch (e) {
         if (container) {
             container.innerHTML = `
-                <div style="background:#fef2f2; border:1px solid #fecdd3; border-radius:4px; padding:5px 8px; font-size:10.5px; color:#b91c1c;">
+                <div style="background:#fef2f2; border:1px solid #fecdd3; border-radius:2px; padding:5px 8px; font-size:10.5px; color:#b91c1c;">
                     Lỗi kết nối tới API GW: ${escapeHtml(e.message || String(e))}
                 </div>
             `;
@@ -3605,16 +3847,14 @@ function applyTicketsData(data, force = false) {
     }
 
     if (document.getElementById('badgeActiveCount')) document.getElementById('badgeActiveCount').innerText = data.active_count || 0;
-    if (document.getElementById('badgeClosedCount')) document.getElementById('badgeClosedCount').innerText = data.closed_count || 0;
-    if (document.getElementById('badgeAllCount')) document.getElementById('badgeAllCount').innerText = data.total_count || 0;
 
     cachedTickets = tickets;
     renderTicketsTable(force);
 
-    // Kích hoạt preload ngầm toàn bộ các module còn lại vào RAM client sau khi tải xong dữ liệu đầu tiên
+    // Tắt cơ chế tự động bắn bão 7 request ngầm để tránh nghẽn luồng xử lý trên server (chạy trực tiếp Windows)
+    // Các tab/module nghiệp vụ sẽ được tải theo nhu cầu thực tế (On-Demand) siêu nhanh khi KTV bấm vào tab
     if (!window._hasPreloadedModules && !isHistoryStatsView && !isUserManagementView) {
         window._hasPreloadedModules = true;
-        setTimeout(preloadAllModulesInBackground, 1000);
     }
 }
 
@@ -3651,6 +3891,10 @@ async function loadTickets(force = false, resetPage = false) {
         const search = searchInputElem ? searchInputElem.value.trim() : '';
         const filterStatusElem = document.getElementById('filterStatus');
         const statusFilter = filterStatusElem ? filterStatusElem.value : 'all';
+        const fromDateElem = document.getElementById('filterFromDate');
+        const toDateElem = document.getElementById('filterToDate');
+        const fromDateVal = fromDateElem ? fromDateElem.value.trim() : '';
+        const toDateVal = toDateElem ? toDateElem.value.trim() : '';
 
         const clientAuthTok = (typeof getTtsNewAuthToken === 'function' ? getTtsNewAuthToken() : '') || (typeof getTtsAuthSession === 'function' && getTtsAuthSession() ? getTtsAuthSession().token : '');
         if (!clientAuthTok || window.authRequireLogin || window.authTokenExpired) {
@@ -3658,7 +3902,7 @@ async function loadTickets(force = false, resetPage = false) {
         }
 
         // ⚡ INSTANT CACHE: Kiểm tra bộ nhớ RAM trước (0ms phản hồi)
-        const cacheKey = `${requestedTab}_${requestedSystem}_${requestedService}_${currentRegion || 'ALL'}_${statusFilter}_${search}`;
+        const cacheKey = `${requestedTab}_${requestedSystem}_${requestedService}_${currentRegion || 'ALL'}_${statusFilter}_${fromDateVal}_${toDateVal}_${search}`;
         const cachedItem = window.ticketsModuleCache ? window.ticketsModuleCache[cacheKey] : null;
         const now = Date.now();
 
@@ -3680,7 +3924,11 @@ async function loadTickets(force = false, resetPage = false) {
 
         const reqHeaders = clientAuthTok ? { 'Authorization': clientAuthTok } : {};
 
-        const res = await fetch(`/api/tickets?search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusFilter)}&tab=${encodeURIComponent(requestedTab)}&source=${encodeURIComponent(requestedSystem)}&service_type=${encodeURIComponent(requestedService)}&region=${encodeURIComponent(currentRegion || 'ALL')}`, { 
+        let fetchUrl = `/api/tickets?search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusFilter)}&tab=${encodeURIComponent(requestedTab)}&source=${encodeURIComponent(requestedSystem)}&service_type=${encodeURIComponent(requestedService)}&region=${encodeURIComponent(currentRegion || 'ALL')}`;
+        if (fromDateVal) fetchUrl += `&from_date=${encodeURIComponent(fromDateVal)}`;
+        if (toDateVal) fetchUrl += `&to_date=${encodeURIComponent(toDateVal)}`;
+
+        const res = await fetch(fetchUrl, { 
             signal,
             headers: reqHeaders
         });
@@ -3764,6 +4012,146 @@ async function preloadAllModulesInBackground() {
     isPreloadingModules = false;
 }
 window.preloadAllModulesInBackground = preloadAllModulesInBackground;
+
+function onDateRangePresetChange(preset) {
+    const customBox = document.getElementById('customDateRangeBox');
+    const fromEl = document.getElementById('filterFromDate');
+    const toEl = document.getElementById('filterToDate');
+    if (!fromEl || !toEl) return;
+
+    const pad = (n) => String(n).padStart(2, '0');
+    const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const now = new Date();
+
+    if (preset === 'all') {
+        if (customBox) customBox.style.display = 'none';
+        fromEl.value = '';
+        toEl.value = '';
+    } else if (preset === 'today') {
+        if (customBox) customBox.style.display = 'none';
+        fromEl.value = fmt(now);
+        toEl.value = fmt(now);
+    } else if (preset === 'yesterday') {
+        if (customBox) customBox.style.display = 'none';
+        const y = new Date(now);
+        y.setDate(y.getDate() - 1);
+        fromEl.value = fmt(y);
+        toEl.value = fmt(y);
+    } else if (preset === 'last3days') {
+        if (customBox) customBox.style.display = 'none';
+        const d3 = new Date(now);
+        d3.setDate(d3.getDate() - 2);
+        fromEl.value = fmt(d3);
+        toEl.value = fmt(now);
+    } else if (preset === 'last7days') {
+        if (customBox) customBox.style.display = 'none';
+        const d7 = new Date(now);
+        d7.setDate(d7.getDate() - 6);
+        fromEl.value = fmt(d7);
+        toEl.value = fmt(now);
+    } else if (preset === 'this_month') {
+        if (customBox) customBox.style.display = 'none';
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        fromEl.value = fmt(firstDay);
+        toEl.value = fmt(now);
+    } else if (preset === 'custom') {
+        if (customBox) customBox.style.display = 'inline-flex';
+        return;
+    }
+    loadTickets(true, true);
+}
+window.onDateRangePresetChange = onDateRangePresetChange;
+
+async function triggerScanCcosSync() {
+    const btn = document.getElementById('btnScanCcosSync');
+    const fromEl = document.getElementById('filterFromDate');
+    const toEl = document.getElementById('filterToDate');
+    const fromDateVal = fromEl ? fromEl.value.trim() : '';
+    const toDateVal = toEl ? toEl.value.trim() : '';
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span>Đang quét CCOS...</span>`;
+    }
+
+    try {
+        const clientAuthTok = (typeof getTtsNewAuthToken === 'function' ? getTtsNewAuthToken() : '') || (typeof getTtsAuthSession === 'function' && getTtsAuthSession() ? getTtsAuthSession().token : '');
+        const reqHeaders = { 'Content-Type': 'application/json' };
+        if (clientAuthTok) reqHeaders['Authorization'] = clientAuthTok;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+        const res = await fetch('/api/tickets/scan-ccos-sync', {
+            method: 'POST',
+            headers: reqHeaders,
+            signal: controller.signal,
+            body: JSON.stringify({
+                from_date: fromDateVal,
+                to_date: toDateVal,
+                limit: 30,
+                region: currentRegion || 'ALL',
+                force_check: false
+            })
+        });
+        clearTimeout(timeoutId);
+        const data = await res.json();
+        if (data.success) {
+            alert(`Kết quả kiểm tra đồng bộ CCOS:\n- Tổng số phiếu kiểm tra: ${data.total}\n- Đã về CCOS an toàn: ${data.synced_count}\n- Chưa về CCOS (lỗi đồng bộ TTS): ${data.not_synced_count}`);
+            loadTickets(true, false);
+        } else {
+            alert(data.detail || data.message || 'Lỗi khi quét kiểm tra CCOS');
+        }
+    } catch (e) {
+        if (e.name === 'AbortError') {
+            alert('Quá thời gian chờ phản hồi từ Gateway OneOSS khi kiểm tra CCOS. Vui lòng thử lại sau.');
+        } else {
+            alert('Lỗi kết nối khi quét CCOS: ' + e.message);
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span>Kiểm Tra CCOS</span>`;
+        }
+    }
+}
+window.triggerScanCcosSync = triggerScanCcosSync;
+
+async function triggerSingleCcosCheck(ticketId, phone, incidentTime, event, ticketCode = '') {
+    if (event) event.stopPropagation();
+    try {
+        const clientAuthTok = (typeof getTtsNewAuthToken === 'function' ? getTtsNewAuthToken() : '') || (typeof getTtsAuthSession === 'function' && getTtsAuthSession() ? getTtsAuthSession().token : '');
+        const reqHeaders = { 'Content-Type': 'application/json' };
+        if (clientAuthTok) reqHeaders['Authorization'] = clientAuthTok;
+
+        const res = await fetch('/api/tickets/scan-ccos-sync', {
+            method: 'POST',
+            headers: reqHeaders,
+            body: JSON.stringify({
+                ticket_id: ticketId || '',
+                phone: phone || '',
+                incident_time: incidentTime || '',
+                ticket_code: ticketCode || '',
+                limit: 1,
+                region: currentRegion || 'ALL',
+                force_check: true
+            })
+        });
+        const data = await res.json();
+        if (data.success && data.items && data.items.length > 0) {
+            const item = data.items[0];
+            if (item.status === 'Đã về CCOS') {
+                alert(`Phiếu [${item.ticket_code || phone}] ĐÃ VỀ CCOS AN TOÀN!\nThời điểm hoàn tất: ${item.customer_completion_date || 'Đã ghi nhận trên hệ thống'}`);
+            } else {
+                alert(`Phiếu [${item.ticket_code || phone}] CHƯA VỀ CCOS!\nChi tiết: ${item.error_detail || 'Chưa hoàn thành trên OneOSS'}`);
+            }
+        }
+        loadTickets(true, false);
+    } catch (e) {
+        console.error('Lỗi kiểm tra CCOS đơn:', e);
+    }
+}
+window.triggerSingleCcosCheck = triggerSingleCcosCheck;
 
 // Quản lý trạng thái mở rộng chi tiết của các dòng phiếu (giữ nguyên khi tự động làm mới)
 let expandedTicketKeys = new Set();
@@ -4081,7 +4469,7 @@ function renderCauseDropdownMenu(ticketKey, query) {
         itemsHtml = `<div style="padding:14px; text-align:center; color:#94a3b8; font-size:11px; font-style:italic;">
                     Không tìm thấy nguyên nhân phù hợp với từ khóa "${escapeHtml(query)}"
                     <div style="margin-top:8px;">
-                        <button type="button" onmousedown="showAllCauses('${ticketKey}')" style="background:#0284c7; color:#fff; border:none; padding:4px 12px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer;">Xem toàn bộ ${totalAllCount} nguyên nhân</button>
+                        <button type="button" onmousedown="showAllCauses('${ticketKey}')" style="background:#0284c7; color:#fff; border:none; padding:4px 12px; border-radius:2px; font-size:11px; font-weight:600; cursor:pointer;">Xem toàn bộ ${totalAllCount} nguyên nhân</button>
                     </div>
                 </div>`;
     }
@@ -4134,7 +4522,7 @@ function renderPrecheckBtnHtml(phone, incidentTime, precheckedAtStr) {
     `;
 }
 
-function formatClosedTimeDisplay(closedAtStr, closedBy, ticketStatus) {
+function formatClosedTimeDisplay(closedAtStr, closedBy, ticketStatus, ccosBadgeHtml = '') {
     if (!closedAtStr || closedAtStr === '--') {
         return '<div style="text-align:center;"><span style="color:#94a3b8; font-style:italic;">--</span></div>';
     }
@@ -4162,10 +4550,10 @@ function formatClosedTimeDisplay(closedAtStr, closedBy, ticketStatus) {
     const stLower = String(ticketStatus || '').toLowerCase();
     const isStep51 = stLower.includes('5.1');
     if (closedBy && closedBy !== 'null' && String(closedBy).trim()) {
-        actorHtml = `<span style="font-size:9.5px; font-weight:600; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:3px; max-width:130px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="KTV thực hiện: ${escapeHtml(closedBy)}">${escapeHtml(closedBy)}</span>`;
+        actorHtml = `<span style="font-size:9.5px; font-weight:600; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:2px; max-width:130px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="KTV thực hiện: ${escapeHtml(closedBy)}">${escapeHtml(closedBy)}</span>`;
     } else {
         const fallbackTxt = isStep51 ? 'Đã đóng 5.1' : 'Đã đóng 2.6';
-        actorHtml = `<span style="font-size:9.5px; font-weight:600; color:#15803d; background:#dcfce7; border:1px solid #86efac; padding:1px 5px; border-radius:3px;">${fallbackTxt}</span>`;
+        actorHtml = `<span style="font-size:9.5px; font-weight:600; color:#15803d; background:#dcfce7; border:1px solid #86efac; padding:1px 5px; border-radius:2px;">${fallbackTxt}</span>`;
     }
 
     let stepBadge = '';
@@ -4176,14 +4564,15 @@ function formatClosedTimeDisplay(closedAtStr, closedBy, ticketStatus) {
     }
 
     return `
-        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; text-align:center; padding:1px 0;">
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; text-align:center; padding:1px 0;">
             <div style="display:inline-flex; align-items:center; gap:4px;">
                 <span style="font-family:'JetBrains Mono', monospace; font-weight:700; font-size:11.5px; color:#0f172a;">${escapeHtml(timePart)}</span>
                 ${datePart ? `<span style="font-size:10px; color:#64748b; font-weight:500;">${escapeHtml(datePart)}</span>` : ''}
             </div>
-            <div style="display:inline-flex; align-items:center; justify-content:center; gap:3px; flex-wrap:wrap;">
+            <div style="display:inline-flex; align-items:center; justify-content:center; gap:4px; flex-wrap:wrap; margin-top:2px;">
                 ${actorHtml}
                 ${stepBadge}
+                ${ccosBadgeHtml}
             </div>
         </div>
     `;
@@ -4273,7 +4662,7 @@ function renderTicketsTable(force = false) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="${totalCols}" style="text-align:center; padding:55px 20px; background:#f8fafc;">
-                    <div style="max-width:440px; margin:0 auto; padding:24px 20px; border-radius:8px; background:#ffffff; border:1px solid #e2e8f0; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
+                    <div style="max-width:440px; margin:0 auto; padding:24px 20px; border-radius:2px; background:#ffffff; border:1px solid #e2e8f0; box-shadow:0 2px 8px rgba(0,0,0,0.04);">
                         <div style="width:44px; height:44px; margin:0 auto 12px; border-radius:50%; background:#eff6ff; display:flex; align-items:center; justify-content:center; color:#005baa;">
                             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
@@ -4282,7 +4671,7 @@ function renderTicketsTable(force = false) {
                         </div>
                         <div style="font-size:13.5px; font-weight:700; color:#1e293b; letter-spacing:0.3px; margin-bottom:6px;">${noticeTitle}</div>
                         <div style="font-size:12.5px; color:#64748b; line-height:1.5; margin-bottom:16px;">${noticeMsg}</div>
-                        <button type="button" onclick="openTtsNewModal()" class="btn-primary" style="height:34px; padding:0 20px; font-size:12.5px; font-weight:700; border-radius:6px; cursor:pointer; background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; border:none; box-shadow:0 2px 6px rgba(13,113,220,0.25); display:inline-flex; align-items:center; gap:6px;">
+                        <button type="button" onclick="openTtsNewModal()" class="btn-primary" style="height:34px; padding:0 20px; font-size:12.5px; font-weight:700; border-radius:2px; cursor:pointer; background:linear-gradient(180deg, #1886ee 0%, #0d71dc 100%); color:#ffffff; border:none; box-shadow:0 2px 6px rgba(13,113,220,0.25); display:inline-flex; align-items:center; gap:6px;">
                             <span>${btnLabel}</span>
                         </button>
                     </div>
@@ -4300,9 +4689,20 @@ function renderTicketsTable(force = false) {
         if (currentTableTab === 'chua_dong') {
             emptyMsg = 'Hiện không có phiếu nào cần xử lý hoặc toàn bộ phiếu đã được giải quyết.';
         } else if (currentTableTab === 'da_dong') {
-            emptyMsg = 'Chưa có phiếu nào trong danh sách lịch sử đã đóng của phân hệ này.';
+            const qdElem = document.getElementById('filterQuickDate');
+            const qdVal = qdElem ? qdElem.value : '';
+            if (qdVal === 'today') {
+                emptyMsg = 'Hôm nay chưa có phiếu nào được đóng trong phân hệ này.';
+            } else if (qdVal === 'yesterday') {
+                emptyMsg = 'Hôm qua không có phiếu nào được đóng trong phân hệ này.';
+            } else if (qdVal === '3days') {
+                emptyMsg = '3 ngày gần nhất không có phiếu nào được đóng trong phân hệ này.';
+            } else {
+                emptyMsg = 'Chưa có phiếu nào trong danh sách lịch sử đã đóng của khoảng thời gian này.';
+            }
         }
         tbody.innerHTML = `<tr><td colspan="${totalCols}" style="text-align:center; padding:40px; color:var(--text-muted); font-size:13px;">${emptyMsg}</td></tr>`;
+        tbody.style.opacity = '1';
         if (pagContainer) pagContainer.style.display = 'none';
         lastTicketsSignature = "EMPTY_" + currentTableTab + "_" + currentSystem + "_" + currentService;
         return;
@@ -4328,12 +4728,12 @@ function renderTicketsTable(force = false) {
             if (isNoA && !isNoB) return 1;
             if (!isNoA && isNoB) return -1;
             if (isNoA && isNoB) {
-                return parseIncidentDate(a.incident_time, a.ticket_code) - parseIncidentDate(b.incident_time, b.ticket_code);
+                return getTicketReceiptTimestamp(a) - getTicketReceiptTimestamp(b);
             }
             const cmp = stA.localeCompare(stB, 'vi', { sensitivity: 'base' });
             if (cmp !== 0) return sortStatusOrder === 'asc' ? cmp : -cmp;
             // Tie-breaker khi cùng nhận định: Sắp xếp theo ngày tiếp nhận cũ nhất trước (FIFO)
-            return parseIncidentDate(a.incident_time, a.ticket_code) - parseIncidentDate(b.incident_time, b.ticket_code);
+            return getTicketReceiptTimestamp(a) - getTicketReceiptTimestamp(b);
         });
     } else if (currentTableTab === 'da_dong') {
         // Tab Đã Đóng:
@@ -4346,7 +4746,7 @@ function renderTicketsTable(force = false) {
                 const timeB = parseClosedDate(b.closed_at || b.updated_at);
                 const diff = timeB - timeA;
                 if (diff !== 0) return diff;
-                return String(a.ticket_code || a.phone || '').localeCompare(String(b.ticket_code || b.phone || ''));
+                return String(b.ticket_code || b.phone || '').localeCompare(String(a.ticket_code || a.phone || ''), 'vi', { numeric: true });
             });
         } else if (effectiveClosedSort === 'asc') {
             displayTickets = [...cachedTickets].sort((a, b) => {
@@ -4354,43 +4754,43 @@ function renderTicketsTable(force = false) {
                 const timeB = parseClosedDate(b.closed_at || b.updated_at);
                 const diff = timeA - timeB;
                 if (diff !== 0) return diff;
-                return String(a.ticket_code || a.phone || '').localeCompare(String(b.ticket_code || b.phone || ''));
+                return String(a.ticket_code || a.phone || '').localeCompare(String(b.ticket_code || b.phone || ''), 'vi', { numeric: true });
             });
         } else if (sortIncidentTimeOrder === 'desc') {
             displayTickets = [...cachedTickets].sort((a, b) => {
-                const timeA = parseIncidentDate(a.incident_time, a.ticket_code);
-                const timeB = parseIncidentDate(b.incident_time, b.ticket_code);
+                const timeA = getTicketReceiptTimestamp(a);
+                const timeB = getTicketReceiptTimestamp(b);
                 const diff = timeB - timeA;
                 if (diff !== 0) return diff;
-                return String(a.ticket_code || a.phone || '').localeCompare(String(b.ticket_code || b.phone || ''));
+                return String(b.ticket_code || b.phone || '').localeCompare(String(a.ticket_code || a.phone || ''), 'vi', { numeric: true });
             });
         } else {
             // Mặc định hoặc sortIncidentTimeOrder === 'asc'
             displayTickets = [...cachedTickets].sort((a, b) => {
-                const timeA = parseIncidentDate(a.incident_time, a.ticket_code);
-                const timeB = parseIncidentDate(b.incident_time, b.ticket_code);
+                const timeA = getTicketReceiptTimestamp(a);
+                const timeB = getTicketReceiptTimestamp(b);
                 const diff = timeA - timeB;
                 if (diff !== 0) return diff;
-                return String(a.ticket_code || a.phone || '').localeCompare(String(b.ticket_code || b.phone || ''));
+                return String(a.ticket_code || a.phone || '').localeCompare(String(b.ticket_code || b.phone || ''), 'vi', { numeric: true });
             });
         }
     } else {
         if (sortIncidentTimeOrder === 'desc') {
             displayTickets = [...cachedTickets].sort((a, b) => {
-                const timeA = parseIncidentDate(a.incident_time, a.ticket_code);
-                const timeB = parseIncidentDate(b.incident_time, b.ticket_code);
+                const timeA = getTicketReceiptTimestamp(a);
+                const timeB = getTicketReceiptTimestamp(b);
                 const diff = timeB - timeA;
                 if (diff !== 0) return diff;
-                return String(a.ticket_code || a.phone || '').localeCompare(String(b.ticket_code || b.phone || ''));
+                return String(b.ticket_code || b.phone || '').localeCompare(String(a.ticket_code || a.phone || ''), 'vi', { numeric: true });
             });
         } else {
-            // Mặc định: Cũ nhất lên trước (ASC - FIFO), không tự ý đảo lộn thứ tự phiếu
+            // Mặc định: Tiếp nhận cũ nhất lên trước (ASC - FIFO theo ngày và ID phiếu), không tự ý đảo lộn thứ tự phiếu
             displayTickets = [...cachedTickets].sort((a, b) => {
-                const timeA = parseIncidentDate(a.incident_time, a.ticket_code);
-                const timeB = parseIncidentDate(b.incident_time, b.ticket_code);
+                const timeA = getTicketReceiptTimestamp(a);
+                const timeB = getTicketReceiptTimestamp(b);
                 const diff = timeA - timeB;
                 if (diff !== 0) return diff;
-                return String(a.ticket_code || a.phone || '').localeCompare(String(b.ticket_code || b.phone || ''));
+                return String(a.ticket_code || a.phone || '').localeCompare(String(b.ticket_code || b.phone || ''), 'vi', { numeric: true });
             });
         }
     }
@@ -4494,6 +4894,7 @@ function renderTicketsTable(force = false) {
         const isStep26 = rawStepCheck.includes('2.6') || (t.ticket_status === 'Chờ đóng lần 2');
         const isStep24 = !isStep23 && !isStep26;
 
+        let ccosBadgeHtml = '';
         if (t.ticket_status === 'Đã đóng' || t.ticket_status === 'Da dong' || (t.ticket_status && t.ticket_status.includes('Đã đóng')) || currentTableTab === 'da_dong') {
             let closeLabel = 'ĐÃ ĐÓNG 2.6';
             let closeBadgeStyle = 'font-weight:700; padding:4px 8px; font-size:11px;';
@@ -4511,12 +4912,23 @@ function renderTicketsTable(force = false) {
                 closeBadgeClass = 'badge-status badge-green';
             }
 
+            const ccosStatusVal = String(t.ccos_sync_status || '').trim();
+            const cleanTCode = escapeHtml((t.ticket_code || '').split('\n')[0].trim());
+            if (ccosStatusVal === 'Đã về CCOS' || ccosStatusVal.includes('Đã về')) {
+                const compDateTip = t.customer_completion_date ? `Đã đồng bộ CCOS: ${t.customer_completion_date}. Bấm để kiểm tra lại!` : 'Đã đồng bộ sang CCOS thành công. Bấm để kiểm tra lại!';
+                ccosBadgeHtml = `<span class="badge-status" style="background:#ecfdf5; color:#065f46; border:1px solid #a7f3d0; font-size:9.5px; padding:2px 6px; font-weight:700; cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:3px;" onclick="triggerSingleCcosCheck('${t.ticket_id || 0}', '${t.phone}', '${escapeHtml(t.incident_time || '')}', event, '${cleanTCode}')" title="${compDateTip}"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg><span>Đã về CCOS</span></span>`;
+            } else if (ccosStatusVal === 'Chưa về CCOS' || ccosStatusVal.includes('Chưa') || ccosStatusVal.includes('Lỗi')) {
+                ccosBadgeHtml = `<span class="badge-status" style="background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; font-size:9.5px; padding:2px 6px; font-weight:700; cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:3px;" onclick="triggerSingleCcosCheck('${t.ticket_id || 0}', '${t.phone}', '${escapeHtml(t.incident_time || '')}', event, '${cleanTCode}')" title="Phiếu đã đóng trên TTS nhưng chưa về CCOS. Bấm để kiểm tra lại!"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span>Chưa về CCOS</span></span>`;
+            } else {
+                ccosBadgeHtml = `<span class="badge-status" style="background:#f0f9ff; color:#0369a1; border:1px solid #bae6fd; font-size:9.5px; padding:2px 6px; font-weight:700; cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:3px;" onclick="triggerSingleCcosCheck('${t.ticket_id || 0}', '${t.phone}', '${escapeHtml(t.incident_time || '')}', event, '${cleanTCode}')" title="Bấm để kiểm tra đồng bộ CCOS"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span>Check CCOS</span></span>`;
+            }
+
             actionHtml = `
-                        <div style="display:flex; flex-direction:column; align-items:center; gap:3px;">
-                            <span class="${closeBadgeClass}" style="${closeBadgeStyle}">${closeLabel}</span>
-                        </div>
-                    `;
-            compactActionHtml = `<span class="${closeBadgeClass}" style="${compactBadgeStyle}">${closeLabel}</span>`;
+                <div style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                    <span class="${closeBadgeClass}" style="${closeBadgeStyle}">${closeLabel}</span>
+                </div>
+            `;
+            compactActionHtml = `<div style="display:inline-flex; align-items:center; justify-content:center;"><span class="${closeBadgeClass}" style="${compactBadgeStyle}">${closeLabel}</span></div>`;
         } else if (isTtsNew) {
             let stageBadge = '';
             if (reopenCount > 0) {
@@ -4684,7 +5096,7 @@ function renderTicketsTable(force = false) {
         const ccosProcessingHtml = t.processing_content ? `
             <details style="margin-top:5px; font-size:10.5px; border-top:1px dashed #cbd5e1; padding-top:4px;">
                 <summary style="cursor:pointer; color:#0d9488; font-weight:600;">Xem nội dung xử lý CCOS</summary>
-                <div style="margin-top:4px; max-height:90px; overflow-y:auto; color:#0f766e; font-style:normal; line-height:1.35; background:#f0fdfa; padding:4px 6px; border-radius:4px; border:1px solid #ccfbf1; font-family:'JetBrains Mono', Consolas, monospace; font-size:10.5px; white-space:pre-wrap;">${escapeHtml(t.processing_content)}</div>
+                <div style="margin-top:4px; max-height:90px; overflow-y:auto; color:#0f766e; font-style:normal; line-height:1.35; background:#f0fdfa; padding:4px 6px; border-radius:2px; border:1px solid #ccfbf1; font-family:'JetBrains Mono', Consolas, monospace; font-size:10.5px; white-space:pre-wrap;">${escapeHtml(t.processing_content)}</div>
             </details>
         ` : '';
 
@@ -4705,10 +5117,10 @@ function renderTicketsTable(force = false) {
                         <div style="font-size:11.5px; line-height:1.45; text-align:left; word-break:break-word; overflow-wrap:anywhere; white-space:normal;">
                             ${wardBadgeHtml}
                             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-                                <div style="display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:2px 8px; border-radius:4px;">
+                                <div style="display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:2px 8px; border-radius:2px;">
                                     Tóm Tắt Nội Dung
                                 </div>
-                                <button type="button" onclick="openAiTeachModal(event, '${escapeHtml(t.phone || '')}', '${escapeHtml(t.incident_time || '')}', ${t.ticket_id || 0})" style="display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:600; color:#0284c7; background:#ffffff; border:1px solid #bae6fd; padding:1px 6px; border-radius:4px; cursor:pointer; transition:all 0.15s;" title="Chỉnh sửa & Lưu làm mẫu cho AI học theo" onmouseover="this.style.background='#e0f2fe'" onmouseout="this.style.background='#ffffff'">
+                                <button type="button" onclick="openAiTeachModal(event, '${escapeHtml(t.phone || '')}', '${escapeHtml(t.incident_time || '')}', ${t.ticket_id || 0})" style="display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:600; color:#0284c7; background:#ffffff; border:1px solid #bae6fd; padding:1px 6px; border-radius:2px; cursor:pointer; transition:all 0.15s;" title="Chỉnh sửa & Lưu làm mẫu cho AI học theo" onmouseover="this.style.background='#e0f2fe'" onmouseout="this.style.background='#ffffff'">
                                     Dạy AI
                                 </button>
                             </div>
@@ -4721,28 +5133,31 @@ function renderTicketsTable(force = false) {
                     if (isTimeLine && currentService === 'sms') {
                         return `<div style="margin-bottom:3px; word-break:break-word; overflow-wrap:anywhere; white-space:normal; display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
                             <span style="color:#475569; font-weight:600;">${escapeHtml(label)}:</span> 
-                            <span style="color:#0f172a; font-weight:700; background:#fef3c7; color:#b45309; padding:0 5px; border-radius:3px; border:1px solid #fde68a;">${escapeHtml(val)}</span>
-                            <button type="button" onclick="openEditIncidentTimeModal(event, '${escapeHtml(t.phone || '')}', '${escapeHtml(t.incident_time || '')}', ${t.ticket_id || 0}, '${escapeHtml(val).replace(/'/g, "\\'")}')" style="background:#ffffff; border:1px solid #bae6fd; border-radius:3px; cursor:pointer; padding:0 5px; color:#0284c7; font-size:10px; font-weight:700; line-height:1.3;" title="Điều chỉnh mốc thời gian sự cố này">Sửa</button>
+                            <span style="color:#0f172a; font-weight:700; background:#fef3c7; color:#b45309; padding:0 5px; border-radius:2px; border:1px solid #fde68a;">${escapeHtml(val)}</span>
+                            <button type="button" onclick="openEditIncidentTimeModal(event, '${escapeHtml(t.phone || '')}', '${escapeHtml(t.incident_time || '')}', ${t.ticket_id || 0}, '${escapeHtml(val).replace(/'/g, "\\'")}')" style="background:#ffffff; border:1px solid #bae6fd; border-radius:2px; cursor:pointer; padding:0 5px; color:#0284c7; font-size:10px; font-weight:700; line-height:1.3;" title="Điều chỉnh mốc thời gian sự cố này">Sửa</button>
                         </div>`;
                     }
                     return `<div style="margin-bottom:3px; word-break:break-word; overflow-wrap:anywhere; white-space:normal;"><span style="color:#475569; font-weight:600;">${escapeHtml(label)}:</span> <span style="color:#0f172a; font-weight:500;">${escapeHtml(val)}</span></div>`;
                 }
                 return `<div style="word-break:break-word; overflow-wrap:anywhere; white-space:normal;">${escapeHtml(line)}</div>`;
             }).join('')}
-                            ${t.ticket_content ? `
-                                <details style="margin-top:6px; font-size:10.5px; border-top:1px dashed #cbd5e1; padding-top:4px;">
-                                    <summary style="cursor:pointer; color:#0369a1; font-weight:700; outline:none;">Xem phản ánh gốc</summary>
-                                    <div class="raw-ticket-content-box">${escapeHtml(t.ticket_content)}</div>
+                            ${(t.ticket_content || t.processing_content) ? (() => {
+                                const cleanRawContent = decodeHtmlEntities(String(t.ticket_content || '')).trim().replace(/^[\r\n\s]+/, '').replace(/[\r\n\s]+$/, '');
+                                const cleanRawProc = decodeHtmlEntities(String(t.processing_content || '')).trim().replace(/^[\r\n\s]+/, '').replace(/[\r\n\s]+$/, '');
+                                return `
+                                <details style="margin-top:5px; font-size:10.5px; border-top:1px dashed #cbd5e1; padding-top:4px;">
+                                    <summary style="cursor:pointer; color:#0369a1; font-weight:600; outline:none; user-select:none;">Xem phản ánh gốc</summary>
+                                    <div class="raw-ticket-inner-box" style="margin:4px 0 2px 0; padding:6px 8px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:2px; font-size:11px; line-height:1.4; color:#334155; text-align:left;">${cleanRawProc ? `<div style="font-size:10px; font-weight:700; color:#475569; margin-bottom:2px;">NỘI DUNG PHẢN ÁNH:</div><div style="white-space:pre-wrap; margin-bottom:6px; color:#1e293b;">${escapeHtml(cleanRawContent || 'Không có nội dung phản ánh')}</div><div style="font-size:10px; font-weight:700; color:#0d9488; margin-bottom:2px; border-top:1px dashed #cbd5e1; padding-top:4px;">NỘI DUNG XỬ LÝ CCOS:</div><div style="white-space:pre-wrap; color:#0f766e; background:#f0fdfa; padding:4px 6px; border-radius:2px; border:1px solid #ccfbf1; font-family:'JetBrains Mono', Consolas, monospace; font-size:10.5px; line-height:1.35;">${escapeHtml(cleanRawProc)}</div>` : `<div style="white-space:pre-wrap; color:#1e293b;">${escapeHtml(cleanRawContent || 'Không có nội dung phản ánh')}</div>`}</div>
                                 </details>
-                            ` : ''}
-                            ${ccosProcessingHtml}
+                                `;
+                            })() : ''}
                         </div>
                     `;
         } else {
             const content = t.ticket_content || (t.ai_summary && t.ai_summary !== 'null' ? t.ai_summary : '');
-            if (content) {
-                compactSummaryTooltip = (wardLocation ? `[${wardLocation}] ` : '') + content;
-                const summaryText = content.replace(/\n/g, ' ');
+            if (content || t.processing_content) {
+                compactSummaryTooltip = (wardLocation ? `[${wardLocation}] ` : '') + (content || t.processing_content);
+                const summaryText = (content || t.processing_content).replace(/\n/g, ' ');
                 compactSummaryHtml = `
                     <div style="display:flex; flex-direction:column; justify-content:center; min-width:0; padding:1px 0; text-align:left;">
                         ${compactWardBadgeHtml}
@@ -4754,13 +5169,16 @@ function renderTicketsTable(force = false) {
                 aiSummaryHtml = `
                     <div style="font-size:11.5px; color:#1e293b; line-height:1.45; word-break:break-word; text-align:left;">
                         ${wardBadgeHtml}
-                        <div class="raw-ticket-content-box" style="margin:4px 0 6px 0;">${escapeHtml(content)}</div>
+                        ${(() => {
+                            const cleanContent = decodeHtmlEntities(String(content || '')).trim().replace(/^[\r\n\s]+/, '').replace(/[\r\n\s]+$/, '');
+                            const cleanProc = decodeHtmlEntities(String(t.processing_content || '')).trim().replace(/^[\r\n\s]+/, '').replace(/[\r\n\s]+$/, '');
+                            return `<div class="raw-ticket-inner-box" style="margin:4px 0 6px 0; padding:6px 8px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:2px; font-size:11px; line-height:1.4; color:#334155; text-align:left;">${cleanProc ? `<div style="font-size:10px; font-weight:700; color:#475569; margin-bottom:2px;">NỘI DUNG PHẢN ÁNH:</div><div style="white-space:pre-wrap; margin-bottom:6px; color:#1e293b;">${escapeHtml(cleanContent || 'Không có nội dung phản ánh')}</div><div style="font-size:10px; font-weight:700; color:#0d9488; margin-bottom:2px; border-top:1px dashed #cbd5e1; padding-top:4px;">NỘI DUNG XỬ LÝ CCOS:</div><div style="white-space:pre-wrap; color:#0f766e; background:#f0fdfa; padding:4px 6px; border-radius:2px; border:1px solid #ccfbf1; font-family:'JetBrains Mono', Consolas, monospace; font-size:10.5px; line-height:1.35;">${escapeHtml(cleanProc)}</div>` : `<div style="white-space:pre-wrap; color:#1e293b;">${escapeHtml(cleanContent || 'Không có nội dung phản ánh')}</div>`}</div>`;
+                        })()}
                         <div style="margin-top:4px;">
-                            <button type="button" onclick="openAiTeachModal(event, '${escapeHtml(t.phone || '')}', '${escapeHtml(t.incident_time || '')}', ${t.ticket_id || 0})" style="display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:600; color:#0284c7; background:#ffffff; border:1px solid #bae6fd; padding:1px 6px; border-radius:4px; cursor:pointer;" title="Tạo mẫu chuẩn 6 mục cho AI học">
+                            <button type="button" onclick="openAiTeachModal(event, '${escapeHtml(t.phone || '')}', '${escapeHtml(t.incident_time || '')}', ${t.ticket_id || 0})" style="display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:600; color:#0284c7; background:#ffffff; border:1px solid #bae6fd; padding:1px 6px; border-radius:2px; cursor:pointer;" title="Tạo mẫu chuẩn 6 mục cho AI học">
                                 Dạy AI
                             </button>
                         </div>
-                        ${ccosProcessingHtml}
                     </div>`;
             } else if (ccosProcessingHtml) {
                 aiSummaryHtml = `<div style="font-size:11.5px; color:#1e293b; line-height:1.45;">${wardBadgeHtml}${ccosProcessingHtml}</div>`;
@@ -4781,12 +5199,12 @@ function renderTicketsTable(force = false) {
         if (isCallService || ccosData) {
             if (ccosData && ccosData.has_file && Array.isArray(ccosData.files) && ccosData.files.length > 0) {
                 ccosAttachmentHtml = `
-                    <div style="margin-top:8px; padding:7px 10px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; font-size:11.5px;">
+                    <div style="margin-top:8px; padding:7px 10px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:2px; font-size:11.5px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                             <span style="font-weight:700; color:#1e40af; display:inline-flex; align-items:center; gap:4px;">
                                 📎 File đính kèm CCOS ${ccosData.kn_code ? `(${escapeHtml(ccosData.kn_code)})` : ''}:
                             </span>
-                            <span style="font-size:10px; color:#1d4ed8; background:#dbeafe; padding:1px 6px; border-radius:3px; font-weight:700;">${ccosData.files.length} file</span>
+                            <span style="font-size:10px; color:#1d4ed8; background:#dbeafe; padding:1px 6px; border-radius:2px; font-weight:700;">${ccosData.files.length} file</span>
                         </div>
                         <div style="display:flex; flex-direction:column; gap:4px;">
                             ${ccosData.files.map(f => `
@@ -4797,10 +5215,10 @@ function renderTicketsTable(force = false) {
                         </div>
                     </div>
                 `;
-                compactSummaryHtml = `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-weight:700; font-size:9.5px; padding:1px 5px; border-radius:3px; margin-right:4px;" title="Có ${ccosData.files.length} file đính kèm trên CCOS">📎 File (${ccosData.files.length})</span>` + compactSummaryHtml;
+                compactSummaryHtml = `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-weight:700; font-size:9.5px; padding:1px 5px; border-radius:2px; margin-right:4px;" title="Có ${ccosData.files.length} file đính kèm trên CCOS">📎 File (${ccosData.files.length})</span>` + compactSummaryHtml;
             } else {
                 ccosAttachmentHtml = `
-                    <div style="margin-top:8px; padding:5px 8px; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:4px; font-size:11px; color:#64748b; display:inline-flex; align-items:center; gap:5px;">
+                    <div style="margin-top:8px; padding:5px 8px; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:2px; font-size:11px; color:#64748b; display:inline-flex; align-items:center; gap:5px;">
                         📎 File đính kèm: <span style="font-style:italic;">Không có file đính kèm</span>
                     </div>
                 `;
@@ -4844,7 +5262,7 @@ function renderTicketsTable(force = false) {
                     <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
                         <span class="badge-status badge-green" style="font-weight:700; font-size:10px; padding:2px 7px;">ĐÃ CÓ CAM KẾT</span>
                         ${ccosFiles.map(f => `
-                            <a href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer" style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:700; color:#0284c7; background:#f0f9ff; border:1px solid #bae6fd; padding:1.5px 5px; border-radius:3px; text-decoration:none; margin-top:1px; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="Bấm để tải/xem bản cam kết CCOS: ${escapeHtml(f.name)}">
+                            <a href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer" style="display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:700; color:#0284c7; background:#f0f9ff; border:1px solid #bae6fd; padding:1.5px 5px; border-radius:2px; text-decoration:none; margin-top:1px; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="Bấm để tải/xem bản cam kết CCOS: ${escapeHtml(f.name)}">
                                 <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                                 <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(f.name)}</span>
                             </a>
@@ -5148,16 +5566,16 @@ function renderTicketsTable(force = false) {
             if (currentService === 'call' || currentService === 'sms' || currentService === 'roaming' || currentService === 'sim') {
                 const isLocked = isNamLocked || raw.includes('NAM: 1') || raw.includes('Khóa dịch vụ') || raw.includes('Khóa GPRS');
                 const callStatusBadge = isLocked
-                    ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:11px; padding:3px 8px; border-radius:4px; display:inline-block; font-weight:700;">NAM: 1 (KHÓA DỊCH VỤ)</span>`
-                    : `<span style="background:#dcfce7; color:#15803d; border:1px solid #86efac; font-size:11px; padding:3px 8px; border-radius:4px; display:inline-block; font-weight:700;">NAM: 0 (MỞ DỊCH VỤ)</span>`;
+                    ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:11px; padding:3px 8px; border-radius:2px; display:inline-block; font-weight:700;">NAM: 1 (KHÓA DỊCH VỤ)</span>`
+                    : `<span style="background:#dcfce7; color:#15803d; border:1px solid #86efac; font-size:11px; padding:3px 8px; border-radius:2px; display:inline-block; font-weight:700;">NAM: 0 (MỞ DỊCH VỤ)</span>`;
 
                 const hssDigits = (hssVal || '').replace(/\D/g, '');
                 const isStrangeHss = (hssDigits.length >= 3 && ((ipVal || '').startsWith('113.') || (ipVal || '').startsWith('172.') || (ipVal || '').startsWith('192.168.'))) || hssVal.includes('PROFILE LẠ');
                 let hssBadge = '';
                 if (isStrangeHss) {
-                    hssBadge = `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:11px; padding:2px 7px; border-radius:4px; display:inline-block; font-weight:700;" title="Cảnh báo HSS Profile lạ: có thể lỗi cấu hình hoặc chưa kích hoạt VoLTE đúng cách">⚠️ HSS: ${escapeHtml(hssVal)} (PROFILE LẠ)</span>`;
+                    hssBadge = `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; font-size:11px; padding:2px 7px; border-radius:2px; display:inline-block; font-weight:700;" title="Cảnh báo HSS Profile lạ: có thể lỗi cấu hình hoặc chưa kích hoạt VoLTE đúng cách">⚠️ HSS: ${escapeHtml(hssVal)} (PROFILE LẠ)</span>`;
                 } else if (hssVal) {
-                    hssBadge = `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-size:11px; padding:2px 7px; border-radius:4px; display:inline-block; font-weight:700;" title="HSS Profile của thuê bao trên Core">HSS: ${escapeHtml(hssVal)}</span>`;
+                    hssBadge = `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-size:11px; padding:2px 7px; border-radius:2px; display:inline-block; font-weight:700;" title="HSS Profile của thuê bao trên Core">HSS: ${escapeHtml(hssVal)}</span>`;
                 } else {
                     hssBadge = `<span style="color:#94a3b8; font-size:10.5px;">HSS: --</span>`;
                 }
@@ -5167,7 +5585,7 @@ function renderTicketsTable(force = false) {
                 const noPkgText = (currentService === 'sms') ? 'Không có gói tin nhắn riêng' : ((currentService === 'roaming') ? 'Không có gói CVQT riêng' : ((currentService === 'sim') ? 'Không có thông tin SIM riêng' : 'Không có gói thoại riêng'));
                 if (sapcItems.length > 0) {
                     pkgContent = `
-                        <div style="margin-top:6px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px;">
+                        <div style="margin-top:6px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:2px; padding:6px 8px;">
                             <div style="color:#64748b; font-size:10px; font-weight:700; text-transform:uppercase; margin-bottom:3px;">${pkgTitleSection}</div>
                             ${sapcItems.map(item => `
                                 <div style="margin-top:3px; font-size:11px;">
@@ -5194,13 +5612,13 @@ function renderTicketsTable(force = false) {
                 let cParts = [];
                 if (hssVal) {
                     if (isStrangeHss) {
-                        cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">HSS: ${escapeHtml(hssVal)} (LẠ)</span>`);
+                        cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:2px; border:1px solid #fca5a5;">HSS: ${escapeHtml(hssVal)} (LẠ)</span>`);
                     } else {
-                        cParts.push(`<span style="background:#eff6ff; color:#1d4ed8; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #bfdbfe;">HSS: ${escapeHtml(hssVal)}</span>`);
+                        cParts.push(`<span style="background:#eff6ff; color:#1d4ed8; font-weight:700; padding:1px 5px; border-radius:2px; border:1px solid #bfdbfe;">HSS: ${escapeHtml(hssVal)}</span>`);
                     }
                 }
                 cParts.push(isLocked
-                    ? `<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 6px; border-radius:3px;">NAM: 1 (Khóa)</span>`
+                    ? `<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 6px; border-radius:2px;">NAM: 1 (Khóa)</span>`
                     : `<span style="color:#15803d; font-weight:700; font-family:'JetBrains Mono', monospace;">NAM: 0 (Mở)</span>`
                 );
                 if (sapcLines.length > 0) {
@@ -5211,7 +5629,7 @@ function renderTicketsTable(force = false) {
             } else {
                 let refinedBtoolsText = btoolsLines.length > 0 ? refineBtoolsWithSapc(btoolsLines.join(' '), sapcItems, t) : '';
                 let btoolsHtml = `
-                    <div style="font-size:10.5px; line-height:1.4; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; margin-top:4px; min-width:0; width:100%; box-sizing:border-box; word-break:break-word; overflow-wrap:anywhere;">
+                    <div style="font-size:10.5px; line-height:1.4; background:#ffffff; border:1px solid #e2e8f0; border-radius:2px; padding:6px 8px; margin-top:4px; min-width:0; width:100%; box-sizing:border-box; word-break:break-word; overflow-wrap:anywhere;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
                             <strong style="color:#b45309; font-size:10px; text-transform:uppercase; letter-spacing:0.03em;">Data Usage (BTools):</strong>
                             <a href="${btoolsUrl}" target="_blank" style="font-size:10.5px; color:#b45309; font-weight:700; text-decoration:none;" title="Tra cứu BTools cho thuê bao ${t.phone}">Xem BTools ↗</a>
@@ -5240,11 +5658,11 @@ function renderTicketsTable(force = false) {
                     const hssDigits = targetHss.replace(/\D/g, '');
                     const isStrangeHssTag = (hssDigits.length >= 3 && ((ipVal || '').startsWith('113.') || (ipVal || '').startsWith('172.') || (ipVal || '').startsWith('192.168.'))) || targetHss.includes('PROFILE LẠ');
                     if (isStrangeHssTag) {
-                        cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">HSS: ${escapeHtml(targetHss)} (PROFILE LẠ)</span>`);
+                        cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:2px; border:1px solid #fca5a5;">HSS: ${escapeHtml(targetHss)} (PROFILE LẠ)</span>`);
                     }
                 }
                 if (raw.includes('NAM: 1') || raw.includes('Khóa GPRS')) {
-                    cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:3px; border:1px solid #fca5a5;">Khóa GPRS</span>`);
+                    cParts.push(`<span style="background:#fee2e2; color:#b91c1c; font-weight:700; padding:1px 5px; border-radius:2px; border:1px solid #fca5a5;">Khóa GPRS</span>`);
                 } else if (raw.includes('NAM: 0')) {
                     cParts.push(`<span style="color:#475569; font-weight:600; font-family:'JetBrains Mono', monospace;">NAM: 0</span>`);
                 }
@@ -5304,7 +5722,7 @@ function renderTicketsTable(force = false) {
             let rendered = lines.map(line => {
                 if (line.includes('CẢNH BÁO VPN') || line.includes('⚠️') || line.toLowerCase().includes('vpn') || line.includes('1.1.1.1')) {
                     if (showVpnAlert) {
-                        return `<div style="margin-top:3px; padding:2px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:3px; font-weight:700; font-size:10px;">CẢNH BÁO VPN: ${escapeHtml(line.replace(/^[⚠️\s*]+/, '').replace(/^CẢNH BÁO VPN:\s*/i, ''))}</div>`;
+                        return `<div style="margin-top:3px; padding:2px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:2px; font-weight:700; font-size:10px;">CẢNH BÁO VPN: ${escapeHtml(line.replace(/^[⚠️\s*]+/, '').replace(/^CẢNH BÁO VPN:\s*/i, ''))}</div>`;
                     }
                     return `<div style="margin-top:2px; color:#64748b; font-size:10px;">${escapeHtml(line.replace(/^[⚠️ℹ️\s*]+/, ''))}</div>`;
                 }
@@ -5324,7 +5742,7 @@ function renderTicketsTable(force = false) {
                 return `<div style="margin-top:2px; word-break:break-word; overflow-wrap:anywhere; white-space:normal;">${escapeHtml(line)}</div>`;
             });
             if (!isIncident && showVpnAlert && vpnAppName && !rawText.includes('VPN')) {
-                rendered.push(`<div style="margin-top:3px; padding:2px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:3px; font-weight:700; font-size:10px;">CẢNH BÁO VPN: Phát hiện thiết bị có app ${escapeHtml(vpnAppName)}</div>`);
+                rendered.push(`<div style="margin-top:3px; padding:2px 6px; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:2px; font-weight:700; font-size:10px;">CẢNH BÁO VPN: Phát hiện thiết bị có app ${escapeHtml(vpnAppName)}</div>`);
             }
             return rendered.join('');
         }
@@ -5415,20 +5833,20 @@ function renderTicketsTable(force = false) {
 
             const appCount = parseInt(t.appearance_count || 1, 10);
             const appBadgeHtml = (appCount > 1) 
-                ? `<span style="font-size:9.5px; font-weight:700; color:#4338ca; background:#e0e7ff; border:1px solid #c7d2fe; border-radius:3px; padding:1px 5px; margin-left:3px; white-space:nowrap;" title="Phiếu đã xuất hiện ${appCount} lần">Lần ${appCount}</span>` 
+                ? `<span style="font-size:9.5px; font-weight:700; color:#4338ca; background:#e0e7ff; border:1px solid #c7d2fe; border-radius:2px; padding:1px 5px; margin-left:3px; white-space:nowrap;" title="Phiếu đã xuất hiện ${appCount} lần">Lần ${appCount}</span>` 
                 : '';
 
             ticketCodeHtml = `
                 <div>
                     <div style="display:flex; align-items:center; gap:4px;">
-                        <span style="color:#0f172a; font-weight:700; font-size:11.5px;">
+                        <span style="color:#0f172a; font-weight:700; font-size:11.5px; font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-feature-settings:'tnum';">
                             ${escapeHtml(mainCode || '--')}
                         </span>
                         ${appBadgeHtml}
                         ${newBeacon}
                     </div>
-                    ${procName ? `<div style="font-size:10px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:3px; margin-top:3px; display:inline-block;">${escapeHtml(procName)}</div>` : ''}
-                    ${stepName ? `<div style="font-size:10.5px; font-weight:500; color:#475569; margin-top:2px; line-height:1.25;">${escapeHtml(stepName)}</div>` : ''}
+                    ${procName ? `<div style="font-size:10px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:2px; margin-top:3px; display:inline-block; font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-feature-settings:'tnum';">${escapeHtml(procName)}</div>` : ''}
+                    ${stepName ? `<div style="font-size:10.5px; font-weight:500; color:#475569; margin-top:2px; line-height:1.25; font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-feature-settings:'tnum';">${escapeHtml(stepName)}</div>` : ''}
                     ${reopenBadgeHtml}
                 </div>
             `;
@@ -5463,7 +5881,7 @@ function renderTicketsTable(force = false) {
                         ${appBadgeHtml}
                         ${newBeacon}
                         ${reopenCount > 0 ? `
-                            <span class="badge-status" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; font-weight:800; font-size:9.5px; padding:1px 5px; border-radius:3px; white-space:nowrap; display:inline-flex; align-items:center; gap:3px;" title="${hasReopenFlag ? 'Phiếu mở lại: CCOS trả về kiểm tra lại' : `Phiếu mở lại ${reopenCount} lần`}">
+                            <span class="badge-status" style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; font-weight:800; font-size:9.5px; padding:1px 5px; border-radius:2px; white-space:nowrap; display:inline-flex; align-items:center; gap:3px;" title="${hasReopenFlag ? 'Phiếu mở lại: CCOS trả về kiểm tra lại' : `Phiếu mở lại ${reopenCount} lần`}">
                                 <svg viewBox="0 0 24 24" width="11" height="11" fill="#dc2626" stroke="#dc2626" stroke-width="1"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1z"></path><line x1="4" y1="22" x2="4" y2="15" stroke-width="2.2"></line></svg>
                                 <span>MỞ LẠI</span>
                             </span>` : ''}
@@ -5471,12 +5889,12 @@ function renderTicketsTable(force = false) {
                     <!-- Dòng 2: Tên Quy trình (nếu có) -->
                     ${procName ? `
                     <div style="line-height:1.2; white-space:nowrap;">
-                        <span style="font-size:9.5px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:3px; display:inline-block; max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:-apple-system, BlinkMacSystemFont, sans-serif;" title="Quy trình: ${escapeHtml(procName)}">${escapeHtml(procName)}</span>
+                        <span class="proc-mono-tag" style="font-size:9.5px; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; padding:1px 5px; border-radius:2px; display:inline-block; max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-feature-settings:'tnum';" title="Quy trình: ${escapeHtml(procName)}">${escapeHtml(procName)}</span>
                     </div>` : ''}
                     <!-- Dòng 3: Tên bước hiện tại -->
                     <div style="line-height:1.2; white-space:nowrap;">
                         ${stepName 
-                            ? `<span style="font-size:9.5px; font-weight:600; color:${stepColor}; background:${stepBg}; border:1px solid ${stepBorder}; padding:1px 5px; border-radius:3px; display:inline-block; max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:-apple-system, BlinkMacSystemFont, sans-serif;" title="Bước hiện tại: ${escapeHtml(stepName)}">${escapeHtml(stepName)}</span>`
+                            ? `<span class="step-mono-tag" style="font-size:9.5px; font-weight:600; color:${stepColor}; background:${stepBg}; border:1px solid ${stepBorder}; padding:1px 5px; border-radius:2px; display:inline-block; max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-feature-settings:'tnum';" title="Bước hiện tại: ${escapeHtml(stepName)}">${escapeHtml(stepName)}</span>`
                             : `<span style="color:#94a3b8; font-size:10px; font-style:italic;">--</span>`
                         }
                     </div>
@@ -5517,7 +5935,7 @@ function renderTicketsTable(force = false) {
 
         let compactPakhTypeHtml = (displayPakhType === '--')
             ? '<span style="color:#94a3b8; font-size:11px;">--</span>'
-            : `<span class="badge-status" style="${pakhBadgeStyle} font-size:9.5px; font-weight:700; padding:2px 6px; border-radius:3px; display:inline-flex; align-items:center; max-width:100%; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${escapeHtml(rawPakhType || displayPakhType)}">${escapeHtml(displayPakhType)}</span>`;
+            : `<span class="badge-status" style="${pakhBadgeStyle} font-size:9.5px; font-weight:700; padding:2px 6px; border-radius:2px; display:inline-flex; align-items:center; max-width:100%; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${escapeHtml(rawPakhType || displayPakhType)}">${escapeHtml(displayPakhType)}</span>`;
 
         return `
                     <!-- 1 DÒNG GỌN CHÍNH (COMPACT ROW) -->
@@ -5542,8 +5960,8 @@ function renderTicketsTable(force = false) {
                         ` : ''}
                         <td style="vertical-align:middle; text-align:center; padding:2px 4px; white-space:nowrap;">
                             <div style="display:inline-flex; align-items:center; justify-content:center; gap:3px;">
-                                <span style="font-family:'JetBrains Mono', monospace; font-weight:700; font-size:11.5px; color:#0f172a; letter-spacing:0.2px;">
-                                    ${escapeHtml(t.phone)}
+                                <span style="font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-feature-settings:'tnum'; font-weight:700; font-size:11.5px; color:#0f172a; letter-spacing:0.2px;" title="${escapeHtml(t.phone)}">
+                                    ${escapeHtml(formatPhone9Digits(t.phone))}
                                 </span>
                             </div>
                         </td>
@@ -5552,10 +5970,12 @@ function renderTicketsTable(force = false) {
                         </td>
                         <td style="text-align:center; vertical-align:middle; padding:2px 3px; white-space:nowrap;">
                             ${(() => {
-                                const incDisplay = formatIncidentTimeDisplay(t.incident_time, t.ticket_code);
-                                const deadlineVal = String(t.deadline_overall || t.deadlineOverall || '').trim();
+                                const incDisplay = getTicketReceiptDisplay(t);
+                                const incProblemDisplay = formatIncidentTimeDisplay(t.incident_time, t.ticket_code);
+                                const deadlineVal = String(t.deadline || t.sla_date_step || t.slaDateStep || t.deadline_overall || t.deadlineOverall || t.sla_date || t.slaDate || t.customer_completion_date || t.customerCompletionDate || '').trim();
                                 let deadlineTooltip = '';
                                 let warningClass = '';
+                                let formattedDdMmYyyy = '';
 
                                 // CHỈ CẢNH BÁO CHO PHIẾU CHƯA ĐÓNG
                                 const stRaw = String(t.ticket_status || t.ticketStatus || '').trim().toLowerCase();
@@ -5563,11 +5983,9 @@ function renderTicketsTable(force = false) {
                                     Boolean(t.is_closed) ||
                                     Boolean(t.closed_at && t.closed_at !== '--' && t.closed_at !== 'null') ||
                                     stRaw.includes('đã đóng') || stRaw.includes('da dong') ||
-                                    stRaw.includes('hoàn tất') || stRaw.includes('hoàn thành') ||
-                                    stRaw.includes('chuyển 2.4') || stRaw.includes('chuyển 5.1') ||
-                                    stRaw.includes('chuyển 2.6') || stRaw.includes('đã chuyển');
+                                    stRaw.includes('hoàn tất') || stRaw.includes('hoàn thành');
 
-                                if (!isClosed && deadlineVal && deadlineVal !== '--' && deadlineVal !== 'null' && deadlineVal !== 'None') {
+                                if (deadlineVal && deadlineVal !== '--' && deadlineVal !== 'null' && deadlineVal !== 'None') {
                                     let day, month, year, timeStr = '';
                                     const mSlash = deadlineVal.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:[\sT]+(\d{1,2}:\d{1,2}))?/);
                                     const mIso = deadlineVal.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[\sT]+(\d{1,2}:\d{1,2}))?/);
@@ -5598,7 +6016,7 @@ function renderTicketsTable(force = false) {
                                         } else if (p2 > 12) {
                                             day = p2; month = p1 - 1;
                                         } else {
-                                            // Cả 2 số đều <= 12: Thẩm định logic viễn thông (Hạn SLA toàn trình phải >= ngày tiếp nhận)
+                                            // Cả 2 số đều <= 12: Thẩm định logic viễn thông (Hạn SLA phải >= ngày tiếp nhận)
                                             const optVN = new Date(year, p2 - 1, p1);
                                             const optUS = new Date(year, p1 - 1, p2);
 
@@ -5643,7 +6061,7 @@ function renderTicketsTable(force = false) {
                                     }
 
                                     if (day && month !== undefined && !isNaN(year)) {
-                                        const formattedDdMmYyyy = `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`;
+                                        formattedDdMmYyyy = `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`;
 
                                         const now = new Date();
                                         const twoDaysLaterEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2, 23, 59, 59, 999);
@@ -5656,25 +6074,49 @@ function renderTicketsTable(force = false) {
                                             dlDate = new Date(year, month, day, 23, 59, 59);
                                         }
 
-                                        // 1. ĐÃ QUÁ HẠN TOÀN TRÌNH: dlDate < now (Đỏ khẩn cấp)
+                                        // 1. ĐÃ QUÁ HẠN BƯỚC: dlDate < now (Đỏ khẩn cấp)
                                         if (dlDate < now) {
-                                            warningClass = 'cell-deadline-overdue';
-                                            deadlineTooltip = `(ĐÃ QUÁ HẠN TOÀN TRÌNH: ${formattedDdMmYyyy}${timeStr ? ' ' + timeStr : ''})`;
+                                            if (!isClosed) warningClass = 'cell-deadline-overdue';
+                                            deadlineTooltip = `(ĐÃ QUÁ HẠN BƯỚC: ${formattedDdMmYyyy}${timeStr ? ' ' + timeStr : ''})`;
                                         }
-                                        // 2. SẮP QUÁ HẠN TOÀN TRÌNH TRONG 2 NGÀY: dlDate <= Hôm nay + 2 ngày (Cam vàng ưu tiên 48h)
+                                        // 2. SẮP QUÁ HẠN BƯỚC TRONG 2 NGÀY: dlDate <= Hôm nay + 2 ngày (Cam vàng ưu tiên 48h)
                                         else if (dlDate <= twoDaysLaterEnd) {
-                                            warningClass = 'cell-deadline-impending';
-                                            deadlineTooltip = `(SẮP QUÁ HẠN TOÀN TRÌNH: ${formattedDdMmYyyy}${timeStr ? ' ' + timeStr : ''})`;
+                                            if (!isClosed) warningClass = 'cell-deadline-impending';
+                                            deadlineTooltip = `(SẮP QUÁ HẠN BƯỚC: ${formattedDdMmYyyy}${timeStr ? ' ' + timeStr : ''})`;
                                         } else {
-                                            deadlineTooltip = `(Quá hạn toàn trình: ${formattedDdMmYyyy}${timeStr ? ' ' + timeStr : ''})`;
+                                            deadlineTooltip = `(Hạn xử lý bước: ${formattedDdMmYyyy}${timeStr ? ' ' + timeStr : ''})`;
                                         }
                                     }
                                 }
 
-                                const titleAttr = deadlineTooltip 
-                                    ? `${deadlineTooltip} | Tiếp nhận: ${incDisplay}` 
-                                    : `Tiếp nhận: ${incDisplay}`;
+                                let subDlHtml = '';
+                                if (formattedDdMmYyyy) {
+                                    let dlColor = '#64748b';
+                                    let dlLabel = 'Hạn: ' + formattedDdMmYyyy.slice(0, 5);
+                                    if (warningClass === 'cell-deadline-overdue') {
+                                        dlColor = '#ef4444';
+                                        dlLabel = 'Quá hạn: ' + formattedDdMmYyyy.slice(0, 5);
+                                    } else if (warningClass === 'cell-deadline-impending') {
+                                        dlColor = '#d97706';
+                                        dlLabel = 'Sắp hạn: ' + formattedDdMmYyyy.slice(0, 5);
+                                    }
+                                    subDlHtml = `<span style="font-size:9.5px; color:${dlColor}; font-weight:700; font-family:'JetBrains Mono', monospace; line-height:1.1; margin-top:1px;" title="${escapeHtml(deadlineTooltip || ('Hạn xử lý bước: ' + formattedDdMmYyyy))}">${dlLabel}</span>`;
+                                }
 
+                                let hoverTitle = `Tiếp nhận: ${incDisplay}`;
+                                if (incProblemDisplay && incProblemDisplay !== '--' && incProblemDisplay !== incDisplay) {
+                                    hoverTitle += `\nSự cố phản ánh (khách báo): ${incProblemDisplay}`;
+                                }
+                                const titleAttr = deadlineTooltip 
+                                    ? `${deadlineTooltip}\n${hoverTitle}` 
+                                    : hoverTitle;
+
+                                if (subDlHtml) {
+                                    return `<div style="display:inline-flex; flex-direction:column; align-items:center; justify-content:center;">
+                                        <span class="table-time-val ${warningClass}" title="${escapeHtml(titleAttr)}">${escapeHtml(incDisplay)}</span>
+                                        ${subDlHtml}
+                                    </div>`;
+                                }
                                 return `<span class="table-time-val ${warningClass}" title="${escapeHtml(titleAttr)}">${escapeHtml(incDisplay)}</span>`;
                             })()}
                         </td>
@@ -5683,8 +6125,8 @@ function renderTicketsTable(force = false) {
                         <!-- Cột Thời Điểm Sự Cố (Chỉ phân hệ SMS) -->
                         <td style="text-align:center; vertical-align:middle; padding:2px 4px; white-space:nowrap;">
                             ${(() => {
-                                const incTimeVal = t.sms_incident_time || (extractSmsIncidentDetails(t.ticket_content || t.ai_summary || '', t.incident_time || '', t.created_time || '').incidentTime) || '--';
-                                return `<span style="display:inline-block; padding:2px 6px; border-radius:4px; font-weight:700; font-size:10.5px; background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-family:'JetBrains Mono', monospace; cursor:pointer;" title="Click để điều chỉnh mốc thời gian sự cố này" onclick="openEditIncidentTimeModal(event, '${escapeHtml(t.phone || '')}', '${escapeHtml(t.incident_time || '')}', ${t.ticket_id || 0}, '${escapeHtml(incTimeVal).replace(/'/g, "\\'")}')">${escapeHtml(incTimeVal)}</span>`;
+                                const incTimeVal = t.sms_incident_time || (extractSmsIncidentDetails(t.ticket_content || t.ai_summary || '', t.incident_time || '', t.created_time || '').timeRangeDesc) || '--';
+                                return `<span style="display:inline-block; padding:2px 6px; border-radius:2px; font-weight:700; font-size:10.5px; background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-family:'JetBrains Mono', monospace; cursor:pointer;" title="Click để điều chỉnh mốc thời gian sự cố này" onclick="openEditIncidentTimeModal(event, '${escapeHtml(t.phone || '')}', '${escapeHtml(t.incident_time || '')}', ${t.ticket_id || 0}, '${escapeHtml(incTimeVal).replace(/'/g, "\\'")}')">${escapeHtml(incTimeVal)}</span>`;
                             })()}
                         </td>
                         <!-- Cột Lịch Sử Nhắn Tin (Chỉ phân hệ SMS) -->
@@ -5722,7 +6164,7 @@ function renderTicketsTable(force = false) {
                                         `;
                                     }
                                     return `
-                                        <button type="button" class="btn btn-sm" onclick="fetchInlineSmsCdr('${escapeHtml(t.phone)}', '${escapeHtml(t.incident_time || '')}', '${escapeHtml(ticketKey)}', this, event)" style="padding:2px 8px; font-size:11px; font-weight:700; color:#0d9488; background:#f0fdfa; border:1px solid #99f6e4; border-radius:4px; cursor:pointer;" title="Tra cứu lịch sử tin nhắn CDR theo thời điểm phản ánh">
+                                        <button type="button" class="btn btn-sm" onclick="fetchInlineSmsCdr('${escapeHtml(t.phone)}', '${escapeHtml(t.incident_time || '')}', '${escapeHtml(ticketKey)}', this, event)" style="padding:2px 8px; font-size:11px; font-weight:700; color:#0d9488; background:#f0fdfa; border:1px solid #99f6e4; border-radius:2px; cursor:pointer;" title="Tra cứu lịch sử tin nhắn CDR theo thời điểm phản ánh">
                                             Lấy CDR
                                         </button>
                                     `;
@@ -5753,7 +6195,7 @@ function renderTicketsTable(force = false) {
                                         ? `<span style="font-family:'JetBrains Mono', monospace; font-weight:600; color:#0f172a;">${escapeHtml(cleanCellText)}</span>`
                                         : `<span style="color:#94a3b8; font-family:'JetBrains Mono', monospace;">--</span>`;
                                     const vpnBadge = vpnAppName
-                                        ? `<span style="display:inline-block; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:3px; font-weight:700; font-size:9.5px; padding:0 5px; margin-left:3px;" title="Cảnh báo: Thiết bị có cài đặt/dùng app VPN (${escapeHtml(vpnAppName)})">⚠️ VPN: ${escapeHtml(vpnAppName)}</span>`
+                                        ? `<span style="display:inline-block; background:#fee2e2; color:#b91c1c; border:1px solid #f87171; border-radius:2px; font-weight:700; font-size:9.5px; padding:0 5px; margin-left:3px;" title="Cảnh báo: Thiết bị có cài đặt/dùng app VPN (${escapeHtml(vpnAppName)})">⚠️ VPN: ${escapeHtml(vpnAppName)}</span>`
                                         : '';
                                     return cellSpan + (vpnBadge ? ' ' + vpnBadge : '');
                                 })()}
@@ -5764,7 +6206,7 @@ function renderTicketsTable(force = false) {
                         ` : ''}
                         <td style="vertical-align:middle; padding:2px 6px; text-align:left;">
                             ${(currentTableTab === 'da_dong') 
-                                ? `<div>${formatClosedTimeDisplay(t.closed_at || t.updated_at, t.closed_by, t.ticket_status)}${(() => {
+                                ? `<div>${formatClosedTimeDisplay(t.closed_at || t.updated_at, t.closed_by, t.ticket_status, ccosBadgeHtml)}${(() => {
                                     const shortDesc = (t.ticket_content || t.ai_summary || '').replace(/\n/g, ' ').trim();
                                     return shortDesc ? `<div class="compact-ellipsis" style="font-size:10px; color:#64748b; max-width:210px; margin:3px 0 0 0; text-align:left; line-height:1.25;" title="${escapeHtml(shortDesc)}">${escapeHtml(shortDesc)}</div>` : '';
                                 })()}</div>`
@@ -5773,23 +6215,27 @@ function renderTicketsTable(force = false) {
                                         const parsedSms = extractSmsIncidentDetails(t.ticket_content || t.ai_summary || '', t.incident_time || '');
                                         const probVal = t.sms_problem || parsedSms.problemSummary;
                                         if (probVal) {
-                                            const devText = parsedSms.deviceType ? `<span style="display:inline-block; font-size:9.5px; color:#4338ca; background:#e0e7ff; border:1px solid #c7d2fe; padding:0 4px; border-radius:3px; margin-right:3px;">${escapeHtml(parsedSms.deviceType)}</span>` : '';
-                                            const actText = (parsedSms.priorActions && parsedSms.priorActions.length > 0) ? `<span style="display:inline-block; font-size:9.5px; color:#475569; background:#f1f5f9; border:1px solid #cbd5e1; padding:0 4px; border-radius:3px; margin-right:3px;">${escapeHtml(parsedSms.priorActions.join(', '))}</span>` : '';
+                                            const devText = parsedSms.deviceType ? `<span style="display:inline-block; font-size:9.5px; color:#4338ca; background:#e0e7ff; border:1px solid #c7d2fe; padding:0 4px; border-radius:2px; margin-right:3px;">${escapeHtml(parsedSms.deviceType)}</span>` : '';
+                                            const actText = (parsedSms.priorActions && parsedSms.priorActions.length > 0) ? `<span style="display:inline-block; font-size:9.5px; color:#475569; background:#f1f5f9; border:1px solid #cbd5e1; padding:0 4px; border-radius:2px; margin-right:3px;">${escapeHtml(parsedSms.priorActions.join(', '))}</span>` : '';
                                             const anomText = '';
                                             return `
                                                 <div style="font-size:11.5px; line-height:1.4; text-align:left; padding:1px 0;">
                                                     <div style="margin-bottom:3px; font-weight:600; color:#0f172a; font-size:11px;">
-                                                        <span style="color:#b45309; font-weight:700; font-size:10px; background:#fffbeb; border:1px solid #fde68a; padding:1px 5px; border-radius:3px; margin-right:4px;">Lỗi cụ thể:</span>
+                                                        <span style="color:#b45309; font-weight:700; font-size:10px; background:#fffbeb; border:1px solid #fde68a; padding:1px 5px; border-radius:2px; margin-right:4px;">Lỗi cụ thể:</span>
                                                         ${escapeHtml(probVal)}
                                                     </div>
                                                     ${(devText || actText) ? `<div style="margin-bottom:2px; line-height:1.3;">${devText}${actText}</div>` : ''}
                                                     ${anomText}
-                                                    ${t.ticket_content ? `
-                                                    <details style="margin-top:2px; font-size:10px; border-top:1px dashed #e2e8f0; padding-top:2px;">
-                                                        <summary style="cursor:pointer; color:#64748b; font-weight:600; outline:none;">Xem phản ánh gốc</summary>
-                                                        <div style="margin-top:2px; color:#475569; font-size:10px; line-height:1.35; white-space:pre-wrap; max-height:80px; overflow-y:auto; background:#f8fafc; padding:3px 5px; border-radius:3px;">${escapeHtml(t.ticket_content)}</div>
-                                                    </details>
-                                                    ` : ''}
+                                                    ${(t.ticket_content || t.processing_content) ? (() => {
+                                                        const cleanColContent = decodeHtmlEntities(String(t.ticket_content || '')).trim().replace(/^[\r\n\s]+/, '').replace(/[\r\n\s]+$/, '');
+                                                        const cleanColProc = decodeHtmlEntities(String(t.processing_content || '')).trim().replace(/^[\r\n\s]+/, '').replace(/[\r\n\s]+$/, '');
+                                                        return `
+                                                        <details style="margin-top:2px; font-size:10px; border-top:1px dashed #e2e8f0; padding-top:2px;">
+                                                            <summary style="cursor:pointer; color:#0369a1; font-weight:600; outline:none; user-select:none;">Xem phản ánh gốc</summary>
+                                                            <div class="raw-ticket-inner-box" style="margin-top:2px; font-size:10px; line-height:1.35; background:#f8fafc; padding:4px 6px; border-radius:2px; border:1px solid #e2e8f0; text-align:left;">${cleanColProc ? `<div style="font-size:9.5px; font-weight:700; color:#475569; margin-bottom:1px;">NỘI DUNG PHẢN ÁNH:</div><div style="white-space:pre-wrap; color:#334155; margin-bottom:4px;">${escapeHtml(cleanColContent || 'Không có nội dung phản ánh')}</div><div style="font-size:9.5px; font-weight:700; color:#0d9488; margin-bottom:1px; border-top:1px dashed #cbd5e1; padding-top:3px;">NỘI DUNG XỬ LÝ CCOS:</div><div style="white-space:pre-wrap; color:#0f766e; background:#f0fdfa; padding:3px 5px; border-radius:2px; border:1px solid #ccfbf1; font-family:'JetBrains Mono', Consolas, monospace;">${escapeHtml(cleanColProc)}</div>` : `<div style="white-space:pre-wrap; color:#334155;">${escapeHtml(cleanColContent || 'Không có nội dung phản ánh')}</div>`}</div>
+                                                        </details>
+                                                        `;
+                                                    })() : ''}
                                                 </div>
                                             `;
                                         }
@@ -5838,9 +6284,9 @@ function renderTicketsTable(force = false) {
                                         <span>${isSpamCallModule ? 'TÓM TẮT NỘI DUNG & CAM KẾT' : 'TÓM TẮT NỘI DUNG PHẢN ÁNH'}</span>
                                         <span style="font-size:10px; color:#64748b; font-family:'JetBrains Mono', monospace;">${escapeHtml(t.package_title || '')}</span>
                                     </div>
-                                    <div style="flex:1; overflow-y:auto; overflow-x:hidden; max-height:290px; word-break:break-word; overflow-wrap:anywhere; white-space:normal; box-sizing:border-box;">
+                                    <div style="flex:1; overflow-y:auto; overflow-x:hidden; max-height:380px; word-break:break-word; overflow-wrap:anywhere; white-space:normal; box-sizing:border-box;">
                                         ${isSpamCallModule ? `
-                                            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:8px 10px; margin-bottom:8px;">
+                                            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:2px; padding:8px 10px; margin-bottom:8px;">
                                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                                                     <span style="font-size:11.5px; font-weight:700; color:#166534;">TÌNH TRẠNG CAM KẾT:</span>
                                                     ${commitmentColumnHtml}
@@ -5863,7 +6309,7 @@ function renderTicketsTable(force = false) {
                                         <span style="font-size:10.5px; color:#005baa; font-family:'JetBrains Mono', monospace; font-weight:700;">${escapeHtml(t.phone)}</span>
                                     </div>
                                     <div style="flex:1; overflow-y:auto; overflow-x:hidden; max-height:290px; font-size:11.5px; line-height:1.5; word-break:break-word; overflow-wrap:anywhere; white-space:normal; box-sizing:border-box;">
-                                        <div style="margin-bottom:8px; padding:8px 10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;">
+                                        <div style="margin-bottom:8px; padding:8px 10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:2px;">
                                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
                                                 <span style="color:#64748b;">Nhà mạng ảnh hưởng:</span>
                                                 <div>${carrierBadgesHtml}</div>
@@ -5881,7 +6327,7 @@ function renderTicketsTable(force = false) {
                                                 <span style="font-weight:700; color:#0284c7;">${escapeHtml(t.commitment_source || 'Chưa phát hiện')}</span>
                                             </div>
                                         </div>
-                                        <div style="padding:8px 10px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; font-size:11px; color:#1e40af;">
+                                        <div style="padding:8px 10px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:2px; font-size:11px; color:#1e40af;">
                                             <strong style="display:block; margin-bottom:3px;">Khuyến nghị xử lý KTV:</strong>
                                             ${hasCommit 
                                                 ? `<div style="color:#15803d; font-weight:600;">✓ Thuê bao đã nộp bản cam kết. KTV kiểm tra đối soát trên phân hệ Chặn Spam liên mạng và điều phối mở chặn theo quy trình.</div>` 
@@ -5895,7 +6341,7 @@ function renderTicketsTable(force = false) {
                                     <div class="detail-card-title">
                                         <span>THỐNG KÊ NHẬT KÝ TIN NHẮN (SMSC CDR)</span>
                                         <div style="display:flex; align-items:center; gap:8px;">
-                                            <button type="button" onclick="openSmscCdrModal('${t.phone}', event)" style="background:#f0fdfa; border:1px solid #99f6e4; color:#0d9488; font-size:10.5px; font-weight:700; border-radius:4px; padding:2px 8px; cursor:pointer;" title="Mở bảng tra cứu chi tiết toàn màn hình">Chi tiết CDR ↗</button>
+                                            <button type="button" onclick="openSmscCdrModal('${t.phone}', event)" style="background:#f0fdfa; border:1px solid #99f6e4; color:#0d9488; font-size:10.5px; font-weight:700; border-radius:2px; padding:2px 8px; cursor:pointer;" title="Mở bảng tra cứu chi tiết toàn màn hình">Chi tiết CDR ↗</button>
                                             <a href="http://10.165.15.29:8080/VNPT-GW/client/search" target="_blank" style="font-size:10.5px; color:#0369a1; font-weight:700; text-decoration:none;" title="Mở cổng tra cứu VNPT-GW (10.165.15.29:8080)">GW ↗</a>
                                             <a href="http://10.155.42.218/checkall#" target="_blank" style="font-size:10.5px; color:#005baa; font-weight:700; text-decoration:none;" title="Mở cổng tra cứu SAPC (10.155.42.218/checkall#)">SAPC ↗</a>
                                         </div>
@@ -5921,15 +6367,20 @@ function renderTicketsTable(force = false) {
                                                          <strong style="color:#0f172a; font-size:11px;">Dữ liệu CEM:</strong>
                                                          <a href="https://cem.vnptmedia.vn/" target="_blank" style="font-size:10.5px; color:#0284c7; font-weight:700; text-decoration:none;" title="Mở cổng CEM (cem.vnptmedia.vn)">CEM ↗</a>
                                                      </div>
-                                                     ${showVpnAlert && vpnAppName ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; font-weight:700; font-size:9.5px; padding:1px 6px; border-radius:3px;">CẢNH BÁO VPN: ${escapeHtml(vpnAppName)}</span>` : ''}
+                                                     ${showVpnAlert && vpnAppName ? `<span style="background:#fee2e2; color:#b91c1c; border:1px solid #f87171; font-weight:700; font-size:9.5px; padding:1px 6px; border-radius:2px;">CẢNH BÁO VPN: ${escapeHtml(vpnAppName)}</span>` : ''}
                                                  </div>
                                                  <div style="display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:6px; min-width:0; width:100%; box-sizing:border-box;">
-                                                     <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; display:flex; flex-direction:column; justify-content:space-between; min-width:0; word-break:break-word; overflow-wrap:anywhere; box-sizing:border-box;">
+                                                     <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:2px; padding:6px 8px; display:flex; flex-direction:column; justify-content:space-between; min-width:0; word-break:break-word; overflow-wrap:anywhere; box-sizing:border-box;">
                                                          <div>
                                                              <div style="font-weight:700; font-size:10.5px; color:#0369a1; border-bottom:1px solid #e2e8f0; padding-bottom:3px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
                                                                  <span>NGÀY TIẾP NHẬN</span>
                                                                  <span style="font-size:10px; font-weight:600; color:#475569;">${escapeHtml(incidentDateDisplay)}</span>
                                                              </div>
+                                                             ${(t.deadline || t.sla_date_step || t.deadline_overall || t.deadlineOverall) ? `
+                                                             <div style="font-size:10px; color:#b45309; border-bottom:1px solid #e2e8f0; padding-bottom:3px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
+                                                                 <span style="font-weight:700;">HẠN XỬ LÝ BƯỚC</span>
+                                                                 <span style="font-weight:700; color:#0284c7; font-family:'JetBrains Mono', monospace;">${escapeHtml(t.deadline || t.sla_date_step || t.deadline_overall || t.deadlineOverall)}</span>
+                                                             </div>` : ''}
                                                              <div style="font-size:10.5px; line-height:1.35; color:#334155; word-break:break-word; overflow-wrap:anywhere; white-space:normal;">
                                                                  ${cemIncidentHtml}
                                                              </div>
@@ -5938,7 +6389,7 @@ function renderTicketsTable(force = false) {
                                                              ${renderCemIncidentLocation(ticketKey, rawCemIncident, t.phone, t.incident_time)}
                                                          </div>
                                                      </div>
-                                                     <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:6px 8px; min-width:0; word-break:break-word; overflow-wrap:anywhere; box-sizing:border-box;">
+                                                     <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:2px; padding:6px 8px; min-width:0; word-break:break-word; overflow-wrap:anywhere; box-sizing:border-box;">
                                                          <div style="font-weight:700; font-size:10.5px; color:#059669; border-bottom:1px solid #e2e8f0; padding-bottom:3px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
                                                              <span>GẦN NHẤT CÓ DATA</span>
                                                              <span style="font-size:10px; font-weight:600; color:#475569;">5 ngày</span>
@@ -5982,13 +6433,13 @@ function renderTicketsTable(force = false) {
                                             const totalCausesCount = groups.reduce((acc, g) => acc + (g.items ? g.items.length : 0), 0);
 
                                             return `
-                                        <div style="display:flex; align-items:center; gap:6px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:5px; padding:3px 8px; margin-bottom:2px; min-width:0; width:100%; box-sizing:border-box;">
+                                        <div style="display:flex; align-items:center; gap:6px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:2px; padding:3px 8px; margin-bottom:2px; min-width:0; width:100%; box-sizing:border-box;">
                                             <span style="font-size:10.5px; font-weight:700; color:#475569; white-space:nowrap; flex-shrink:0;">Nguyên nhân:</span>
                                             <div class="cause-combobox-wrapper" style="position:relative; flex:1; min-width:0;">
                                                 <input type="text"
                                                        id="input-detail-cause-${ticketKey}"
                                                        class="searchable-cause-input"
-                                                       style="width:100%; height:24px; padding:1px 24px 1px 6px; font-size:11px; font-weight:600; color:#0f172a; border-radius:4px; border:1px solid #cbd5e1; background:#ffffff; outline:none; text-overflow:ellipsis; box-sizing:border-box;"
+                                                       style="width:100%; height:24px; padding:1px 24px 1px 6px; font-size:11px; font-weight:600; color:#0f172a; border-radius:2px; border:1px solid #cbd5e1; background:#ffffff; outline:none; text-overflow:ellipsis; box-sizing:border-box;"
                                                        placeholder="-- Gõ tìm kiếm nguyên nhân (${totalCausesCount} mục) --"
                                                        value="${escapeHtml(currentCause)}"
                                                        autocomplete="off"
@@ -6009,7 +6460,7 @@ function renderTicketsTable(force = false) {
                                                      class="cause-dropdown-menu"
                                                      data-phone="${escapeHtml(t.phone)}"
                                                      data-time="${escapeHtml(t.incident_time || '')}"
-                                                     style="display:none; position:absolute; top:calc(100% + 2px); left:0; width:100%; min-width:480px; max-width:720px; max-height:380px; overflow-y:auto; background:#ffffff; border:1px solid #cbd5e1; border-radius:6px; box-shadow:0 14px 28px -5px rgba(0,0,0,0.25), 0 10px 10px -5px rgba(0,0,0,0.1); z-index:99999; box-sizing:border-box;">
+                                                     style="display:none; position:absolute; top:calc(100% + 2px); left:0; width:100%; min-width:480px; max-width:720px; max-height:380px; overflow-y:auto; background:#ffffff; border:1px solid #cbd5e1; border-radius:2px; box-shadow:0 14px 28px -5px rgba(0,0,0,0.25), 0 10px 10px -5px rgba(0,0,0,0.1); z-index:99999; box-sizing:border-box;">
                                                 </div>
                                             </div>
                                             <div id="save-cause-${ticketKey}" class="save-indicator" style="margin:0; font-size:9.5px; padding:1px 6px; white-space:nowrap; flex-shrink:0;">Đã lưu</div>
@@ -6033,7 +6484,7 @@ function renderTicketsTable(force = false) {
 
                                         <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px; margin-top:4px; padding-top:6px; border-top:1px solid #f1f5f9;">
                                             ${reopenCount > 0 ? `
-                                                <div style="font-size:10.5px; font-weight:700; color:#b91c1c; background:#fee2e2; border:1px solid #fca5a5; padding:3px 8px; border-radius:4px; display:inline-flex; align-items:center; gap:5px;">
+                                                <div style="font-size:10.5px; font-weight:700; color:#b91c1c; background:#fee2e2; border:1px solid #fca5a5; padding:3px 8px; border-radius:2px; display:inline-flex; align-items:center; gap:5px;">
                                                     <svg viewBox="0 0 24 24" width="12" height="12" fill="#dc2626" stroke="#dc2626" stroke-width="1"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15" stroke-width="2.2"></line></svg>
                                                     <span>Phiếu mở lại ${reopenCount > 1 ? `(${reopenCount} lần)` : ''}: CCOS trả về yêu cầu KTV kiểm tra lại</span>
                                                 </div>
@@ -6050,6 +6501,7 @@ function renderTicketsTable(force = false) {
                     `;
     }).join('');
 
+    tbody.style.opacity = '1';
     autoResizeAllTextareas();
 }
 
@@ -7226,13 +7678,13 @@ function exportExcel() {
 window.exportCdrForPhone = function(phone, event) {
     if (event) event.stopPropagation();
     if (!phone) {
-        alert('Không có thông tin số điện thoại để xuất Excel CDR.');
+        alert('Không có thông tin số điện thoại để xuất CSV CDR.');
         return;
     }
     let cleanP = String(phone).trim().replace(/\D/g, '');
     if (cleanP.startsWith('0')) cleanP = '84' + cleanP.slice(1);
     if (!cleanP.startsWith('84') && cleanP.length === 9) cleanP = '84' + cleanP;
-    window.location.href = `/api/cdr/export_excel?phone=${encodeURIComponent(cleanP)}`;
+    window.location.href = `/api/cdr/export_csv?phone=${encodeURIComponent(cleanP)}`;
 };
 
 

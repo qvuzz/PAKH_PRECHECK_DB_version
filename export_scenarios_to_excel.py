@@ -61,8 +61,8 @@ def export_all_scenarios():
         ("Kết luận kịch bản (Conclusion)", 32, align_left),
         ("Mã lỗi OneOSS", 14, align_center),
         ("Tên mã lỗi OneOSS", 28, align_left),
-        ("Phân tích kỹ thuật (Technical Analysis - Cho KTV sửa)", 65, align_top_left),
-        ("Hướng xử lý / Tư vấn KH (Action Plan - Cho KTV sửa)", 60, align_top_left),
+        ("Cột 10: Ý kiến phân tích kỹ thuật (comment / technical_analysis)", 75, align_top_left),
+        ("Cột 11: Nội dung phản hồi / Hướng xử lý (action_plan)", 70, align_top_left),
         ("Màu sắc", 12, align_center)
     ]
 
@@ -77,9 +77,9 @@ def export_all_scenarios():
     ws_sms.row_dimensions[1].height = 28
 
     # Doc du lieu SMS
-    sms_path = os.path.join(BASE_DIR, "sms_diagnostic_scenarios.json")
+    sms_path = os.path.join(BASE_DIR, "diagnostic_scenarios_sms.json")
     if not os.path.exists(sms_path):
-        sms_path = os.path.join(BASE_DIR, "diagnostic_scenarios_sms.json")
+        sms_path = os.path.join(BASE_DIR, "sms_diagnostic_scenarios.json")
     
     sms_scenarios = []
     if os.path.exists(sms_path):

@@ -158,13 +158,13 @@ KNOWN_DEVICES = [
 ]
 
 
-def parse_sms_entities(ticket_content: str, incident_time_fallback: str = "", package_title: str = "", created_time: str = "", phone: str = "") -> dict:
+def parse_sms_entities(ticket_content: str, incident_time_fallback: str = "", package_title: str = "", created_time: str = "", phone: str = "", processing_content: str = "") -> dict:
     """
     Bóc tách toàn diện các thực thể (Entities) phục vụ hiển thị tóm tắt và Automation.
     Được module hóa độc lập tại ai_sms_interpreter.py.
     """
     from ai_sms_interpreter import interpret_sms_ticket
-    return interpret_sms_ticket(ticket_content, package_title=package_title, incident_time_fallback=incident_time_fallback, created_time=created_time, phone=phone)
+    return interpret_sms_ticket(ticket_content, package_title=package_title, incident_time_fallback=incident_time_fallback, created_time=created_time, phone=phone, processing_content=processing_content)
 
 def _legacy_parse_sms_entities(ticket_content: str, incident_time_fallback: str = "") -> dict:
     raw = str(ticket_content or "").strip()
@@ -562,17 +562,17 @@ def is_free_internal_service(phone_str: str) -> bool:
         raw_short = raw[2:]
     else:
         raw_short = raw
-    return raw_short in ("888", "900", "1414", "1543", "1083", "156", "123", "9191", "18001091", "191")
+    return raw_short in ("888", "900", "1414", "1083", "156", "123", "9191", "18001091", "191")
 
 
 def is_charging_vas_service(phone_str: str) -> bool:
-    """Kiểm tra xem số nhận có phải là đầu số dịch vụ tính phí/ứng tiền không (1539, 8500, 7539, 9115...)."""
+    """Kiểm tra xem số nhận có phải là đầu số dịch vụ tính phí/ứng tiền/đăng ký gói không (1543, 1539, 8500, 7539, 9115...)."""
     raw = re.sub(r'\D', '', str(phone_str or ""))
     if raw.startswith("84") and len(raw) > 2:
         raw_short = raw[2:]
     else:
         raw_short = raw
-    if raw_short in ("1539", "8500", "7539", "9115"):
+    if raw_short in ("1543", "1539", "8500", "7539", "9115"):
         return True
     if len(raw_short) == 4 and raw_short[0] in ("6", "7", "8"):
         return True
@@ -738,7 +738,8 @@ def extract_gw_flags(gw_data: dict) -> dict:
         "volte_not_registered": False,
         "volte_misconfigured": False,
         "volte_errors": [],
-        "eps_profile": ""
+        "eps_profile": "",
+        "user_agent": ""
     }
     if isinstance(gw_data, dict) and "hss_profile_65" in gw_data and "volte_not_registered" in gw_data:
         return gw_data
@@ -850,6 +851,13 @@ def extract_gw_flags(gw_data: dict) -> dict:
                         else:
                             found_errors.append("Hồ sơ VoLTE có lỗi cấu hình")
 
+                # 4. Nhận diện User Agent thiết bị (iOS/iPhone/Android)
+                if "user agent" in row_str or "useragent" in row_str:
+                    for cell in row:
+                        c_val = str(cell).strip()
+                        if any(k in c_val.lower() for k in ["ios", "iphone", "android"]):
+                            flags["user_agent"] = c_val
+
                 # 3. Nhận diện trạng thái chưa đăng ký / chưa có Profile VoLTE
                 if any(k in row_str for k in [
                     "không có profile volte", "khong co profile volte",
@@ -896,11 +904,81 @@ def is_sms_cdr_success(r: dict) -> bool:
     # 3. Bản ghi thành công thực tế (Chuẩn 3GPP TS 23.040: Message Delivered Successful)
     if tc in ("100C", "133C", "4108") or sc in ("100C", "133C", "4108"):
         return True
-    if sc == "2" and (tc in ("0", "0000", "", "--", "NONE", "NULL") or not tc):
+    if sc in ("2", "0") and (tc in ("0", "0000", "", "--", "NONE", "NULL") or not tc):
         return True
 
     # Tuyệt đối không fallback theo status_type cũ trong database
     return False
+
+
+def is_vietnamese_number(num_str: str) -> bool:
+    """
+    Sàng lọc tiền kiểm Tầng 1: Nhận diện 100% số nội địa Việt Nam.
+    Bao gồm:
+    - Đầu số dịch vụ ngắn (3-5 ký tự: 888, 900, 9191, 8xxx, 7xxx, 6xxx, 129, 6089...)
+    - Tổng đài doanh nghiệp 1800, 1900
+    - Di động Việt Nam (các đầu 03, 05, 07, 08, 09):
+        + E.164 chuẩn: 84 + [35789] + 8 số (11 số)
+        + E.164 ghép dư số 0: 840 + [35789] + 8 số (12 số)
+        + Định dạng quốc gia có số 0: 0 + [35789] + 8 số (10 số)
+        + Định dạng rút gọn bỏ 0: [35789] + 8 số (9 số)
+    - Cố định Việt Nam (đầu 02x):
+        + 842x (11-12 số), 8402x (12-13 số), 02x (10-11 số), 2x (10-11 số)
+    """
+    s = str(num_str).strip().replace("+", "")
+    if not s:
+        return True
+    # 1. Đầu số dịch vụ ngắn trong nước (3-5 ký tự)
+    if re.fullmatch(r'\d{3,5}', s):
+        return True
+    # 2. Đầu số 1800, 1900
+    if re.fullmatch(r'(1800|1900)\d{4,6}', s):
+        return True
+    # 3. Di động Việt Nam chuẩn E.164: 84 + 9 chữ số (3, 5, 7, 8, 9)
+    if re.fullmatch(r'84[35789]\d{8}', s):
+        return True
+    # 4. Di động Việt Nam dạng 840 + 9 chữ số
+    if re.fullmatch(r'840[35789]\d{8}', s):
+        return True
+    # 5. Di động Việt Nam chuẩn quốc gia 0 + 9 chữ số
+    if re.fullmatch(r'0[35789]\d{8}', s):
+        return True
+    # 6. Di động Việt Nam dạng bỏ 0 (9 chữ số bắt đầu bằng 3, 5, 7, 8, 9)
+    if re.fullmatch(r'[35789]\d{8}', s):
+        return True
+    # 7. Cố định Việt Nam: 842x, 8402x, 02x, 2x (10-11 số)
+    if re.fullmatch(r'842\d{9,10}', s) or re.fullmatch(r'8402\d{9,10}', s) or re.fullmatch(r'02\d{9,10}', s) or re.fullmatch(r'2\d{9,10}', s):
+        return True
+    return False
+
+
+def is_intl_number(num_str: str) -> bool:
+    """
+    Sàng lọc tiền kiểm Tầng 2: Xác định chính xác số quốc tế.
+    Chỉ chạy sau khi số KHÔNG PHẢI là số Việt Nam.
+    """
+    s = str(num_str).strip()
+    clean = s.replace("+", "")
+    if is_vietnamese_number(clean):
+        return False
+    # Tiền tố quay số quốc tế rõ ràng (+, 00, 8400)
+    if s.startswith("+") or clean.startswith(("00", "8400")):
+        return True
+    # Bắc Mỹ (+1): 11 số bắt đầu bằng 1 (ví dụ 19548038883)
+    if re.fullmatch(r'1[2-9]\d{9}', clean):
+        return True
+    # Anh (+44): 11-12 số bắt đầu bằng 44
+    if clean.startswith("44") and len(clean) in (11, 12):
+        return True
+    # Các mã quốc gia phổ biến khác: 47 (Na Uy), 49 (Đức), 43 (Áo), 992 (Tajikistan), 7 (Nga/Kazakhstan), 882/883 (Vệ tinh), 81, 82, 86, 61, 33, 65, 386...
+    if len(clean) >= 9 and not clean.startswith(("0", "84")):
+        return True
+    return False
+
+
+def is_intl_dest_num(num_str: str) -> bool:
+    """Alias tương thích ngược cho is_intl_number."""
+    return is_intl_number(num_str)
 
 
 def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_desc: str, prob_type: str, entities: dict, cdr_records: list, stats: dict, gw_data: dict = None) -> dict:
@@ -1012,21 +1090,8 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
     if intermediate_retries > 0 and (mo_fail + mt_fail) <= intermediate_retries and (mo_success + mt_success) > 0:
         multipart_retry_success = True
 
-    # 2. Rule 2: Khách gửi MO sai cú pháp VAS (MO_Syntax_Or_Service_Rejection)
+    # 2. Bỏ qua kiểm tra sai cú pháp VAS (do SMSC CDR không lưu nội dung text bản tin)
     vas_syntax_error = False
-    vas_shortcode = ""
-    for r_mo in cdr_records:
-        if "MO" in r_mo.get("direction", ""):
-            mo_dest = str(r_mo.get("called_number", "")).strip()
-            mo_tc = str(r_mo.get("termination_cause", "")).strip()
-            if (mo_dest in ("888", "5656", "1576", "900", "1543", "1414", "156") or len(mo_dest) <= 5) and mo_tc in ("199C", "199c"):
-                for r_mt in cdr_records:
-                    if "MT" in r_mt.get("direction", "") and str(r_mt.get("calling_number", "")).strip() == mo_dest:
-                        vas_syntax_error = True
-                        vas_shortcode = mo_dest
-                        break
-        if vas_syntax_error:
-            break
 
     # 3. Rule 3: Thiết bị tự động gửi tin ngầm kích hoạt (device_silent_sms_and_activation)
     silent_activation_detected = False
@@ -1062,9 +1127,17 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
                 memory_full_detected = True
                 break
 
+    target_fault_party = entities.get("target_fault_party") or "Tất cả các số"
+
     # 6. Rule 6: Đối tác OTT / Quốc tế chưa đẩy tin về VNPT
-    intl_keywords = ["google", "paypal", "pay pal", "telegram", "facebook", "meta", "whatsapp", "microsoft", "tiktok", "binance", "netflix", "apple", "instagram", "amazon", "uber", "steam", "openai", "chatgpt"]
-    is_international_brand = any(kw in (brand_label or "").lower() or kw in content.lower() for kw in intl_keywords)
+    intl_keywords = [
+        "google", "paypal", "pay pal", "telegram", "facebook", "meta", "whatsapp",
+        "microsoft", "tiktok", "binance", "netflix", "apple", "instagram", "amazon",
+        "uber", "steam", "openai", "chatgpt", "danske", "danske bank", "quốc tế",
+        "quoc te", "international", "nước ngoài", "nuoc ngoai"
+    ]
+    proc_str = str(entities.get("processing_content") or "").lower()
+    is_international_brand = any(kw in (brand_label or "").lower() or kw in content.lower() or kw in proc_str or kw in str(target_fault_party).lower() for kw in intl_keywords)
     international_hub_unsent = is_international_brand and (not recent_otp_delivery_time)
 
     # 7. Rule 7: Từ chối cước / Chặn OCS (175C / Status 8)
@@ -1078,7 +1151,6 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
                 break
 
     # --- KIỂM TRA ĐỐI SOÁT GIAO DỊCH THÀNH CÔNG SAU THỜI GIAN PHẢN ÁNH (ĐÃ GỌI/NHẬN BÌNH THƯỜNG) ---
-    target_fault_party = entities.get("target_fault_party") or "Tất cả các số"
     has_success_after_incident = False
     latest_success_time = ""
     latest_success_party = ""
@@ -1182,19 +1254,31 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
             other_side = d_no if is_mo else c_no
 
             matched_party = False
-            if target_fault_party in ("Tất cả các số", "Không đề cập"):
-                # Bất kỳ số nào gửi/nhận thành công
-                matched_party = True
-            elif clean_target_p9:
-                clean_c9 = re.sub(r'[^0-9]', '', c_no)[-9:] if len(re.sub(r'[^0-9]', '', c_no)) >= 8 else ""
-                clean_d9 = re.sub(r'[^0-9]', '', d_no)[-9:] if len(re.sub(r'[^0-9]', '', d_no)) >= 8 else ""
-                if clean_target_p9 in (clean_c9, clean_d9):
+            is_internal_free = is_free_internal_service(c_no if is_mt else d_no)
+            is_intl_issue = is_international_brand or any(k in str(target_fault_party).lower() for k in ["quốc tế", "quoc te", "international", "nước ngoài"])
+
+            if is_mt and is_internal_free:
+                # TUYỆT ĐỐI KHÔNG dùng tin nhắn tổng đài nội mạng (888, 1414, 900...) làm minh chứng khách đã nhận được tin nhắn bình thường
+                matched_party = False
+            elif is_intl_issue:
+                # Nếu phản ánh lỗi nhận tin nhắn Quốc Tế: bên gửi c_no phải có định dạng quốc tế (+, 00..., len > 11 không phải 84) hoặc đúng Brandname
+                c_clean = re.sub(r'[^0-9+]', '', c_no)
+                is_intl_party = c_clean.startswith("+") or c_clean.startswith("00") or (len(c_clean) > 11 and not c_clean.startswith("84")) or (clean_target_brand and (clean_target_brand in c_no.lower() or c_no.lower() in clean_target_brand))
+                if is_intl_party and not is_internal_free:
                     matched_party = True
             elif clean_target_brand:
                 clean_c = re.sub(r'[^a-zA-Z0-9]', '', c_no.lower())
                 clean_d = re.sub(r'[^a-zA-Z0-9]', '', d_no.lower())
                 if clean_target_brand in clean_c or clean_c in clean_target_brand or clean_target_brand in clean_d or clean_d in clean_target_brand:
                     matched_party = True
+            elif clean_target_p9:
+                clean_c9 = re.sub(r'[^0-9]', '', c_no)[-9:] if len(re.sub(r'[^0-9]', '', c_no)) >= 8 else ""
+                clean_d9 = re.sub(r'[^0-9]', '', d_no)[-9:] if len(re.sub(r'[^0-9]', '', d_no)) >= 8 else ""
+                if clean_target_p9 in (clean_c9, clean_d9):
+                    matched_party = True
+            elif target_fault_party in ("Tất cả các số", "Không đề cập"):
+                # Bất kỳ số di động người dùng thực tế nào gửi/nhận thành công (loại trừ tin tổng đài nội mạng 888)
+                matched_party = not (is_mt and is_internal_free)
 
             if matched_party:
                 if is_mo:
@@ -1268,13 +1352,21 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
     blocked_free_service = any(
         is_free_internal_service(str(r.get("called_number") or "")) and 
         str(r.get("status_code", "")).strip() == "8" and 
-        str(r.get("termination_cause", "")).strip().upper() == "175C"
+        str(r.get("termination_cause", "")).strip().upper() == "175C" and
+        str(r.get("mapped_network_err") or "").strip() != "400"
         for r in mo_records_all
     )
     has_mapped_error_400 = any(
         str(r.get("mapped_network_err") or "").strip() == "400"
         for r in mo_records_all
     )
+    ocs_failed_dests = [
+        str(r.get("called_number") or "").strip()
+        for r in mo_records_all
+        if (str(r.get("status_code", "")).strip() == "8" and str(r.get("termination_cause", "")).strip().upper() == "175C")
+        or str(r.get("mapped_network_err") or "").strip() == "400"
+    ]
+    ocs_failed_dest = ocs_failed_dests[0] if ocs_failed_dests else ""
     has_spam_keywords = any(kw in content.lower() for kw in ["spam", "tin rác", "tin rac", "cam kết", "cam ket", "939", "cv 939", "chặn chiều", "chan chieu"])
 
     # 🎯 THU THẬP CẢNH BÁO CẤU HÌNH VOLTE (CHỈ ĐÓNG VAI TRÒ CẢNH BÁO, KHÔNG LÀM KỊCH BẢN CHÍNH)
@@ -1290,22 +1382,48 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
     # --- LỰA CHỌN KỊCH BẢN CHUẨN (SCENARIO ID) - PHÂN BIỆT 5 NHÓM LỖI ĐỘC LẬP ---
     scenario_id = "SMS_13_MT_RECEIVE_FAIL_GENERAL"
 
+    content_lower_sc = content.lower()
+    has_google_ref = (
+        "google" in content_lower_sc
+        or "gmail" in content_lower_sc
+        or bool(re.search(r'\bgg\b', content_lower_sc))
+        or (brand_label or "").lower() == "google"
+    )
+    is_receiving_otp_only = any(
+        k in content_lower_sc for k in [
+            "không nhận được", "ko nhận được", "chưa nhận được",
+            "không về", "ko về", "tin nhắn đến", "nhận otp", "nhận mã"
+        ]
+    ) and prob_type != "mo_fail"
+    is_google_activation_sms = (
+        has_google_ref
+        and not is_receiving_otp_only
+        and (
+            prob_type == "mo_fail"
+            or bool(re.search(r'(?:nhắn\s*tin|gửi\s*tin|gửi\s*sms|nhắn\s*sms|kích\s*hoạt\s*dịch\s*vụ|kích\s*hoạt\s*google)', content_lower_sc))
+        )
+    )
+
     # 🎯 ƯU TIÊN TUYỆT ĐỐI MẠNG LÕI: SUB STATE = RESTRICTED AREA (THUÊ BAO BỊ KHÓA SÓNG 3G NÊN KHÔNG THỂ NHẮN TIN)
     if "RESTRICTED" in sub_state or "RESTRICTED AREA" in content.upper():
         scenario_id = "SMS_30_RESTRICTED_AREA_3G_BARRED"
+
+    # 🎯 KỊCH BẢN GỬI TIN NHẮN XÁC THỰC / KÍCH HOẠT DỊCH VỤ GOOGLE KHÔNG CHÍNH THỐNG
+    elif is_google_activation_sms and not (gw_flags.get("smo_barred") or gw_flags.get("smsbarring_volte_blocked")):
+        scenario_id = "SMS_25_GOOGLE_ACTIVATION_UNOFFICIAL"
 
     # 🎯 1. NẾU CÓ HIỆN TƯỢNG LỖI ĐỊNH TUYẾN / CHẶN LIÊN MẠNG SANG MOBIFONE / VIETTEL:
     # (Bản chất lỗi liên mạng là gửi mạng khác thành công nhưng gửi Mobi/Viettel bị lỗi 130C/135C/136C -> Ưu tiên tuyệt đối)
     elif prob_type == "mo_fail" and intercarrier_failed_carrier:
         scenario_id = "SMS_INTERCARRIER_ROUTING_ERROR"
 
-    # 🎯 2. NẾU BỊ CHẶN CHIỀU GỬI DO KHÓA SPAM (SPS / 175C CHẶN CỨNG)
-    elif prob_type == "mo_fail" and has_175c_reject and (blocked_free_service or has_mapped_error_400 or has_spam_keywords):
-        scenario_id = "SMS_SPS_SPAM_HARD_BLOCKED_175C"
-
-    # 🎯 3. NẾU KHÁCH BÁO LỖI GỬI ĐI (MO FAIL) VÀ ĐÃ CÓ BẢN TIN GỬI ĐI (MO) THÀNH CÔNG SAU THỜI GIAN PHẢN ÁNH:
+    # 🎯 2. NẾU KHÁCH BÁO LỖI GỬI ĐI (MO FAIL) VÀ ĐÃ CÓ BẢN TIN GỬI ĐI (MO) THÀNH CÔNG SAU THỜI GIAN PHẢN ÁNH:
     elif prob_type == "mo_fail" and has_mo_success_after_incident:
         scenario_id = "SMS_MO_SUCCESS_AFTER_INCIDENT"
+
+    # 🎯 3. NẾU BỊ CHẶN CHIỀU GỬI DO KHÓA SPAM (SPS / 175C CHẶN CỨNG - KHÔNG GỬI ĐƯỢC KỂ CẢ SAU PHẢN ÁNH)
+    elif prob_type == "mo_fail" and has_175c_reject and not has_mapped_error_400 and not has_mo_success_after_incident and (blocked_free_service or has_spam_keywords):
+        scenario_id = "SMS_SPS_SPAM_HARD_BLOCKED_175C"
 
     # 🎯 NẾU CỜ BAIC = 1 (KH TỰ BẬT CHẶN TIN NHẮN ĐẾN TRÊN THIẾT BỊ / CÚ PHÁP USSD):
     elif (gw_flags.get("baic_blocked") or gw_flags.get("baic_val") == "1") and prob_type in ("mt_fail", "otp", "otp_delayed", "dnc", "other"):
@@ -1342,12 +1460,12 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
         if intercarrier_failed_carrier:
             scenario_id = "SMS_INTERCARRIER_ROUTING_ERROR"
 
-        # KỊCH BẢN 2: BỊ CHẶN CHIỀU GỬI DO KHÓA SPAM (SPS / CHẶN CỨNG HỆ THỐNG 175C)
-        elif has_175c_reject and (blocked_free_service or has_mapped_error_400 or has_spam_keywords):
+        # KỊCH BẢN 2: BỊ CHẶN CHIỀU GỬI DO KHÓA SPAM (SPS / CHẶN CỨNG HỆ THỐNG 175C - KHÔNG GỬI ĐƯỢC KỂ CẢ SAU PHẢN ÁNH)
+        elif has_175c_reject and not has_mapped_error_400 and not has_mo_success_after_incident and (blocked_free_service or has_spam_keywords):
             scenario_id = "SMS_SPS_SPAM_HARD_BLOCKED_175C"
 
-        # KỊCH BẢN 3: TÀI KHOẢN KHÔNG ĐỦ TIỀN / LỖI TRỪ CƯỚC OCS (175C ĐƠN THUẦN)
-        elif has_175c_reject and not (blocked_free_service or has_mapped_error_400 or has_spam_keywords):
+        # KỊCH BẢN 3: TÀI KHOẢN KHÔNG ĐỦ TIỀN / LỖI TRỪ CƯỚC OCS (175C / MAPPED ERROR 400 OCS_INSUFFICIENT_BALANCE)
+        elif (has_175c_reject or has_mapped_error_400) and not has_mo_success_after_incident:
             scenario_id = "SMS_14_OCS_CHARGING_REJECTED"
 
         # KỊCH BẢN 5: ĐÃ GỬI OK (Có bản ghi MO đạt Status 2 hoặc Cause 100C/133C)
@@ -1365,8 +1483,6 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
                 scenario_id = "SMS_12_SPS_SPAM_BLOCK"
             else:
                 scenario_id = "SMS_MO_WRONG_SMSC_CENTER"
-        elif vas_syntax_error:
-            scenario_id = "SMS_04_VAS_SYNTAX_ERROR"
         elif dest_short:
             scenario_id = "SMS_11_PREMIUM_SMS_BLOCK"
         elif has_tried_smsc:
@@ -1394,10 +1510,15 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
             scenario_id = "SMS_16B_BAIC_CUSTOMER_SELF_BARRED"
         elif gw_flags["smt_barred"]:
             scenario_id = "SMS_16_SMT_CORE_BARRED"
-        elif has_cdr and (recent_otp_delivery_time or (target_brand_ok or (mt_success > 0 and (mt_fail == 0 or mt_success >= mt_fail)))):
+        elif has_cdr and (recent_otp_delivery_time or target_brand_ok or (not target_brand and not is_international_brand and mt_success > 0 and (mt_fail == 0 or mt_success >= mt_fail))):
             is_delivered_after_incident = False
             is_delivered_before_incident = False
-            check_time = recent_otp_delivery_time or target_brand_deliv_time or generic_otp_delivery_time
+            # Nếu có thương hiệu cụ thể hoặc quốc tế: chỉ đối soát theo delivery time của thương hiệu đó
+            if target_brand or is_international_brand:
+                check_time = target_brand_deliv_time or recent_otp_delivery_time
+            else:
+                check_time = recent_otp_delivery_time or target_brand_deliv_time or generic_otp_delivery_time
+
             if check_time and inc_dt:
                 try:
                     deliv_dt = None
@@ -1414,23 +1535,23 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
                             is_delivered_before_incident = True
                 except Exception:
                     pass
-            elif not inc_dt and (check_time or mt_success > 0):
-                # Không có mốc sự cố cụ thể thì mới công nhận thành công gần nhất
+            elif not inc_dt and check_time:
+                # Không có mốc sự cố cụ thể thì công nhận thành công gần nhất nếu có check_time chuẩn
+                is_delivered_after_incident = True
+            elif not inc_dt and not target_brand and not is_international_brand and mt_success > 0:
                 is_delivered_after_incident = True
             elif inc_dt and has_mt_success_before_incident and not has_mt_success_after_incident:
                 is_delivered_before_incident = True
 
             if is_delivered_before_incident and not is_delivered_after_incident:
-                if international_hub_unsent:
+                if international_hub_unsent or is_international_brand:
                     scenario_id = "SMS_08_INTERNATIONAL_HUB_UNSENT"
                 else:
                     scenario_id = "SMS_09_OTP_NOT_SENT_BY_PARTNER"
             elif is_delivered_after_incident:
                 scenario_id = "SMS_02B_OTP_RECEIVED_NORMAL"
-            elif not inc_dt and mt_success > 0:
-                scenario_id = "SMS_02B_OTP_RECEIVED_NORMAL"
             else:
-                if international_hub_unsent:
+                if international_hub_unsent or is_international_brand:
                     scenario_id = "SMS_08_INTERNATIONAL_HUB_UNSENT"
                 else:
                     scenario_id = "SMS_09_OTP_NOT_SENT_BY_PARTNER"
@@ -1598,34 +1719,55 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
             and total_mo == 0
         )
 
-        # 3d. Mã độc phát tán tin nhắn quốc tế cước cao (Đầu số 004..., 992... / Toll Fraud)
-        def is_intl_dest_num(d_val: str) -> bool:
-            s = str(d_val).strip().replace("+", "")
-            if not s:
-                return False
-            if s.startswith(("00", "8400")):
-                return True
-            if s.startswith(("992", "882", "883")):
-                return True
-            if s.startswith("84"):
-                rest = s[2:].lstrip("0")
-                if len(rest) == 9 and rest[0] in ("3", "5", "7", "8", "9", "2"):
-                    return False
-                if len(s) > 13:
-                    return True
-                return False
-            if len(s) >= 10 and not s.startswith(("0", "84")):
-                return True
-            return False
+        # 3d. SÀNG LỌC TIỀN KIỂM SỐ QUỐC TẾ & PHÂN ĐỊNH CHỦ ĐỘNG GỬI VS MÃ ĐỘC
+        intl_dests = [d for d in unique_dests if is_intl_number(d)]
+        has_intl_dest = len(intl_dests) > 0
 
-        has_intl_dest = any(is_intl_dest_num(d) for d in unique_dests)
+        # Kiểm tra từ khóa quốc tế rõ ràng trong nội dung phản ánh (bắt buộc dùng biên từ \b)
+        has_explicit_intl_keyword = bool(
+            re.search(r'\b(tin nhắn quốc tế|sms quốc tế|gửi ra nước ngoài|gửi quốc tế|cước quốc tế|đi quốc tế)\b', content_lower) or
+            re.search(r'\b(004\d{7,}|84004\d{7,}|992\d{6,})\b', content_lower)
+        )
+
+        # 1. Khách hàng CHỦ ĐỘNG gửi tin nhắn quốc tế (Customer Active International MO)
+        has_denial = any(
+            k in content_lower 
+            for k in [
+                "không nhắn", "không gửi", "không thao tác", "tự phát sinh", "tự trừ", 
+                "không rõ nguyên nhân", "khẳng định không", "chưa từng", "không hề", 
+                "bị hack", "không sử dụng", "không biết"
+            ]
+        )
+        has_explicit_active_send = any(
+            k in content_lower for k in [
+                "kh gửi", "gửi đi máy báo", "máy báo không thành công", "gửi không thành công nhưng vẫn trừ", 
+                "gửi tin nhắn quốc tế", "gửi đi nước ngoài", "nhắn sang", "nhắn cho bạn", "nhắn người thân"
+            ]
+        )
+        is_active_intl_send = (
+            (has_intl_dest or has_explicit_intl_keyword) and 
+            not is_apple_activation and
+            (
+                has_explicit_active_send or (
+                    has_intl_dest and not has_denial and not has_malware_kw and (
+                        any(d.startswith(("1", "+1", "81", "+81", "82", "+82", "61", "+61")) for d in intl_dests) or
+                        (mo_success > 0 and total_mo <= 20)
+                    )
+                )
+            )
+        )
+
+        # 2. Thiết bị nhiễm mã độc gian lận cước quốc tế (Toll Fraud Trojan)
+        # CHỈ áp dụng khi: Có số quốc tế lạ cước cao + Khách phủ nhận gửi / không biết + Không phải chủ động gửi + Không phải Apple iMessage
+        has_intl_toll_dest = any(
+            str(d).replace("+", "").startswith(("0047", "0049", "0043", "84004", "992", "882", "883", "47", "49", "43"))
+            for d in intl_dests
+        )
         is_intl_toll_fraud = (
-            has_intl_dest or 
-            "tin nhắn quốc tế" in content_lower or 
-            "004" in content_lower or 
-            "84004" in content_lower or
-            "ora-28000" in content_lower or
-            "992" in content_lower
+            not is_active_intl_send and 
+            not is_apple_activation and 
+            (has_intl_dest or has_explicit_intl_keyword) and 
+            (has_intl_toll_dest or (has_malware_kw and total_mo >= 5) or (has_denial and has_intl_dest))
         )
 
         # THỨ TỰ ƯU TIÊN THÁC ĐỔ (WATERFALL PRIORITY - ZERO OVERLAP)
@@ -1635,6 +1777,8 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
             scenario_id = "SMS_19A_APPLE_ACTIVATION_LOOP"
         elif is_vendor_silent_activation:
             scenario_id = "SMS_05_DEVICE_SILENT_ACTIVATION"
+        elif is_active_intl_send and not is_apple_activation:
+            scenario_id = "SMS_MO_INTL_DELIVERY_SUCCESS"
         elif is_intl_toll_fraud and not is_apple_activation:
             scenario_id = "SMS_19F_INTERNATIONAL_TOLL_FRAUD_TROJAN"
         elif is_botnet_spam_spread_136c:
@@ -1698,11 +1842,74 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
 
     has_specific_brand = bool(brand_label and brand_label not in ("đối tác/ngân hàng", "SMS thông thường", "đối tác", "ngân hàng"))
 
+    clean_p_disp = ("0" + str(phone_84)[2:]) if str(phone_84).startswith("84") else str(phone_84)
+
+    # 1. Trích xuất danh sách số đích mẫu từ CDR
+    _sample_dest_list = [d for d in unique_dests if d][:5] if ('unique_dests' in locals() and unique_dests) else []
+    if not _sample_dest_list and 'cdr_records' in locals() and cdr_records:
+        _seen_d = []
+        for r in cdr_records:
+            d = r.get("destination_address") or r.get("called_number") or r.get("destination")
+            if d and str(d) not in _seen_d:
+                _seen_d.append(str(d))
+                if len(_seen_d) >= 5:
+                    break
+        _sample_dest_list = _seen_d
+    sample_dests_str = (", ".join(_sample_dest_list) + ("..." if len(_sample_dest_list) >= 5 else "")) if _sample_dest_list else (dest_str or "nhiều số di động lạ")
+
+    # 2. Trích xuất mốc giờ phát sinh đầu tiên từ CDR
+    _earliest_mo_time = ""
+    if 'cdr_records' in locals() and cdr_records:
+        _mo_times = [
+            str(r.get("delivery_time") or r.get("submission_time") or "").strip()
+            for r in cdr_records
+            if "MO" in str(r.get("direction", "")).upper() and (r.get("delivery_time") or r.get("submission_time"))
+        ]
+        if _mo_times:
+            _earliest_mo_time = min(_mo_times)
+    start_time_desc = ""
+    if _earliest_mo_time:
+        try:
+            _dt_part, _tm_part = _earliest_mo_time.split(" ")
+            _y, _m, _d = _dt_part.split("-")
+            _hh, _mm = _tm_part.split(":")[:2]
+            start_time_desc = f"{_hh}:{_mm} ngày {_d}/{_m}/{_y}"
+        except Exception:
+            start_time_desc = str(_earliest_mo_time)
+    if not start_time_desc:
+        _inc_val = str(entities.get("incident_time") or "").strip()
+        if _inc_val and _inc_val != "--":
+            start_time_desc = _inc_val
+        else:
+            start_time_desc = time_period.split("→")[0].strip() if "→" in time_period else time_period
+
+    # 3. Thông tin nhà mạng đích & loại SIM
+    _target_dest = dest_str if dest_str and dest_str != "đầu số dịch vụ" else (_sample_dest_list[0] if _sample_dest_list else "")
+    dest_carrier_desc, dest_carrier_name = detect_carrier_from_phone(_target_dest) if _target_dest else ("mạng đối tác", "mạng đối tác")
+    try:
+        _sim_data_obj = detect_sim_data_only_info(phone_84, content, gw_flags)
+        sim_label = _sim_data_obj.get("sim_type_label") or "SIM Data"
+    except Exception:
+        sim_label = "SIM Data"
+
+    # 4. Danh sách số quốc tế
+    _intl_list = [d for d in unique_dests if str(d).startswith("00") or (str(d).startswith("+") and not str(d).startswith("+84")) or (len(str(d)) > 11 and not str(d).startswith("84"))] if ('unique_dests' in locals() and unique_dests) else []
+    intl_dests_str = ", ".join(_intl_list[:5]) if _intl_list else "các đầu số quốc tế lạ"
+
     # Điền giá trị thực tế vào template từ JSON
     def render_template(tmpl: str) -> str:
         if not tmpl:
             return ""
         res = tmpl
+        res = res.replace("{clean_phone}", clean_p_disp)
+        res = res.replace("{mo_success}", str(mo_success))
+        res = res.replace("{mo_fail}", str(mo_fail))
+        res = res.replace("{sample_dests}", sample_dests_str)
+        res = res.replace("{start_time_desc}", start_time_desc)
+        res = res.replace("từ từ ", "từ ")
+        res = res.replace("{dest_carrier}", dest_carrier_desc)
+        res = res.replace("{sim_type}", sim_label)
+        res = res.replace("{intl_dests}", intl_dests_str)
         res = res.replace("{total_mo}", str(total_mo))
         res = res.replace("{time_desc}", time_period)
         res = res.replace("{time_range}", time_period)
@@ -1859,7 +2066,7 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
             f"(tần suất 1-2 giây/tin, độ dài ~3 tin/lần) gửi đến số {dest_carrier_name} {target_dest}. "
             f"Đề nghị khách hàng: 1. Kiểm tra ngay thiết bị đang lắp {sim_label} (nếu lắp trên thiết bị định vị, camera, bộ phát WiFi hoặc báo động "
             f"thì cần tắt tính năng gửi SMS cảnh báo về số {target_dest}; nếu lắp trên điện thoại cần gỡ bỏ ứng dụng lạ/khôi phục cài đặt gốc). "
-            f"2. Tạm khóa chiều gửi tin nhắn đi (SMO) cho SIM nếu chỉ có nhu cầu sử dụng Data 4G để chặn đứng việc thiết bị tiếp tục phát sinh cước."
+            f"2. Tạm khóa chiều gửi tin nhắn đi (SMO) cho SIM nếu chỉ có nhu cầu sử dụng Data 4G để chặn đứng việc thiết bị tiếp tục tự phát sinh tin nhắn."
         )
 
     elif scenario_id == "SMS_19E_BOTNET_TROJAN_SPAM_SPREAD_136C":
@@ -1913,7 +2120,7 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
             start_time_desc = f"từ ngày {start_date_desc}" if "ngày" not in start_date_desc else start_date_desc
 
         result_stats_comment = (
-            f"Trong đó có {mo_ok_cnt:,} bản tin phát thành công (gây phát sinh cước {claimed_amt}) và {mo_fail_cnt:,} bản ghi lỗi Retry (Status 5 / Cause 136C, Mapped Network Error = 34, 59, 9 do hệ thống Anti-Spam của mạng đích chặn)."
+            f"Trong đó có {mo_ok_cnt:,} bản tin phát thành công và {mo_fail_cnt:,} bản ghi lỗi Retry (Status 5 / Cause 136C, Mapped Network Error = 34, 59, 9 do hệ thống Anti-Spam của mạng đích chặn)."
             if mo_ok_cnt > 0 else
             f"Trong đó ghi nhận {mo_fail_cnt:,} bản ghi lỗi Retry liên tục (Status 5 / Cause 136C, Mapped Network Error = 34, 59, 9 do hệ thống Anti-Spam của mạng đích chặn)."
         )
@@ -1926,7 +2133,7 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
         )
 
         action_summary = (
-            f"đã tự động phát sinh {mo_ok_cnt:,} tin nhắn MO gửi tới nhiều số di động khác nhau (chiếm cước phát sinh) và {mo_fail_cnt:,} lần gửi lỗi bị mạng chặn (mã lỗi 136C)."
+            f"đã tự động phát sinh {mo_ok_cnt:,} tin nhắn MO gửi tới nhiều số di động khác nhau và {mo_fail_cnt:,} lần gửi lỗi bị mạng chặn (mã lỗi 136C)."
             if mo_ok_cnt > 0 else
             f"đã tự động phát sinh {mo_fail_cnt:,} lần gửi tin nhắn MO liên tục bị mạng chặn do vi phạm chính sách chống Spam (mã lỗi 136C)."
         )
@@ -1935,7 +2142,30 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
             f"Qua kiểm tra nhật ký tổng đài từ {start_date_desc} đến {end_date_desc}, SIM {clean_p_disp} lắp trên thiết bị của khách hàng "
             f"{action_summary} Nguyên nhân do máy điện thoại bị nhiễm mã độc/ứng dụng lạ "
             f"tự động gửi SMS ngầm trong nền mà người dùng không hay biết. "
-            f"VinaPhone kính đề nghị Quý khách kiểm tra, gỡ bỏ các ứng dụng lạ/độc hại vừa cài đặt hoặc khôi phục cài đặt gốc của điện thoại để tránh tiếp tục phát sinh cước ngoài ý muốn."
+            f"VinaPhone kính đề nghị Quý khách kiểm tra, gỡ bỏ các ứng dụng lạ/độc hại vừa cài đặt hoặc khôi phục cài đặt gốc của điện thoại để ngăn thiết bị tiếp tục tự phát sinh tin nhắn ngoài ý muốn."
+        )
+
+    elif scenario_id == "SMS_MO_INTL_DELIVERY_SUCCESS":
+        status = "GỬI TIN NHẮN QUỐC TẾ THÀNH CÔNG (CƯỚC ĐÚNG THỰC TẾ)"
+        color = "green"
+        cause_code = "2006"
+        cause_name = "Cung cấp log file SMS theo yêu cầu"
+        claimed_amt = entities.get("claimed_amount") or "cước phát sinh"
+        clean_p_disp = ("0" + str(phone_84)[2:]) if str(phone_84).startswith("84") else str(phone_84)
+        sample_intl = [d for d in unique_dests if is_intl_number(d)][:3] if 'unique_dests' in locals() else []
+        intl_str = ", ".join(sample_intl) if sample_intl else "số quốc tế"
+        dest_str_intl = f"tới số {intl_str}" if sample_intl else "tới đầu số quốc tế"
+
+        tech_comment = (
+            f"Kiểm tra SMSC CDR ({time_period}): Thuê bao chủ động phát sinh bản tin MO gửi đi quốc tế {dest_str_intl}. "
+            f"Tổng đài VinaPhone đã tiếp nhận và chuyển tiếp thành công sang mạng đối tác quốc tế (Status: 2, Cause: 100C - Message Delivery Successful). "
+            f"Do bản tin có độ dài vượt chuẩn (tin dài) nên được tách thành các phân đoạn và tính cước theo đúng biểu cước tin nhắn quốc tế quy định. "
+            f"Việc máy khách hàng báo không thành công do ứng dụng nhắn tin trên máy chưa nhận được bản tin báo phát từ mạng nước ngoài."
+        )
+        action_plan = (
+            f"Giải thích cho khách hàng: Tổng đài VinaPhone đã chuyển phát thành công các bản tin MO {dest_str_intl} sang mạng quốc tế. "
+            f"Cước dịch vụ ({claimed_amt}) được tính đúng theo số lượng phân đoạn tin nhắn phát sinh thực tế từ thiết bị. "
+            f"Việc điện thoại hiển thị gửi chưa thành công là do ứng dụng nhắn tin trên máy không nhận được phản hồi báo phát từ nhà mạng nước ngoài kịp thời."
         )
 
     elif scenario_id == "SMS_19F_INTERNATIONAL_TOLL_FRAUD_TROJAN":
@@ -1945,20 +2175,21 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
         cause_name = "Do thiết bị đầu cuối"
         claimed_amt = entities.get("claimed_amount") or "cước phát sinh"
         clean_p_disp = ("0" + str(phone_84)[2:]) if str(phone_84).startswith("84") else str(phone_84)
-        sample_intl = [d for d in unique_dests if str(d).startswith(("00", "+", "8400", "992"))][:3] if 'unique_dests' in locals() else []
-        intl_str = ", ".join(sample_intl) if sample_intl else "đầu số quốc tế lạ (+49, +43, 992...)"
+        sample_intl = [d for d in unique_dests if is_intl_number(d)][:3] if 'unique_dests' in locals() else []
+        intl_str = ", ".join(sample_intl) if sample_intl else "đầu số quốc tế lạ"
+        dest_str_intl = f"tới các đầu số {intl_str}" if sample_intl else "tới các đầu số quốc tế lạ"
 
         tech_comment = (
             f"Kiểm tra SMSC CDR ({time_period}): Hệ thống ghi nhận thiết bị của khách hàng phát sinh liên tục các bản tin MO "
-            f"gửi đi quốc tế tới các đầu số lạ ({intl_str}) trong thời gian ngắn (phát sinh {claimed_amt}). "
+            f"gửi đi quốc tế {dest_str_intl} trong thời gian ngắn. "
             f"Nguyên nhân do thiết bị cài đặt ứng dụng lạ chứa mã độc gian lận cước viễn thông quốc tế (Toll Fraud Trojan) tự động gửi tin ngầm ra nước ngoài. "
-            f"Mạng lưới VinaPhone định tuyến thành công và tính cước đúng theo biểu cước tin nhắn quốc tế quy định."
+            f"Mạng lưới VinaPhone định tuyến chuyển phát thành công theo lưu lượng phát sinh thực tế từ thiết bị."
         )
         action_plan = (
-            f"Qua kiểm tra nhật ký tổng đài, SIM {clean_p_disp} lắp trên thiết bị đã phát sinh các tin nhắn gửi đi quốc tế tới các đầu số {intl_str}. "
+            f"Qua kiểm tra nhật ký tổng đài, SIM {clean_p_disp} lắp trên thiết bị đã phát sinh các tin nhắn gửi đi quốc tế {dest_str_intl}. "
             f"Nguyên nhân do điện thoại đã cài ứng dụng lạ chứa mã độc tự động gửi SMS quốc tế ngầm. "
             f"Hướng dẫn khách hàng: 1. Kiểm tra và gỡ bỏ ngay các ứng dụng lạ trên máy. 2. Khôi phục cài đặt gốc (Factory Reset) điện thoại để xóa triệt để mã độc. "
-            f"3. Liên hệ tổng đài tạm khóa chiều gọi/nhắn tin quốc tế (IDD) nếu không có nhu cầu sử dụng để phòng ngừa phát sinh cước."
+            f"3. Nhờ VNP tạm khóa chiều gọi/nhắn tin quốc tế (IDD) cho thuê bao nếu không có nhu cầu sử dụng để ngăn mã độc tiếp tục tự gửi tin nhắn quốc tế."
         )
 
     elif scenario_id == "SMS_01B_DISPUTE_ACTUALLY_DATA_M0":
@@ -2022,7 +2253,7 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
         cause_code = "2004"
         cause_name = "Lỗi cấu hình trên hệ thống"
         tech_comment = "HSS Profile của khách hàng đang là data only và không hỗ trợ VoLTE, nên không nhắn tin được qua miền IMS."
-        action_plan = "Hướng dẫn khách hàng đăng ký VoLTE hoặc chuyển IT kiểm tra khai báo lại HSS Profile cho khách hàng."
+        action_plan = "Nhờ VNP đăng ký VoLTE hoặc khai báo lại HSS Profile cho khách hàng."
 
     elif scenario_id == "SMS_22_VOLTE_PROVISIONING_ERROR":
         status = "LỖI CẤU HÌNH DỊCH VỤ VOLTE TRÊN HỆ THỐNG"
@@ -2030,7 +2261,7 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
         cause_code = "2004"
         cause_name = "Lỗi cấu hình trên hệ thống"
         tech_comment = "Profile VoLTE bị lỗi nên không thể nhắn/nhận tin trên miền IMS."
-        action_plan = "Nhờ VNP hủy, đăng ký lại VoLTE cho khách hàng hoặc chuyển IT xử lý."
+        action_plan = "Nhờ VNP hủy và đăng ký lại VoLTE cho khách hàng."
 
     elif scenario_id == "SMS_MO_SUCCESS_NORMAL":
         status = "KH ĐÃ GỬI ĐƯỢC TIN NHẮN BÌNH THƯỜNG"
@@ -2077,6 +2308,25 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
             "Đề xuất đóng phản ánh."
         )
 
+    elif scenario_id == "SMS_03_MULTIPART_RETRY_OK":
+        status = "BÌNH THƯỜNG"
+        color = "green"
+        cause_code = "2011"
+        cause_name = "Mạng lưới đảm bảo, khách hàng sử dụng dịch vụ bình thường"
+        target_disp = f"từ {target_fault_party}" if target_fault_party not in ("Tất cả các số", "Không đề cập") else ""
+        time_point_str = f"gần nhất vào lúc {latest_mt_time}" if latest_mt_time else ""
+        tech_comment = (
+            f"Kiểm tra hệ thống SMSC CDR trong kỳ đối soát ({time_period}): "
+            f"Tổng đài đã chuyển phát tin nhắn thành công tới thiết bị của khách hàng {target_disp} {time_point_str} "
+            f"(Mã phát tin 100C / Status 2 - Delivered). Quá trình truyền tin ghi nhận tổng đài có bản ghi thử lại "
+            f"(retry) tạm thời do thiết bị bận hoặc kênh báo hiệu tạm nghẽn và đã hoàn tất chuyển phát đầy đủ. "
+            f"Dịch vụ tin nhắn hoạt động bình thường."
+        )
+        action_plan = (
+            "Mạng lưới đảm bảo, tin nhắn đã được chuyển phát thành công về máy thuê bao. "
+            "Khách hàng sử dụng dịch vụ bình thường, đề xuất đóng phản ánh."
+        )
+
     elif scenario_id == "SMS_INTERCARRIER_ROUTING_ERROR":
         status = "LỖI KẾT NỐI LIÊN MẠNG (130C/135C/136C)"
         color = "orange"
@@ -2093,8 +2343,26 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
             f"(khả năng thuê bao bị mạng {inter_c_name} chặn chiều nhận tin nhắn rác / lọc liên mạng)."
         )
         action_plan = (
-            f"Chuyển bộ phận Khai thác SMSC / Đối soát liên mạng kiểm tra luồng chuyển tiếp tin nhắn từ thuê bao sang mạng {inter_c_name} "
-            f"hoặc kiểm tra chặn SMS Firewall liên mạng."
+            f"Nhờ VNP kiểm tra luồng chuyển tiếp tin nhắn từ thuê bao sang mạng {inter_c_name} "
+            f"hoặc kiểm tra chính sách SMS Firewall liên mạng."
+        )
+
+    elif scenario_id == "SMS_14_OCS_CHARGING_REJECTED":
+        status = "TÀI KHOẢN KHÔNG ĐỦ TIỀN ĐỂ GỬI SMS"
+        color = "orange"
+        cause_code = "2013"
+        cause_name = "Do thuê bao chưa nạp tiền/hết tiền"
+        dest_target = ocs_failed_dest or recent_mo_destination
+        dest_display = f" tới đầu số {dest_target}" if dest_target else ""
+        tech_comment = (
+            f"Kiểm tra nhật ký tổng đài SMSC CDR ({time_period}): Thuê bao phát sinh bản tin gửi tin nhắn đi (MO){dest_display} "
+            f"nhưng bị hệ thống tính cước OCS từ chối (Mã lỗi Status: 8, Cause: 175C, Mapped Network Error: 400 - OCS_INSUFFICIENT_BALANCE). "
+            f"Thuê bao không bị khóa chặn spam, nguyên nhân do tài khoản chính không đủ số dư để thanh toán cước gửi tin / đăng ký gói cước."
+        )
+        action_plan = (
+            f"Giải thích cho khách hàng: Chiều gửi tin nhắn không bị nhà mạng khóa chặn. "
+            f"Bản tin gửi đi{dest_display} bị từ chối do tài khoản chính không đủ số dư. "
+            f"Hướng dẫn khách hàng kiểm tra số dư (*101#), nạp thêm tiền vào tài khoản và thực hiện gửi lại tin nhắn."
         )
 
     elif scenario_id == "SMS_SPS_SPAM_HARD_BLOCKED_175C":
@@ -2102,14 +2370,14 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
         color = "red"
         cause_code = "2008"
         cause_name = "Thuê bao bị chặn dịch vụ do vi phạm quy định chống tin nhắn rác"
+        free_note = " (kể cả khi gửi tới các đầu số tổng đài nội mạng miễn phí như 888, 1414)" if blocked_free_service else ""
         tech_comment = (
-            f"Kiểm tra SMSC CDR ({time_period}) ghi nhận thuê bao bị chặn chiều gửi MO với mã lỗi 8/175C "
-            f"(kể cả khi gửi tới các đầu số tổng đài nội mạng miễn phí như 888, 1414 hoặc mã lỗi mapped network 400). "
+            f"Kiểm tra SMSC CDR ({time_period}) ghi nhận thuê bao bị chặn chiều gửi MO với mã lỗi 8/175C{free_note}. "
             f"Thuê bao đang bị hệ thống chặn chiều gửi tin nhắn (khóa Spam / SPS theo quy định)."
         )
         action_plan = (
-            "1. Đề xuất kiểm tra gỡ chặn trên hệ thống SPS/OCS cho thuê bao. "
-            "2. Hướng dẫn khách hàng ra Điểm giao dịch VinaPhone làm bản cam kết mở khóa sử dụng dịch vụ tin nhắn theo quy định (Công văn 939)."
+            "Nhờ VNP kiểm tra và gỡ chặn chiều gửi tin nhắn (SMO) cho thuê bao trên hệ thống SPS/OCS, "
+            "đồng thời hướng dẫn khách hàng không tiếp tục phát tán tin nhắn hàng loạt."
         )
 
     elif scenario_id == "SMS_15_SMO_CORE_BARRED":
@@ -2124,7 +2392,7 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
             )
             action_plan = (
                 "1. Hướng dẫn khách hàng tạm tắt tính năng Cuộc gọi VoLTE trong Cài đặt di động trên máy để gửi tin nhắn qua sóng 2G/3G. "
-                "2. Chuyển KTV/Khai thác mạng kiểm tra cấu hình Profile VoLTE và mở lại cờ SMSBarring (đưa về giá trị 0) cho thuê bao."
+                "2. Nhờ VNP kiểm tra cấu hình Profile VoLTE và mở lại cờ SMSBarring (đưa về giá trị 0) cho thuê bao."
             )
         else:
             status = "TẠM KHÓA CHIỀU GỬI TIN TRÊN HỆ THỐNG"
@@ -2146,26 +2414,71 @@ def evaluate_sms_scenario(phone_84: str, content: str, incident_time: str, time_
         )
         action_plan = (
             "1. Yêu cầu khách hàng bật Chế độ máy bay (Airplane Mode) trong 30 giây rồi tắt để tái đăng ký kênh Paging vô tuyến. "
-            "2. Khởi động lại máy hoặc thực hiện lệnh Reset SMT trên Core HSS/HLR để xả hàng đợi tin nhắn."
+            "2. Nhờ VNP thực hiện lệnh Reset SMT trên Core HSS/HLR để xả hàng đợi tin nhắn nếu khởi động lại máy không cải thiện."
         )
 
     elif scenario_id in ("SMS_23_DEVICE_RCS_OR_APP_ERROR", "SMS_MO_WRONG_SMSC_CENTER"):
-        status = "CÀI ĐẶT MÁY / SAI TTTN / KẸT RCS / MMS"
         cause_code = "2111"
         cause_name = "Do thiết bị đầu cuối"
         color = "orange"
-        tech_comment = (
-            f"Kiểm tra SMSC CDR không ghi nhận bất kỳ bản tin MO nào gửi lên hệ thống trong khung giờ phản ánh (MO_total = 0) "
-            f"mặc dù chiều gửi SMO trên hệ thống vẫn mở bình thường. "
-            f"Nguyên nhân do thiết bị đầu cuối chưa gửi thoát tin nhắn lên mạng: sai số Trung tâm tin nhắn (+8491020005), "
-            f"kẹt tính năng RCS/Google Chat (Android), chưa bật 'Gửi dưới dạng SMS' (iPhone), hoặc máy tự động chuyển sang tin nhắn MMS (VNPT đã ngừng MMS)."
+        is_iphone = (
+            "iphone" in str(entities.get("device_type") or "").lower() or
+            "ios" in str(gw_flags.get("user_agent") or "").lower() or
+            "iphone" in str(gw_flags.get("user_agent") or "").lower() or
+            "iphone" in content.lower()
         )
-        action_plan = (
-            "Hướng dẫn khách hàng: 1. Kiểm tra và cài đặt đúng số Trung tâm tin nhắn SMSC: +8491020005. "
-            "2. Tắt tính năng RCS/Chat trong Cài đặt tin nhắn (hoặc bật 'Gửi dưới dạng SMS' trên iPhone). "
-            "3. Kiểm tra độ dài và nội dung tin nhắn tránh bị máy chuyển sang tin nhắn MMS. "
-            "4. Khởi động lại máy hoặc thử tháo SIM vệ sinh vi mạch, lắp sang máy khác kiểm tra."
+        is_android = (
+            any(k in str(entities.get("device_type") or "").lower() for k in ["android", "samsung", "oppo", "xiaomi", "redmi", "vivo", "realme"]) or
+            "android" in str(gw_flags.get("user_agent") or "").lower() or
+            any(k in content.lower() for k in ["android", "samsung", "oppo", "xiaomi", "redmi", "vivo", "realme"])
         )
+
+        if is_iphone:
+            status = "KIỂM TRA CÀI ĐẶT GỬI SMS TRÊN IPHONE"
+            tech_comment = (
+                f"Kiểm tra hồ sơ Core dịch vụ gửi tin nhắn (SMO) của thuê bao hoạt động bình thường, không bị chặn. "
+                f"Nhật ký tổng đài SMSC CDR trong khung giờ phản ánh không ghi nhận bản tin MO nào gửi lên hệ thống (MO_total = 0). "
+                f"Nguyên nhân do cài đặt trên máy iPhone: tính năng 'Gửi dưới dạng SMS' (Send as SMS) đang bị tắt hoặc iMessage kẹt kích hoạt "
+                f"khiến máy không tự động chuyển sang tin nhắn SMS thông thường khi iMessage không gửi được."
+            )
+            action_plan = (
+                "Hướng dẫn khách hàng: 1. Vào Cài đặt -> Tin nhắn -> Bật mục 'Gửi dưới dạng SMS' (Send as SMS). "
+                "2. Thử tạm tắt tính năng iMessage và khởi động lại máy để gửi tin nhắn SMS thông thường. "
+                "3. Kiểm tra số Trung tâm tin nhắn SMSC (+8491020005), tháo SIM vệ sinh vi mạch hoặc thử lắp sang máy khác kiểm tra."
+            )
+        elif is_android and ("rcs" in content.lower() or "chat" in content.lower() or scenario_id == "SMS_23_DEVICE_RCS_OR_APP_ERROR"):
+            status = "KIỂM TRA TÍNH NĂNG RCS / CÀI ĐẶT SMS"
+            tech_comment = (
+                f"Kiểm tra hồ sơ Core dịch vụ gửi tin nhắn (SMO) của thuê bao hoạt động bình thường, không bị chặn. "
+                f"Nhật ký tổng đài SMSC CDR trong khung giờ phản ánh không ghi nhận bản tin MO nào gửi lên hệ thống (MO_total = 0). "
+                f"Nguyên nhân do ứng dụng Tin nhắn trên điện thoại Android bị kẹt tính năng Trò chuyện RCS (Google Chat) hoặc sai số Trung tâm tin nhắn."
+            )
+            action_plan = (
+                "Hướng dẫn khách hàng: 1. Vào ứng dụng Tin nhắn -> Cài đặt -> Tính năng trò chuyện RCS -> Tắt tính năng RCS. "
+                "2. Kiểm tra và cài đặt đúng số Trung tâm tin nhắn SMSC: +8491020005. "
+                "3. Khởi động lại máy hoặc tháo SIM lắp sang máy khác kiểm tra."
+            )
+        else:
+            status = "CÀI ĐẶT MÁY / SAI TTTN / KẸT RCS / MMS"
+            tech_comment = (
+                f"Kiểm tra SMSC CDR không ghi nhận bất kỳ bản tin MO nào gửi lên hệ thống trong khung giờ phản ánh (MO_total = 0) "
+                f"mặc dù chiều gửi SMO trên hệ thống vẫn mở bình thường. "
+                f"Nguyên nhân do thiết bị đầu cuối chưa gửi thoát tin nhắn lên mạng: sai số Trung tâm tin nhắn (+8491020005), "
+                f"kẹt tính năng RCS/Google Chat (Android), chưa bật 'Gửi dưới dạng SMS' (iPhone), hoặc máy tự động chuyển sang tin nhắn đa phương tiện MMS (MMS yêu cầu bật dữ liệu di động và cấu hình APN mms đúng — không phải lỗi mạng VNPT)."
+            )
+            action_plan = (
+                "Hướng dẫn khách hàng: 1. Kiểm tra và cài đặt đúng số Trung tâm tin nhắn SMSC: +8491020005. "
+                "2. Tắt tính năng RCS/Chat trong Cài đặt tin nhắn (hoặc bật 'Gửi dưới dạng SMS' trên iPhone). "
+                "3. Kiểm tra độ dài và nội dung tin nhắn tránh bị máy chuyển sang tin nhắn MMS. "
+                "4. Khởi động lại máy hoặc thử tháo SIM vệ sinh vi mạch, lắp sang máy khác kiểm tra."
+            )
+
+    # 🎯 ƯU TIÊN TUYỆT ĐỐI TEMPLATE TỪ CẤU HÌNH JSON / EXCEL (KTV ĐÃ HIỆU CHỈNH):
+    # Nếu kịch bản có câu chữ tùy biến từ JSON/Excel, dùng trực tiếp bản render từ JSON để giữ đúng văn phong KTV
+    if raw_tech and raw_tech.strip() and not (scenario_id == "SMS_01_COST_DISPUTE_VALID_USAGE" and total_mo == 0):
+        tech_comment = render_template(raw_tech)
+    if raw_action and raw_action.strip() and not (scenario_id == "SMS_01_COST_DISPUTE_VALID_USAGE" and total_mo == 0):
+        action_plan = render_template(raw_action)
 
     # 🎯 CHUYỂN TÌNH TRẠNG VOLTE THÀNH CẢNH BÁO (ANOMALY / WARNING) - KHÔNG LÀM KỊCH BẢN CHÍNH
     if volte_warnings:
@@ -2215,42 +2528,55 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
     content = str(ticket.get("content") or ticket.get("ticket_content") or "").strip()
     incident_time = str(ticket.get("incident_time") or ticket.get("created_time") or "").strip()
     created_time = str(ticket.get("created_time") or "").strip()
+    proc_content = str(ticket.get("processing_content") or "").strip()
     step_name = str(ticket.get("step_name") or "")
     code = str(ticket.get("ticket_code") or "")
 
     # 1. Bóc tách thực thể
-    entities = parse_sms_entities(content, incident_time, package_title=title, created_time=created_time, phone=phone_84)
+    entities = parse_sms_entities(content, incident_time, package_title=title, created_time=created_time, phone=phone_84, processing_content=proc_content)
 
     # 🎯 Kiểm tra xem KTV đã từng điều chỉnh tóm tắt (ai_summary) trong AI Teach hoặc sửa mốc thời gian hay chưa
-    custom_summary = str(ticket.get("ai_summary") or "").strip()
-    db_sms_inc_time = str(ticket.get("sms_incident_time") or "").strip()
-    if not custom_summary or not db_sms_inc_time:
+    custom_summary = str(ticket.get("custom_summary") or "").strip()
+    ktv_time = str(ticket.get("custom_incident_time") or "").strip()
+    if ktv_time in ("--", "None", "null", "Không rõ", "Không đề cập"):
+        ktv_time = ""
+
+    ticket_id_val = str(ticket.get("ticket_id") or ticket.get("ticket_code") or "").strip()
+    clean_p = "".join(filter(str.isdigit, str(phone_84)))
+    p_0 = ("0" + clean_p[2:]) if clean_p.startswith("84") else clean_p
+
+    # Kiểm tra trong ai_feedback_samples xem phiếu này đã từng được KTV dạy mẫu chuẩn hay chỉnh sửa thủ công hay chưa
+    if not custom_summary:
         try:
             from db_manager import get_db_connection
             conn_check = get_db_connection()
             with conn_check:
-                if incident_time:
-                    row_s = conn_check.execute(
-                        "SELECT ai_summary, sms_incident_time FROM tickets WHERE (phone = ? OR phone LIKE ?) AND incident_time = ? ORDER BY updated_at DESC LIMIT 1",
-                        (phone_84, f"%{phone_84[-9:]}%", incident_time)
-                    ).fetchone()
-                else:
-                    row_s = conn_check.execute(
-                        "SELECT ai_summary, sms_incident_time FROM tickets WHERE (phone = ? OR phone LIKE ?) ORDER BY updated_at DESC LIMIT 1",
-                        (phone_84, f"%{phone_84[-9:]}%")
-                    ).fetchone()
-                if row_s:
-                    if not custom_summary and row_s[0]:
-                        custom_summary = str(row_s[0]).strip()
-                    if not db_sms_inc_time and len(row_s) > 1 and row_s[1]:
-                        db_sms_inc_time = str(row_s[1]).strip()
+                row_f = conn_check.execute("""
+                    SELECT summary_content FROM ai_feedback_samples 
+                    WHERE ((? != '' AND (ticket_id = ? OR ticket_id LIKE ?))
+                       OR (phone = ? OR phone = ? OR phone LIKE ?))
+                      AND verified_by != 'BOT' 
+                    ORDER BY id DESC LIMIT 1
+                """, (ticket_id_val, ticket_id_val, f"%{ticket_id_val}%", phone_84, p_0, f"%{clean_p[-9:]}%")).fetchone()
+                if row_f and row_f[0]:
+                    custom_summary = str(row_f[0]).strip()
         except Exception:
             pass
+
+    # Nếu chưa có custom_summary nhưng phiếu đã có ai_summary đã được lưu
+    if not custom_summary and ticket.get("ai_summary"):
+        cand_summary = str(ticket.get("ai_summary")).strip()
+        if cand_summary and cand_summary not in ("--", "None", "null"):
+            custom_summary = cand_summary
 
     # Áp dụng các điều chỉnh chuẩn do KTV đã chỉ định (nếu có)
     ktv_problem = ""
     ktv_anomaly = ""
-    ktv_time = db_sms_inc_time or ""
+    if not ktv_time and ticket.get("sms_incident_time"):
+        cand_sms_t = str(ticket.get("sms_incident_time")).strip()
+        if cand_sms_t not in ("--", "None", "null", "Không rõ", "Không đề cập"):
+            ktv_time = cand_sms_t
+
     if custom_summary:
         for line in custom_summary.split("\n"):
             line_str = line.strip()
@@ -2259,7 +2585,8 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
                 ktv_problem = m1.group(1).strip()
             m2 = re.match(r"^2\.\s*mốc thời gian(?:\s+xảy ra)?\s*:\s*(.+)$", line_str, re.IGNORECASE)
             if m2 and m2.group(1).strip() not in ("--", "Không rõ", "Không đề cập"):
-                ktv_time = m2.group(1).strip()
+                if not ktv_time:
+                    ktv_time = m2.group(1).strip()
             m6 = re.match(r"^[67]\.\s*cảnh báo(?:\s*\/\s*dấu hiệu)?\s*:\s*(.+)$", line_str, re.IGNORECASE)
             if m6:
                 ktv_anomaly = m6.group(1).strip()
@@ -2297,9 +2624,6 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
         exact_cutoff_str = raw_receipt
 
     # 🎯 2. XÁC ĐỊNH PHẠM VI DẢI NGÀY ĐỐI SOÁT (RANGE NGÀY HIỂN THỊ VÀ TRUY VẤN CDR)
-    if not ktv_time and db_sms_inc_time and db_sms_inc_time not in ("--", "null", "None"):
-        ktv_time = db_sms_inc_time
-
     display_time = entities.get("time_range_desc") or entities.get("incident_time") or "3 ngày gần nhất"
 
     if ktv_time and ktv_time not in ("--", "Không rõ", "Không đề cập", "null", "None"):
@@ -2365,7 +2689,7 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
                 direction=query_direction, 
                 from_time_str=from_date, 
                 to_time_str=to_date, 
-                limit=1000
+                limit=10000
             )
             if cdr_res and cdr_res.get("success"):
                 cdr_records = cdr_res.get("records", [])
@@ -2380,15 +2704,22 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
         except Exception as ex_cdr:
             cdr_error = str(ex_cdr)
 
+    # Nếu số lượng bản ghi trả về ít hơn dữ liệu đã lưu trong SQLite của cùng dải ngày, ưu tiên lấy dữ liệu đầy đủ nhất
+    if cdr_records:
+        try:
+            from db_manager import get_sms_cdr_records
+            db_all = get_sms_cdr_records(phone_84, from_date=from_date, to_date=to_date, limit=10000)
+            if db_all and len(db_all) > len(cdr_records):
+                cdr_records = db_all
+        except Exception:
+            pass
+
     # Đọc dự phòng từ database SQLite (nếu live fetch không có bản ghi hoặc offline / recheck)
-    # LƯU Ý: Phải lọc chuẩn theo đúng dải ngày from_date / to_date để không bị lấy nhầm CDR của ngày khác
+    # LƯU Ý: Luôn truy vấn trọn vẹn theo phone_84 và dải ngày (không lọc ticket_code để tránh sót bản ghi)
     if not cdr_records:
         try:
             from db_manager import get_sms_cdr_records
-            cached_db = get_sms_cdr_records(phone_84, ticket_code=code, from_date=from_date, to_date=to_date, limit=10000)
-            if not cached_db:
-                # Tìm dự phòng theo riêng số điện thoại nếu ticket_code khác hoặc chưa gán
-                cached_db = get_sms_cdr_records(phone_84, from_date=from_date, to_date=to_date, limit=10000)
+            cached_db = get_sms_cdr_records(phone_84, from_date=from_date, to_date=to_date, limit=10000)
             if cached_db:
                 cdr_records = cached_db
                 cdr_error = None
@@ -2619,6 +2950,22 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
     summary_blocks.append(f"7. Cảnh báo / Dấu hiệu: {entities.get('anomaly') or 'Bình thường'}")
     ai_summary_full = "\n".join(summary_blocks)
 
+    # Tổng hợp danh sách nguyên nhân lỗi hàng đầu hiển thị trực quan trên WebApp
+    top_errors_list = []
+    active_causes = mo_fail_causes if mo_fail > 0 else mt_fail_causes
+    if active_causes:
+        friendly_map = {
+            "136C": "Anti-Spam Policy Rejection (Spam Retry Loop)",
+            "130C": "SRI-for-SM / Absent Subscriber",
+            "135C": "System Error / Delivery Reject",
+            "175C": "Từ chối cước OCS / Tài khoản không đủ tiền (175C)",
+            "199C": "Ghép phân đoạn tin dài (199C)"
+        }
+        for ck, count in sorted(active_causes.items(), key=lambda x: -x[1])[:4]:
+            raw_tc = ck.split()[0].upper()
+            friendly = friendly_map.get(raw_tc, ck)
+            top_errors_list.append({"cause": friendly, "count": count})
+
     sms_cdr_summary = {
         "moCount": total_mo,
         "moOk": mo_success,
@@ -2629,6 +2976,7 @@ def analyze_sms_ticket_with_cdr(phone_84: str, ticket: dict, force_cdr: bool = T
         "mtFail": mt_fail,
         "mtRate": round(mt_success * 100 / total_mt, 1) if total_mt > 0 else 0,
         "totalHits": len(cdr_records),
+        "topErrors": top_errors_list,
         "appBrand": app_brand,
         "fromDate": from_date,
         "toDate": to_date,

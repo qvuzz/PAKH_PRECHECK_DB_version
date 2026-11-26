@@ -113,8 +113,10 @@ def get_db_connection(retry_count: int = 1):
     try:
         conn = sqlite3.connect(str(DB_PATH), timeout=60.0)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL;")  # Tăng tốc độ và chống khóa file
-        conn.execute("PRAGMA busy_timeout=60000;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA cache_size = -64000;")  # 64MB RAM page cache
+        conn.execute("PRAGMA temp_store = MEMORY;")
+        conn.execute("PRAGMA busy_timeout = 60000;")
         return conn
     except sqlite3.DatabaseError as e:
         err_msg = str(e).lower()
@@ -129,6 +131,7 @@ def get_db_connection(retry_count: int = 1):
 
 def _run_init_schema(conn):
     with conn:
+        conn.execute("PRAGMA journal_mode=WAL;")  # Đảm bảo bật WAL một lần duy nhất lúc khởi tạo schema
         conn.execute("""
             CREATE TABLE IF NOT EXISTS tickets (
                 phone TEXT,
@@ -229,6 +232,15 @@ def _run_init_schema(conn):
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(ticket_status);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_source ON tickets(source);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_code ON tickets(ticket_code);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_combo ON tickets(region, source, ticket_status);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_closed_at ON tickets(closed_at);")
+            conn.execute("""
+                UPDATE tickets 
+                SET closed_at = updated_at 
+                WHERE (closed_at IS NULL OR closed_at = '') 
+                  AND (ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%') 
+                  AND updated_at IS NOT NULL AND updated_at != '';
+            """)
         except Exception:
             pass
         try:
@@ -253,6 +265,18 @@ def _run_init_schema(conn):
             pass
         try:
             conn.execute("ALTER TABLE tickets ADD COLUMN appearance_count INTEGER DEFAULT 1;")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN ccos_sync_status TEXT DEFAULT NULL;")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE tickets ADD COLUMN customer_completion_date TEXT DEFAULT NULL;")
+        except Exception:
+            pass
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_ccos_sync ON tickets(ccos_sync_status);")
         except Exception:
             pass
         cur_schema_ver = 0
@@ -392,7 +416,7 @@ def _run_init_schema(conn):
                 call_reference TEXT DEFAULT '--',
                 mapped_network_err TEXT DEFAULT '--',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(phone, direction, delivery_time, calling_number, called_number)
+                UNIQUE(phone, site, direction, delivery_time, calling_number, called_number)
             );
         """)
         for col_name in ["originating_msc", "destination_msc", "call_reference", "mapped_network_err"]:
@@ -401,8 +425,38 @@ def _run_init_schema(conn):
             except Exception:
                 pass
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_cdr_phone ON sms_cdr_records(phone);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_cdr_phone_delivery ON sms_cdr_records(phone, delivery_time DESC);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_cdr_delivery ON sms_cdr_records(delivery_time);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_cdr_ticket_code ON sms_cdr_records(ticket_code);")
+
+        # 🎯 Tự động đồng bộ các phiếu tồn cũ từ các ngày trước đang kẹt ở bước 2.6 thành Đã đóng 2.6
+        try:
+            today_prefix = datetime.now().strftime("/%Y/%m/%d/")
+            conn.execute("""
+                UPDATE tickets 
+                SET ticket_status = 'Đã đóng 2.6',
+                    closed_at = COALESCE(incident_time, updated_at),
+                    closed_by = 'Đóng trên OneOSS',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE (ticket_code LIKE '%2.6%' OR ticket_status = 'Chờ đóng lần 2')
+                  AND (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%')
+                  AND ticket_code NOT LIKE ?
+            """, (f"%{today_prefix}%",))
+        except Exception:
+            pass
+
+
+def _warmup_heavy_modules():
+    """Khởi động ngầm nạp sẵn các module nặng vào RAM khi server khởi động"""
+    global _excel_reader_cached
+    try:
+        if _excel_reader_cached is None:
+            from update_tts import excel_reader as _er
+            _excel_reader_cached = _er
+        from spam_call_analyzer import analyze_spam_call_ticket
+        from services.sms_analyzer import parse_sms_incident_details
+    except Exception:
+        pass
 
 
 def init_db():
@@ -417,6 +471,8 @@ def init_db():
             _run_init_schema(conn)
             conn.close()
             _db_initialized = True
+            import threading
+            threading.Thread(target=_warmup_heavy_modules, daemon=True).start()
         except sqlite3.DatabaseError as e:
             err_msg = str(e).lower()
             if "malformed" in err_msg or "file is not a database" in err_msg or "corrupt" in err_msg:
@@ -530,6 +586,8 @@ def get_ttsnew_stage(phone: str) -> dict:
     return None
 
 
+_excel_reader_cached = None
+
 def check_ticket_can_close(t):
     """
     Kiểm tra xem 1 phiếu có đủ điều kiện để đóng tự động / thủ công hay không.
@@ -562,7 +620,11 @@ def check_ticket_can_close(t):
         return False, "Khách hàng phản ánh lỗi ứng dụng cụ thể (Zalo, TikTok...) - Dành cho KTV kiểm tra xử lý, không đóng tự động!"
 
     try:
-        from update_tts import excel_reader
+        global _excel_reader_cached
+        if _excel_reader_cached is None:
+            from update_tts import excel_reader as _er
+            _excel_reader_cached = _er
+        excel_reader = _excel_reader_cached
 
         norm_status = excel_reader.normalize_text(status)
 
@@ -864,7 +926,7 @@ def _execute_save_or_update(conn, t):
         sms_problem or "",
         sms_cdr_summary or "",
         ims_data or "",
-        t.get("deadline_overall", "") or t.get("deadlineOverall", "") or "",
+        t.get("deadline", "") or t.get("deadline_overall", "") or t.get("deadlineOverall", "") or "",
         appearance_count,
     ))
 
@@ -1234,7 +1296,7 @@ def get_system_counts(region=None):
     import time
     now_ts = time.time()
     reg_key = str(region or "ALL").strip().upper()
-    if reg_key in _system_counts_cache and (now_ts - _system_counts_cache_time.get(reg_key, 0) < 3.0):
+    if reg_key in _system_counts_cache and (now_ts - _system_counts_cache_time.get(reg_key, 0) < 30.0):
         return dict(_system_counts_cache[reg_key])
 
     conn = get_db_connection()
@@ -1334,12 +1396,21 @@ def get_system_counts(region=None):
     _system_counts_cache_time[reg_key] = now_ts
     return counts
 
+def _remove_accents_simple(text: str) -> str:
+    """Loại bỏ dấu tiếng Việt để phục vụ so khớp tìm kiếm không dấu."""
+    if not text:
+        return ""
+    import unicodedata
+    nfkd = unicodedata.normalize('NFKD', text)
+    res = "".join([c for c in nfkd if not unicodedata.combining(c)])
+    return res.replace('đ', 'd').replace('Đ', 'D')
+
 def _build_search_clause(search_str):
     """
     Xây dựng mệnh đề SQL tìm kiếm toàn diện cho:
     - Số điện thoại (tự động chuẩn hóa giữa 0... và 84...)
     - Mã phiếu (ticket_code)
-    - Nhận định kỹ thuật (status)
+    - Nhận định kỹ thuật (status - hỗ trợ alias badge UI, có dấu, không dấu, hoa, thường)
     - Nội dung phản ánh (ticket_content)
     - Tiêu đề gói cước (package_title)
     - Tóm tắt AI (ai_summary)
@@ -1349,9 +1420,10 @@ def _build_search_clause(search_str):
     s_raw = str(search_str or "").strip()
     if not s_raw:
         return "", []
-    s_like = f"%{s_raw}%"
+    
+    # 1. Nhánh tìm kiếm số điện thoại
     phone_conds = ["phone LIKE ?"]
-    phone_params = [s_like]
+    phone_params = [f"%{s_raw}%"]
     digits_only = re.sub(r"\D", "", s_raw)
     if digits_only and len(digits_only) >= 7:
         if digits_only.startswith("0"):
@@ -1365,13 +1437,118 @@ def _build_search_clause(search_str):
         else:
             phone_conds.append("phone LIKE ?")
             phone_params.append(f"%{digits_only}%")
-    
     phone_sql = " OR ".join(phone_conds)
-    clause = f" AND ({phone_sql} OR ticket_code LIKE ? OR status LIKE ? OR ticket_content LIKE ? OR package_title LIKE ? OR ai_summary LIKE ? OR comment LIKE ? OR action_plan LIKE ?)"
-    params = phone_params + [s_like, s_like, s_like, s_like, s_like, s_like, s_like]
+
+    # 2. Xây dựng tập các biến thể tìm kiếm cho status & text (khắc phục giới hạn case-sensitive UTF-8 của SQLite LIKE)
+    s_norm = _remove_accents_simple(s_raw).lower()
+    s_upper = s_raw.upper()
+    s_unaccent_upper = _remove_accents_simple(s_raw).upper()
+
+    status_patterns = set()
+    status_patterns.add(s_raw)
+    status_patterns.add(s_upper)
+    if s_unaccent_upper:
+        status_patterns.add(s_unaccent_upper)
+
+    # Mapping từ badge UI / từ khóa thông dụng sang các trạng thái lưu trữ thực tế trong DB
+    STATUS_MAP = [
+        (["nhan ok", "da nhan ok", "da nhan", "nhan binh thuong", "nhan tin ok"], ["ĐÃ NHẬN BÌNH THƯỜNG", "NHẬN ĐƯỢC TIN NHẮN", "NHẬN BÌNH THƯỜNG"]),
+        (["gui ok", "da gui ok", "da gui", "gui binh thuong", "gui tin ok"], ["ĐÃ GỬI BÌNH THƯỜNG", "GỬI ĐƯỢC TIN NHẮN", "GỬI BÌNH THƯỜNG"]),
+        (["du dk", "du dieu kien", "du dk dong", "du dieu kien dong"], ["MẠNG LƯỚI ĐẢM BẢO", "ĐỦ ĐIỀU KIỆN ĐÓNG", "BÌNH THƯỜNG"]),
+        (["dong", "da dong", "de xuat dong", "duoc dong"], ["ĐỦ ĐIỀU KIỆN ĐÓNG", "MẠNG LƯỚI ĐẢM BẢO", "BÌNH THƯỜNG"]),
+        (["binh thuong", "bt", "hoat dong binh thuong"], ["BÌNH THƯỜNG", "HOẠT ĐỘNG BÌNH THƯỜNG", "MẠNG LƯỚI ĐẢM BẢO", "ĐÃ NHẬN BÌNH THƯỜNG", "ĐÃ GỬI BÌNH THƯỜNG"]),
+        (["spam", "khoa spam", "chan spam", "spam tin nhan", "175c"], ["KHÓA SPAM", "175C", "CHẶN CHIỀU GỬI"]),
+        (["136c", "ma doc", "nhiem ma doc", "botnet"], ["136C", "MÃ ĐỘC"]),
+        (["su co", "su co tram", "dien rong", "su co dien rong", "mat song"], ["SỰ CỐ", "DIỆN RỘNG", "SỰ CỐ DIỆN RỘNG", "TRẠM"]),
+        (["cai dat", "cai dat may", "sai tttn", "ttnt", "thiet bi loi"], ["CÀI ĐẶT MÁY", "THIẾT BỊ LỖI", "TTTN", "TTNT"]),
+        (["song kem", "song yeu", "song 4g kem", "bat song 4g kem", "4g kem"], ["SÓNG 4G KÉM", "BẮT SÓNG 4G KÉM", "SÓNG YẾU"]),
+        (["het luu luong", "het dung luong", "het data"], ["HẾT LƯU LƯỢNG", "HẾT DUNG LƯỢNG", "HẾT TIỀN"]),
+        (["bop", "bop bang thong", "ha bang thong", "ha toc do"], ["BÓP BĂNG THÔNG", "HẠ BĂNG THÔNG", "BĂNG THÔNG"]),
+        (["volte", "loi volte", "chua mo volte", "chua co volte"], ["VOLTE"]),
+        (["gprs", "mat gprs", "chua mo gprs"], ["GPRS"]),
+        (["otp", "loi otp", "khong nhan otp", "cham otp"], ["OTP"]),
+        (["profile 65", "hss 65", "p65"], ["PROFILE 65", "HSS PROFILE 65"]),
+        (["mo lai", "khieu nai lai", "reopen"], ["MỞ LẠI"]),
+        (["ung dung", "loi ung dung", "tiktok", "facebook", "youtube", "zalo"], ["ỨNG DỤNG", "TIKTOK", "FACEBOOK", "YOUTUBE", "ZALO"])
+    ]
+
+    for aliases, targets in STATUS_MAP:
+        if any(alias in s_norm for alias in aliases):
+            for t in targets:
+                status_patterns.add(t)
+
+    status_conds = []
+    status_params = []
+    for pat in status_patterns:
+        status_conds.append("status LIKE ?")
+        status_params.append(f"%{pat}%")
+    status_sql = " OR ".join(status_conds)
+
+    # 3. Mở rộng cho các trường text còn lại
+    text_conds = []
+    text_params = []
+    text_fields = ["ticket_code", "ticket_content", "package_title", "ai_summary", "comment", "action_plan"]
+    search_variants = {s_raw, s_upper}
+    if s_unaccent_upper:
+        search_variants.add(s_unaccent_upper)
+
+    for field in text_fields:
+        for var in search_variants:
+            text_conds.append(f"{field} LIKE ?")
+            text_params.append(f"%{var}%")
+    text_sql = " OR ".join(text_conds)
+
+    clause = f" AND ({phone_sql} OR {status_sql} OR {text_sql})"
+    params = phone_params + status_params + text_params
     return clause, params
 
-def get_ticket_counts(source=None, service_type=None, search=None, region=None):
+def _build_incident_date_clause(from_date=None, to_date=None):
+    """
+    Chuẩn hóa chuỗi ngày DD/MM/YYYY của incident_time / created_time sang YYYY-MM-DD
+    để lọc chính xác theo khoảng ngày tiếp nhận trên CSDL.
+    """
+    clause = ""
+    params = []
+    date_expr = "(substr(COALESCE(NULLIF(incident_time, ''), created_time), 7, 4) || '-' || substr(COALESCE(NULLIF(incident_time, ''), created_time), 4, 2) || '-' || substr(COALESCE(NULLIF(incident_time, ''), created_time), 1, 2))"
+    if from_date:
+        f_val = str(from_date).strip()[:10]
+        if f_val:
+            clause += f" AND {date_expr} >= ?"
+            params.append(f_val)
+    if to_date:
+        t_val = str(to_date).strip()[:10]
+        if t_val:
+            clause += f" AND {date_expr} <= ?"
+            params.append(t_val)
+    return clause, params
+
+def _build_closed_date_clause(from_date=None, to_date=None):
+    """
+    Chuẩn hóa chuỗi ngày YYYY-MM-DD để lọc trực tiếp trên B-Tree Index idx_tickets_closed_at
+    (closed_at dạng 'YYYY-MM-DD HH:MM:SS' trên CSDL, đạt tốc độ truy vấn <1ms).
+    """
+    clause = ""
+    params = []
+    f_val = str(from_date).strip()[:10] if from_date else ""
+    t_val = str(to_date).strip()[:10] if to_date else ""
+
+    if f_val and t_val:
+        start_ts = f"{f_val} 00:00:00"
+        end_ts = f"{t_val} 23:59:59"
+        clause += " AND ((closed_at >= ? AND closed_at <= ?) OR (closed_at IS NULL AND updated_at >= ? AND updated_at <= ?))"
+        params.extend([start_ts, end_ts, start_ts, end_ts])
+    elif f_val:
+        start_ts = f"{f_val} 00:00:00"
+        clause += " AND (closed_at >= ? OR (closed_at IS NULL AND updated_at >= ?))"
+        params.extend([start_ts, start_ts])
+    elif t_val:
+        end_ts = f"{t_val} 23:59:59"
+        clause += " AND ((closed_at <= ? AND closed_at IS NOT NULL) OR (closed_at IS NULL AND updated_at <= ?))"
+        params.extend([end_ts, end_ts])
+
+    return clause, params
+
+def get_ticket_counts(source=None, service_type=None, search=None, region=None, from_date=None, to_date=None, tab_filter=None):
     """
     Truy vấn đếm tổng số phiếu, đã đóng, chưa đóng siêu tốc qua SQL (1-2ms),
     thay thế việc duyệt toàn bộ mảng Python get_all_tickets.
@@ -1414,6 +1591,15 @@ def get_ticket_counts(source=None, service_type=None, search=None, region=None):
             query += " AND region = ?"
             params.append(region)
 
+        if from_date or to_date:
+            if tab_filter == "da_dong":
+                d_clause, d_params = _build_closed_date_clause(from_date, to_date)
+            else:
+                d_clause, d_params = _build_incident_date_clause(from_date, to_date)
+            if d_clause:
+                query += d_clause
+                params.extend(d_params)
+
         if search:
             s_clause, s_params = _build_search_clause(search)
             if s_clause:
@@ -1431,8 +1617,7 @@ def get_ticket_counts(source=None, service_type=None, search=None, region=None):
     finally:
         conn.close()
 
-def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=None, service_type=None, region=None):
-    conn = get_db_connection()
+def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=None, service_type=None, region=None, from_date=None, to_date=None):
     query = "SELECT * FROM tickets WHERE 1=1"
     params = []
 
@@ -1448,6 +1633,18 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
     if region and region != "ALL":
         query += " AND region = ?"
         params.append(region)
+
+    # Lọc theo khoảng thời gian:
+    # Nếu xem tab Lịch Sử Đã Đóng -> Lọc theo ngày đóng phiếu (closed_at)
+    # Ngược lại -> Lọc theo ngày tiếp nhận (incident_time / created_time)
+    if from_date or to_date:
+        if tab_filter == "da_dong" or status_filter == "da_dong":
+            d_clause, d_params = _build_closed_date_clause(from_date, to_date)
+        else:
+            d_clause, d_params = _build_incident_date_clause(from_date, to_date)
+        if d_clause:
+            query += d_clause
+            params.extend(d_params)
 
     # Lọc theo loại nghiệp vụ (data / call / sms / other / spam_call / voice_sms / roaming / sim)
     if service_type == "data":
@@ -1515,94 +1712,113 @@ def get_all_tickets(search=None, status_filter=None, tab_filter=None, source=Non
 
     if tab_filter == "all":
         # Ưu tiên các phiếu Chưa đóng lên đầu trang, sắp xếp theo ngày tiếp nhận cũ nhất trước (FIFO)
-        query += " ORDER BY (CASE WHEN ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%' THEN 1 ELSE 0 END) ASC, COALESCE(NULLIF(incident_time, ''), created_time, updated_at) ASC"
+        query += " ORDER BY (CASE WHEN ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%' THEN 1 ELSE 0 END) ASC, COALESCE(NULLIF(ticket_code, ''), created_time, updated_at) ASC"
         if not search:
             query += " LIMIT 400"
     elif tab_filter == "da_dong":
-        query += " ORDER BY updated_at DESC"
+        query += " ORDER BY COALESCE(NULLIF(closed_at, ''), updated_at) DESC"
         if not search:
             query += " LIMIT 400"
     else:
-        # Tab Chưa đóng: Luôn sắp xếp theo ngày tiếp nhận cũ nhất lên trước (FIFO)
-        query += " ORDER BY COALESCE(NULLIF(incident_time, ''), created_time, updated_at) ASC"
+        # Tab Chưa đóng: Luôn sắp xếp theo ngày tiếp nhận cũ nhất lên trước (FIFO theo mã phiếu YYYY/MM/DD/ID)
+        query += " ORDER BY COALESCE(NULLIF(ticket_code, ''), created_time, updated_at) ASC"
 
-    rows = conn.execute(query, params).fetchall()
-    results = []
-    for r in rows:
-        item = dict(r)
-        # Loại bỏ trường processing_content (chứa html log khổng lồ) để giảm payload từ 4MB xuống 200KB
-        item.pop("processing_content", None)
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(query, params).fetchall()
+        results = []
 
-        is_closed = (item.get("ticket_status") in ("Đã đóng", "Da dong") or "Đã đóng" in str(item.get("ticket_status") or ""))
-
-        can_close, reason = check_ticket_can_close(item)
-        item["can_close"] = can_close
-        item["cannot_close_reason"] = reason
-        if not item.get("closed_at") and is_closed:
-            raw_up = str(item.get("updated_at") or "").strip()
-            if raw_up:
-                try:
-                    from datetime import datetime, timedelta
-                    dt = datetime.strptime(raw_up.split('.')[0], "%Y-%m-%d %H:%M:%S")
-                    item["closed_at"] = (dt + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    item["closed_at"] = raw_up
-            else:
-                item["closed_at"] = raw_up
-        if not item.get("prechecked_at") and item.get("status") not in (None, "", "CHƯA PHÂN LOẠI"):
-            raw_up = str(item.get("updated_at") or "").strip()
-            if raw_up:
-                try:
-                    from datetime import datetime, timedelta
-                    dt = datetime.strptime(raw_up.split('.')[0], "%Y-%m-%d %H:%M:%S")
-                    item["prechecked_at"] = (dt + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    item["prechecked_at"] = raw_up
-            else:
-                item["prechecked_at"] = raw_up
-
-        # Gắn kết quả phân tích Chặn gọi ngoại mạng / Cam kết (CHỈ PHÂN TÍCH CHO PHIẾU CHƯA ĐÓNG ĐỂ TỐI ƯU TỐC ĐỘ)
-        if not is_closed:
+        # Pre-import các hàm phân tích ngoài vòng lặp để tránh overhead import lặp lại hàng nghìn lần
+        _spam_analyzer_fn = None
+        _sms_parser_fn = None
+        if not (tab_filter == "da_dong"):
             try:
-                from spam_call_analyzer import analyze_spam_call_ticket
-                tc_lower = str(item.get("ticket_content") or "").lower()
-                pt_lower = str(item.get("package_title") or "").lower()
-                if (service_type in ("spam_call", "outbound_block", "chan_goi_ngoai_mang") or 
-                    "spam" in pt_lower or "spam" in tc_lower or 
-                    "viettel" in tc_lower or "mobi" in tc_lower or 
-                    "cam kết" in tc_lower or "cam ket" in tc_lower or "ngoại mạng" in tc_lower):
-                    s_res = analyze_spam_call_ticket(item.get("package_title", ""), item.get("ticket_content", ""), item.get("ccos_attachments"), phone=str(item.get("phone") or ""))
-                    item["is_outbound_block"] = s_res["is_outbound_block"]
-                    item["carrier_display"] = s_res["carrier_display"]
-                    item["carriers"] = s_res["carriers"]
-                    item["has_commitment"] = s_res["has_commitment"]
-                    item["commitment_display"] = s_res["commitment_display"]
-                    item["commitment_source"] = s_res["commitment_source"]
-                    item["commitment_files"] = s_res["commitment_files"]
-                    item["spam_summary"] = s_res["summary"]
+                from spam_call_analyzer import analyze_spam_call_ticket as _sp_fn
+                _spam_analyzer_fn = _sp_fn
+            except Exception:
+                pass
+            try:
+                from services.sms_analyzer import parse_sms_incident_details as _sm_fn
+                _sms_parser_fn = _sm_fn
             except Exception:
                 pass
 
-        # Tự động trích xuất thông tin Thời điểm sự cố & Lỗi cho phân hệ SMS nếu chưa có trong DB
-        if not is_closed:
-            pt_raw = str(item.get("package_title") or "").strip()
-            if is_sms_ticket(pt_raw) or service_type == "sms":
-                if not item.get("sms_incident_time"):
-                    try:
-                        from services.sms_analyzer import parse_sms_incident_details
-                        parsed_sms = parse_sms_incident_details(item.get("ticket_content", ""), item.get("incident_time", ""))
-                        item["sms_incident_time"] = parsed_sms.get("incident_time", "")
-                        if not item.get("sms_problem") and parsed_sms.get("problem"):
-                            item["sms_problem"] = parsed_sms.get("problem", "")
-                    except Exception:
-                        pass
+        for r in rows:
+            item = dict(r)
+            if item.get("processing_content"):
+                item["processing_content"] = str(item["processing_content"]).strip()
 
-        results.append(item)
-    conn.close()
-    return results
+            is_closed = (item.get("ticket_status") in ("Đã đóng", "Da dong") or "Đã đóng" in str(item.get("ticket_status") or ""))
+
+            if is_closed:
+                item["can_close"] = True
+                item["cannot_close_reason"] = "Đã đóng"
+            else:
+                can_close, reason = check_ticket_can_close(item)
+                item["can_close"] = can_close
+                item["cannot_close_reason"] = reason
+            if not item.get("closed_at") and is_closed:
+                raw_up = str(item.get("updated_at") or "").strip()
+                if raw_up:
+                    try:
+                        dt = datetime.strptime(raw_up.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                        item["closed_at"] = (dt + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        item["closed_at"] = raw_up
+                else:
+                    item["closed_at"] = raw_up
+            if not item.get("prechecked_at") and item.get("status") not in (None, "", "CHƯA PHÂN LOẠI"):
+                raw_up = str(item.get("updated_at") or "").strip()
+                if raw_up:
+                    try:
+                        dt = datetime.strptime(raw_up.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                        item["prechecked_at"] = (dt + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        item["prechecked_at"] = raw_up
+                else:
+                    item["prechecked_at"] = raw_up
+
+            # Gắn kết quả phân tích Chặn gọi ngoại mạng / Cam kết (CHỈ PHÂN TÍCH CHO PHIẾU CHƯA ĐÓNG ĐỂ TỐI ƯU TỐC ĐỘ)
+            if not is_closed and _spam_analyzer_fn:
+                try:
+                    tc_lower = str(item.get("ticket_content") or "").lower()
+                    pt_lower = str(item.get("package_title") or "").lower()
+                    if (service_type in ("spam_call", "outbound_block", "chan_goi_ngoai_mang") or 
+                        "spam" in pt_lower or "spam" in tc_lower or 
+                        "viettel" in tc_lower or "mobi" in tc_lower or 
+                        "cam kết" in tc_lower or "cam ket" in tc_lower or "ngoại mạng" in tc_lower):
+                        s_res = _spam_analyzer_fn(item.get("package_title", ""), item.get("ticket_content", ""), item.get("ccos_attachments"), phone=str(item.get("phone") or ""))
+                        item["is_outbound_block"] = s_res["is_outbound_block"]
+                        item["carrier_display"] = s_res["carrier_display"]
+                        item["carriers"] = s_res["carriers"]
+                        item["has_commitment"] = s_res["has_commitment"]
+                        item["commitment_display"] = s_res["commitment_display"]
+                        item["commitment_source"] = s_res["commitment_source"]
+                        item["commitment_files"] = s_res["commitment_files"]
+                        item["spam_summary"] = s_res["summary"]
+                except Exception:
+                    pass
+
+            # Tự động trích xuất thông tin Thời điểm sự cố & Lỗi cho phân hệ SMS nếu chưa có trong DB
+            if not is_closed and _sms_parser_fn:
+                pt_raw = str(item.get("package_title") or "").strip()
+                if is_sms_ticket(pt_raw) or service_type == "sms":
+                    if not item.get("sms_incident_time"):
+                        try:
+                            parsed_sms = _sms_parser_fn(item.get("ticket_content", ""), item.get("incident_time", ""))
+                            item["sms_incident_time"] = parsed_sms.get("incident_time", "")
+                            if not item.get("sms_problem") and parsed_sms.get("problem"):
+                                item["sms_problem"] = parsed_sms.get("problem", "")
+                        except Exception:
+                            pass
+
+            results.append(item)
+        return results
+    finally:
+        conn.close()
 
 def update_ticket_field(phone, field, value, incident_time=None):
-    valid_fields = ["comment", "action_plan", "ticket_status", "status", "ai_summary", "closed_by", "reopen_count", "last_reopened_date", "incident_cause", "closed_at", "prechecked_at", "ward", "sms_incident_time", "sms_problem", "sms_cdr_summary"]
+    valid_fields = ["comment", "action_plan", "ticket_status", "status", "ai_summary", "closed_by", "reopen_count", "last_reopened_date", "incident_cause", "closed_at", "prechecked_at", "ward", "sms_incident_time", "sms_problem", "sms_cdr_summary", "ccos_sync_status", "customer_completion_date"]
     if field not in valid_fields:
         return False
 
@@ -1648,6 +1864,45 @@ def update_ticket_field(phone, field, value, incident_time=None):
     conn.close()
     notify_tickets_changed()
     return True
+
+def update_ticket_ccos_sync(ticket_id: int = None, phone: str = "", incident_time: str = None, ccos_sync_status: str = "", customer_completion_date: str = ""):
+    """Cập nhật trạng thái đồng bộ CCOS và ngày hoàn thành CCOS vào DB"""
+    init_db()
+    conn = get_db_connection()
+    try:
+        with _DB_WRITE_LOCK:
+            with conn:
+                if ticket_id:
+                    conn.execute("""
+                        UPDATE tickets 
+                        SET ccos_sync_status = ?, 
+                            customer_completion_date = COALESCE(NULLIF(?, ''), customer_completion_date),
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE ticket_id = ?
+                    """, (ccos_sync_status, customer_completion_date, ticket_id))
+                elif phone and incident_time:
+                    conn.execute("""
+                        UPDATE tickets 
+                        SET ccos_sync_status = ?, 
+                            customer_completion_date = COALESCE(NULLIF(?, ''), customer_completion_date),
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE phone = ? AND incident_time = ?
+                    """, (ccos_sync_status, customer_completion_date, phone, incident_time))
+                elif phone:
+                    conn.execute("""
+                        UPDATE tickets 
+                        SET ccos_sync_status = ?, 
+                            customer_completion_date = COALESCE(NULLIF(?, ''), customer_completion_date),
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE phone = ?
+                    """, (ccos_sync_status, customer_completion_date, phone))
+        notify_tickets_changed()
+        return True
+    except Exception as e:
+        print(f"Lỗi update_ticket_ccos_sync: {e}")
+        return False
+    finally:
+        conn.close()
 
 def delete_all_tickets(source=None):
     init_db()
@@ -2090,19 +2345,25 @@ def save_sms_analysis_bulk(records: list):
             if clean_code:
                 conn.execute("""
                     UPDATE tickets 
-                    SET sms_incident_time = ?, sms_problem = ?, updated_at = CURRENT_TIMESTAMP 
+                    SET sms_incident_time = COALESCE(NULLIF(?, ''), sms_incident_time),
+                        sms_problem = COALESCE(NULLIF(?, ''), sms_problem),
+                        updated_at = CURRENT_TIMESTAMP 
                     WHERE ticket_code = ? OR ticket_code LIKE ?
                 """, (sms_inc_time, sms_prob, clean_code, f"{clean_code}%"))
             elif phone and inc_time:
                 conn.execute("""
                     UPDATE tickets 
-                    SET sms_incident_time = ?, sms_problem = ?, updated_at = CURRENT_TIMESTAMP 
+                    SET sms_incident_time = COALESCE(NULLIF(?, ''), sms_incident_time),
+                        sms_problem = COALESCE(NULLIF(?, ''), sms_problem),
+                        updated_at = CURRENT_TIMESTAMP 
                     WHERE phone = ? AND incident_time = ?
                 """, (sms_inc_time, sms_prob, phone, inc_time))
             elif phone:
                 conn.execute("""
                     UPDATE tickets 
-                    SET sms_incident_time = ?, sms_problem = ?, updated_at = CURRENT_TIMESTAMP 
+                    SET sms_incident_time = COALESCE(NULLIF(?, ''), sms_incident_time),
+                        sms_problem = COALESCE(NULLIF(?, ''), sms_problem),
+                        updated_at = CURRENT_TIMESTAMP 
                     WHERE phone = ?
                 """, (sms_inc_time, sms_prob, phone))
     conn.close()
@@ -2242,13 +2503,18 @@ def get_sms_cdr_records(phone: str, ticket_code: str = None, from_date: str = No
     params = []
 
     if clean_p:
-        where_clauses.append("(phone = ? OR phone LIKE ?)")
-        params.extend([clean_p, f"%{clean_p[-9:]}%"])
+        p9 = clean_p[-9:]
+        where_clauses.append("phone IN (?, ?, ?)")
+        params.extend([clean_p, f"0{p9}", p9])
 
     if ticket_code:
         clean_code = str(ticket_code).split("\n")[0].strip()
-        where_clauses.append("(ticket_code = ? OR ticket_code LIKE ?)")
-        params.extend([clean_code, f"{clean_code}%"])
+        if clean_p:
+            where_clauses.append("(ticket_code = ? OR ticket_code LIKE ? OR ticket_code = '' OR ticket_code IS NULL)")
+            params.extend([clean_code, f"{clean_code}%"])
+        else:
+            where_clauses.append("(ticket_code = ? OR ticket_code LIKE ?)")
+            params.extend([clean_code, f"{clean_code}%"])
 
     if iso_from:
         where_clauses.append("delivery_time >= ?")

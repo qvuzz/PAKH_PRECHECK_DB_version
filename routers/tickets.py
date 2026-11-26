@@ -34,7 +34,7 @@ router = APIRouter(prefix="/api", tags=["Quản lý Phiếu Sự Cố (Tickets)"
 
 # ⚡ SERVER-SIDE IN-MEMORY CACHE (0.1ms phản hồi siêu tốc, triệt tiêu nghẽn SQLite)
 _TICKETS_API_CACHE = {}
-_TICKETS_CACHE_TTL = 6.0  # Giữ cache 6 giây trong RAM
+_TICKETS_CACHE_TTL = 30.0  # Giữ cache 30 giây trong RAM (Tự động clear qua event notify_tickets_changed khi có cập nhật DB)
 
 def invalidate_tickets_cache():
     """Xóa toàn bộ In-Memory Cache của API Tickets khi có sự kiện cập nhật DB"""
@@ -53,7 +53,9 @@ def get_tickets_api(
     tab: str = None, 
     source: str = "tts_new", 
     service_type: str = "data",
-    region: str = None
+    region: str = None,
+    from_date: str = None,
+    to_date: str = None
 ):
     src_f = None if source == "all" else source
     srv_f = None if service_type == "all" else service_type
@@ -151,7 +153,7 @@ def get_tickets_api(
         current_user_name = uinfo.get("displayName") or uinfo.get("userName") or "KTV"
 
     # ⚡ SERVER-SIDE IN-MEMORY CACHE (0.1ms phản hồi dùng chung cho toàn bộ KTV trong phân vùng)
-    cache_key = f"{tab}_{src_f}_{srv_f}_{effective_region}_{status_f}_{search or ''}"
+    cache_key = f"{tab}_{src_f}_{srv_f}_{effective_region}_{status_f}_{from_date or ''}_{to_date or ''}_{search or ''}"
     now_ts = time.time()
     cached_val = _TICKETS_API_CACHE.get(cache_key)
     if cached_val and (now_ts - cached_val[1] < _TICKETS_CACHE_TTL):
@@ -166,7 +168,9 @@ def get_tickets_api(
         tab_filter=tab, 
         source=src_f, 
         service_type=srv_f,
-        region=effective_region
+        region=effective_region,
+        from_date=from_date,
+        to_date=to_date
     )
 
     # Đảm bảo phản hồi siêu tốc cho GET /api/tickets: Không chạy blocking ghi DB trong luồng đọc dữ liệu
@@ -176,7 +180,10 @@ def get_tickets_api(
         source=src_f, 
         service_type=srv_f, 
         search=search,
-        region=effective_region
+        region=effective_region,
+        from_date=from_date,
+        to_date=to_date,
+        tab_filter=tab
     )
 
     res_payload = {
@@ -810,9 +817,9 @@ async def save_ai_feedback_api(request: Request):
 @router.post("/tickets/update-incident-time")
 async def update_incident_time_api(request: Request):
     """Cập nhật mốc thời gian sự cố (Mục 2) của phiếu SMS theo điều chỉnh của KTV."""
-    from db_manager import get_db_connection
+    from db_manager import get_db_connection, _DB_WRITE_LOCK, notify_tickets_changed
     from ai_sms_interpreter import update_ai_summary_incident_time, parse_custom_sms_time
-    from ai_cache import save_summary
+    import asyncio
 
     body = await request.json()
     phone = str(body.get("phone") or "").strip()
@@ -830,42 +837,64 @@ async def update_incident_time_api(request: Request):
     parsed = parse_custom_sms_time(new_time)
     formatted_time = parsed.get("time_range_desc") or parsed.get("detected_time") or new_time
 
-    conn = get_db_connection()
-    updated_summary = ""
-    with conn:
-        row = None
-        if ticket_id:
-            row = conn.execute("SELECT rowid, package_title, ticket_content, ai_summary FROM tickets WHERE ticket_id = ?", (ticket_id,)).fetchone()
-        if not row and incident_time:
-            row = conn.execute("SELECT rowid, package_title, ticket_content, ai_summary FROM tickets WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?", (phone, phone_84, f"%{clean_digits[-9:]}%", incident_time)).fetchone()
-        if not row:
-            row = conn.execute("SELECT rowid, package_title, ticket_content, ai_summary FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1", (phone, phone_84, f"%{clean_digits[-9:]}%")).fetchone()
-
-        pkg_title = row[1] if row else "Tin nhắn (SMS)"
-        t_content = row[2] if row else ""
-        current_summary = row[3] if row else ""
-
-        updated_summary = update_ai_summary_incident_time(current_summary, formatted_time)
-
-        if row:
-            target_rowid = row[0]
-            if ticket_id:
-                conn.execute("UPDATE tickets SET sms_incident_time = ?, ai_summary = ?, ticket_id = COALESCE(ticket_id, ?), updated_at = CURRENT_TIMESTAMP WHERE rowid = ?", (formatted_time, updated_summary, ticket_id, target_rowid))
-            else:
-                conn.execute("UPDATE tickets SET sms_incident_time = ?, ai_summary = ?, updated_at = CURRENT_TIMESTAMP WHERE rowid = ?", (formatted_time, updated_summary, target_rowid))
-        else:
-            conn.execute("""
-                INSERT INTO tickets (phone, incident_time, package_title, ticket_content, sms_incident_time, ai_summary, ticket_id, source, ticket_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'tts_new', 'Chưa đóng')
-            """, (phone_84, incident_time or "", pkg_title, t_content, formatted_time, updated_summary, ticket_id))
-
-    conn.close()
-
-    if phone:
+    with _DB_WRITE_LOCK:
+        conn = get_db_connection()
         try:
-            save_summary(phone, pkg_title, t_content, updated_summary)
+            with conn:
+                row = None
+                if ticket_id:
+                    row = conn.execute("SELECT rowid, package_title, ticket_content, ai_summary FROM tickets WHERE ticket_id = ?", (ticket_id,)).fetchone()
+                if not row and incident_time:
+                    row = conn.execute("SELECT rowid, package_title, ticket_content, ai_summary FROM tickets WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?", (phone, phone_84, f"%{clean_digits[-9:]}%", incident_time)).fetchone()
+                if not row:
+                    row = conn.execute("SELECT rowid, package_title, ticket_content, ai_summary FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1", (phone, phone_84, f"%{clean_digits[-9:]}%")).fetchone()
+
+                pkg_title = row[1] if row else "Tin nhắn (SMS)"
+                t_content = row[2] if row else ""
+                current_summary = row[3] if row else ""
+
+                updated_summary = update_ai_summary_incident_time(current_summary, formatted_time)
+
+                if row:
+                    target_rowid = row[0]
+                    if ticket_id:
+                        conn.execute("UPDATE tickets SET sms_incident_time = ?, ai_summary = ?, ticket_id = COALESCE(ticket_id, ?), updated_at = CURRENT_TIMESTAMP WHERE rowid = ?", (formatted_time, updated_summary, ticket_id, target_rowid))
+                    else:
+                        conn.execute("UPDATE tickets SET sms_incident_time = ?, ai_summary = ?, updated_at = CURRENT_TIMESTAMP WHERE rowid = ?", (formatted_time, updated_summary, target_rowid))
+                else:
+                    conn.execute("""
+                        INSERT INTO tickets (phone, incident_time, package_title, ticket_content, sms_incident_time, ai_summary, ticket_id, source, ticket_status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'tts_new', 'Chưa đóng')
+                    """, (phone_84, incident_time or "", pkg_title, t_content, formatted_time, updated_summary, ticket_id))
+        finally:
+            conn.close()
+
+    notify_tickets_changed()
+
+    # Các tác vụ phụ (lưu cache file và lưu mẫu học AI) đẩy sang chạy ngầm không chặn luồng trả về
+    def _background_persist():
+        try:
+            from db_manager import save_ai_feedback_sample
+            save_ai_feedback_sample(
+                ticket_id=ticket_id,
+                phone=phone_84,
+                package_title=pkg_title,
+                ticket_content=t_content,
+                summary_content=updated_summary,
+                verified_by="KTV_TIME",
+                service_type="sms"
+            )
         except Exception:
             pass
+
+        if phone:
+            try:
+                from ai_cache import save_summary
+                save_summary(phone, pkg_title, t_content, updated_summary)
+            except Exception:
+                pass
+
+    threading.Thread(target=_background_persist, daemon=True).start()
 
     return {
         "success": True,
@@ -1348,13 +1377,20 @@ async def precheck_all_sms_tickets_api(request: Request):
             p_84 = ("84" + clean_digits[1:]) if clean_digits.startswith("0") else (("84" + clean_digits) if len(clean_digits) == 9 else clean_digits)
             inc_time = str(t_row.get("incident_time") or "").strip()
 
+            sms_saved_time = str(t_row.get("sms_incident_time") or "").strip()
             t_info = {
                 "title": t_row.get("package_title") or "Tin nhắn (SMS)",
                 "content": t_row.get("ticket_content") or "",
                 "incident_time": inc_time,
                 "created_time": t_row.get("created_time") or "",
+                "processing_content": t_row.get("processing_content") or "",
                 "reopen_count": t_row.get("reopen_count") or 0,
-                "ticket_code": t_row.get("ticket_code") or ""
+                "ticket_code": t_row.get("ticket_code") or "",
+                "ticket_id": t_row.get("ticket_id") or "",
+                "ai_summary": t_row.get("ai_summary") or "",
+                "sms_incident_time": sms_saved_time,
+                "custom_incident_time": sms_saved_time if (sms_saved_time and sms_saved_time != "--") else "",
+                "is_custom_time": bool(sms_saved_time and sms_saved_time != "--")
             }
 
             try:
@@ -1368,8 +1404,8 @@ async def precheck_all_sms_tickets_api(request: Request):
                         sms_cdr_str = json.dumps(res["sms_cdr_summary"], ensure_ascii=False) if isinstance(res["sms_cdr_summary"], dict) else str(res["sms_cdr_summary"])
                     except Exception:
                         sms_cdr_str = ""
-                sms_prob = res.get("entities", {}).get("problem_title") or ""
-                sms_inc_time = res.get("entities", {}).get("time_range_desc") or res.get("entities", {}).get("incident_time") or ""
+                sms_prob = res.get("sms_problem") or res.get("entities", {}).get("problem_title") or ""
+                sms_inc_time = res.get("sms_incident_time") or res.get("entities", {}).get("time_range_desc") or res.get("entities", {}).get("incident_time") or ""
 
                 # Cập nhật kết quả vào database tickets
                 now_str = datetime.now(ICT).strftime("%Y-%m-%d %H:%M:%S")
@@ -1440,6 +1476,7 @@ async def precheck_one_ticket(request: Request):
     incident_time = body.get("incident_time")
     req_service_type = str(body.get("service_type") or "").strip().lower()
     req_region = str(body.get("region") or "").strip().upper()
+    custom_time_input = str(body.get("custom_incident_time") or body.get("new_time") or "").strip()
     if req_region not in ("MB", "MN", "MT"):
         req_region = None
 
@@ -1453,9 +1490,9 @@ async def precheck_one_ticket(request: Request):
     conn = get_db_connection()
     with conn:
         if incident_time:
-            cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code, ai_summary, sms_incident_time, created_time FROM tickets WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?", (phone, phone_84, f"%{clean_digits[-9:]}%", incident_time))
+            cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code, ai_summary, sms_incident_time, created_time, processing_content, flow_id, ticket_id FROM tickets WHERE (phone = ? OR phone = ? OR phone LIKE ?) AND incident_time = ?", (phone, phone_84, f"%{clean_digits[-9:]}%", incident_time))
         else:
-            cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code, ai_summary, sms_incident_time, created_time FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1", (phone, phone_84, f"%{clean_digits[-9:]}%"))
+            cur = conn.execute("SELECT package_title, ticket_content, reopen_count, ticket_code, ai_summary, sms_incident_time, created_time, processing_content, flow_id, ticket_id FROM tickets WHERE phone = ? OR phone = ? OR phone LIKE ? ORDER BY updated_at DESC LIMIT 1", (phone, phone_84, f"%{clean_digits[-9:]}%"))
         row = cur.fetchone()
         pkg_title = (row[0] if row else "Thoại / SMS") or ""
         t_content = row[1] if row else ""
@@ -1464,6 +1501,48 @@ async def precheck_one_ticket(request: Request):
         existing_ai_sum = (row[4] if row and len(row) > 4 else "") or ""
         existing_sms_inc_time = (row[5] if row and len(row) > 5 else "") or ""
         existing_created_time = (row[6] if row and len(row) > 6 else "") or ""
+        existing_proc_content = (row[7] if row and len(row) > 7 else "") or ""
+        existing_flow_id = row[8] if row and len(row) > 8 else None
+        existing_ticket_id = row[9] if row and len(row) > 9 else None
+
+    # 🎯 Nếu thiếu processing_content, tự động kéo từ OneOSS get-ticket-info
+    if not existing_proc_content and existing_flow_id:
+        try:
+            from ttsnew_api import make_api_request, API_BASE_URL, get_cached_token
+            u_tok = request.headers.get("Authorization") or request.cookies.get("TOKEN") or get_cached_token()
+            if u_tok:
+                u_info = f"{API_BASE_URL}/get-ticket-info?ticketTypeId=2&ticketFlowId={existing_flow_id}"
+                r_info = make_api_request(u_info, u_tok, timeout=3)
+                p_data = r_info.get("data") or {}
+                if isinstance(p_data, dict):
+                    fetched_p = str(p_data.get("processingContent") or "").strip()
+                    fetched_dl = str(p_data.get("deadline") or p_data.get("slaDateStep") or p_data.get("deadlineOverall") or p_data.get("deadline_overall") or p_data.get("slaDate") or p_data.get("customerCompletionDate") or "").strip()
+                    norm_dl = ""
+                    if fetched_dl:
+                        from ttsnew_api import normalize_oneoss_date
+                        norm_dl = normalize_oneoss_date(fetched_dl, t_code)
+                    if fetched_p or norm_dl:
+                        if fetched_p:
+                            existing_proc_content = fetched_p
+                        conn_up = get_db_connection()
+                        with conn_up:
+                            if existing_ticket_id:
+                                if fetched_p and norm_dl:
+                                    conn_up.execute("UPDATE tickets SET processing_content = ?, deadline_overall = COALESCE(NULLIF(deadline_overall, ''), ?) WHERE ticket_id = ?", (fetched_p, norm_dl, existing_ticket_id))
+                                elif fetched_p:
+                                    conn_up.execute("UPDATE tickets SET processing_content = ? WHERE ticket_id = ?", (fetched_p, existing_ticket_id))
+                                elif norm_dl:
+                                    conn_up.execute("UPDATE tickets SET deadline_overall = COALESCE(NULLIF(deadline_overall, ''), ?) WHERE ticket_id = ?", (norm_dl, existing_ticket_id))
+                            elif incident_time:
+                                if fetched_p and norm_dl:
+                                    conn_up.execute("UPDATE tickets SET processing_content = ?, deadline_overall = COALESCE(NULLIF(deadline_overall, ''), ?) WHERE (phone = ? OR phone = ?) AND incident_time = ?", (fetched_p, norm_dl, phone, phone_84, incident_time))
+                                elif fetched_p:
+                                    conn_up.execute("UPDATE tickets SET processing_content = ? WHERE (phone = ? OR phone = ?) AND incident_time = ?", (fetched_p, phone, phone_84, incident_time))
+                                elif norm_dl:
+                                    conn_up.execute("UPDATE tickets SET deadline_overall = COALESCE(NULLIF(deadline_overall, ''), ?) WHERE (phone = ? OR phone = ?) AND incident_time = ?", (norm_dl, phone, phone_84, incident_time))
+                        conn_up.close()
+        except Exception:
+            pass
 
     from region_detector import detect_ticket_region
     target_reg = req_region or detect_ticket_region({
@@ -1573,6 +1652,7 @@ async def precheck_one_ticket(request: Request):
 
         def _fetch_voice_task():
             nonlocal v_res, ccos_json_str
+            target_sms_time = custom_time_input or existing_sms_inc_time
             t_info = {
                 "title": pkg_title,
                 "package_title": pkg_title,
@@ -1580,11 +1660,15 @@ async def precheck_one_ticket(request: Request):
                 "ticket_content": t_content,
                 "incident_time": incident_time or existing_created_time,
                 "created_time": existing_created_time,
+                "processing_content": existing_proc_content,
                 "reopen_count": reopen_cnt,
                 "ticket_code": t_code,
+                "ticket_id": existing_ticket_id,
                 "service_type": req_service_type,
                 "ai_summary": existing_ai_sum,
-                "sms_incident_time": existing_sms_inc_time
+                "sms_incident_time": target_sms_time,
+                "custom_incident_time": target_sms_time if (target_sms_time and target_sms_time != "--") else "",
+                "is_custom_time": bool(target_sms_time and target_sms_time != "--")
             }
             v_res = precheck_single_voice_ticket(phone_84, t_info, driver=driver)
             try:
@@ -1992,6 +2076,279 @@ async def check_ccos_ticket_api(request: Request):
     from ccos_client import get_ccos_attachments
     res = get_ccos_attachments(phone)
     return res
+
+
+@router.post("/tickets/scan-ccos-sync")
+async def scan_ccos_sync_api(request: Request):
+    """
+    Rà soát và kiểm tra xem các phiếu đã đóng trên TTS đã được chuyển về CCOS thành công hay chưa.
+    Phát hiện các trường hợp hoàn thành bên TTS nhưng chưa về CCOS (customerCompletionDate rỗng, hoặc lỗi đồng bộ).
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    ticket_id = body.get("ticket_id")
+    if str(ticket_id).strip() in ("0", "", "None"):
+        ticket_id = None
+    ticket_code = body.get("ticket_code")
+    phone = body.get("phone")
+    incident_time = body.get("incident_time")
+    from_date = body.get("from_date")
+    to_date = body.get("to_date")
+    limit = int(body.get("limit") or (1 if ticket_id or phone or ticket_code else 30))
+    force_check = bool(body.get("force_check", False))
+    region = body.get("region")
+
+    if not ticket_id and ticket_code:
+        import re
+        m_code = re.search(r'/(\d+)$', str(ticket_code).split('\n')[0].strip())
+        if m_code:
+            try:
+                ticket_id = int(m_code.group(1))
+            except Exception:
+                pass
+
+    client_ip = request.client.host if request and request.client else "127.0.0.1"
+    is_local = client_ip in ("127.0.0.1", "::1", "localhost", "testclient")
+    client_tok = request.headers.get("Authorization") or request.cookies.get("TOKEN") or ""
+    tok, _ = resolve_ttsnew_token(client_ip, is_local=is_local, client_tok=client_tok)
+    if not tok:
+        import ttsnew_api
+        tok = ttsnew_api.get_cached_token() or ttsnew_api.extract_token_from_browser()
+    if not tok:
+        raise HTTPException(status_code=401, detail="Chưa có phiên làm việc TTS Mới hợp lệ. Vui lòng đăng nhập TTS Mới.")
+
+    headers = _get_oneoss_headers(tok)
+    if not headers:
+        raise HTTPException(status_code=401, detail="Không thể tạo header xác thực OneOSS.")
+
+    from db_manager import get_db_connection, update_ticket_ccos_sync, _build_closed_date_clause
+    conn = get_db_connection()
+    try:
+        where_parts = ["(ticket_status LIKE '%Đã đóng%' OR ticket_status LIKE '%Da dong%')"]
+        params = []
+        if ticket_id:
+            where_parts.append("ticket_id = ?")
+            params.append(ticket_id)
+        elif phone:
+            where_parts.append("phone = ?")
+            params.append(phone)
+        else:
+            if region and region != "ALL":
+                where_parts.append("region = ?")
+                params.append(region)
+            if from_date or to_date:
+                d_clause, d_params = _build_closed_date_clause(from_date, to_date)
+                if d_clause:
+                    where_parts.append(d_clause.strip().lstrip("AND "))
+                    params.extend(d_params)
+            if not force_check:
+                where_parts.append("(ccos_sync_status IS NULL OR ccos_sync_status != 'Đã về CCOS')")
+
+        where_sql = " AND ".join(where_parts)
+        limit_sql = f"LIMIT {limit}" if limit > 0 else ""
+        sql = f"""
+            SELECT ticket_id, ticket_code, phone, incident_time, created_time, ticket_status, 
+                   closed_at, closed_by, ccos_sync_status, customer_completion_date
+            FROM tickets
+            WHERE {where_sql}
+            ORDER BY COALESCE(NULLIF(closed_at, ''), updated_at) DESC
+            {limit_sql}
+        """
+        rows = conn.execute(sql, params).fetchall()
+        tickets_to_check = [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+    if not tickets_to_check and (ticket_id or phone or ticket_code):
+        tickets_to_check = [{
+            "ticket_id": ticket_id,
+            "ticket_code": ticket_code or "",
+            "phone": phone or "",
+            "incident_time": incident_time or "",
+            "ticket_status": "Đã đóng",
+            "ccos_sync_status": None,
+            "customer_completion_date": None
+        }]
+
+    if not tickets_to_check:
+        return {
+            "success": True,
+            "total": 0,
+            "synced_count": 0,
+            "not_synced_count": 0,
+            "items": [],
+            "message": "Không có phiếu nào cần kiểm tra đồng bộ CCOS trong khoảng thời gian đã chọn."
+        }
+
+    import requests
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _check_ticket_worker(t):
+        t_id = t.get("ticket_id")
+        t_code = t.get("ticket_code")
+        t_phone = t.get("phone")
+        inc_time = t.get("incident_time")
+        
+        status_result = "Chưa kiểm tra"
+        comp_date = ""
+        ccos_code = ""
+        error_detail = ""
+
+        if not t_id and t_code:
+            import re
+            m_code = re.search(r'/(\d+)$', str(t_code).split('\n')[0].strip())
+            if m_code:
+                try:
+                    t_id = int(m_code.group(1))
+                except Exception:
+                    pass
+
+        if t_id:
+            try:
+                url_edit = f"https://gw-oneoss.vnpt.vn/oss/tts/ticket/ticket-tts-api/Ticket/get-editable-ticket/{t_id}"
+                r_edit = requests.get(url_edit, headers=headers, timeout=6)
+                if r_edit.status_code == 200:
+                    j_edit = r_edit.json()
+                    t_data = j_edit.get("data") or {}
+                    cust_comp = t_data.get("customerCompletionDate")
+                    ccos_code = t_data.get("ccosCode") or ""
+                    status_name = str(t_data.get("statusName") or "").strip()
+                    status_name_lower = status_name.lower()
+                    cl_status_id = t_data.get("clTicketStatusId")
+                    raw_status = t_data.get("status")
+
+                    is_oneoss_closed = (
+                        status_name_lower in ("đã đóng", "da dong", "chờ đóng", "cho dong", "hoàn thành", "hoan thanh", "đã xử lý", "da xu ly", "closed", "completed") or
+                        cl_status_id in (100, 3, 4, 5) or
+                        raw_status in (100, 3, 4, 5)
+                    )
+
+                    if cust_comp and str(cust_comp).strip():
+                        # Đã có mốc giờ tổng đài CCOS nghiệm thu hoàn tất với khách hàng
+                        status_result = "Đã về CCOS"
+                        comp_date = str(cust_comp).strip()
+                    elif is_oneoss_closed:
+                        # Đã đóng kỹ thuật bước 2.6 trên OneOSS và chuyển giao kết quả sang CCOS
+                        status_result = "Đã về CCOS"
+                        raw_closing = t_data.get("closingDate") or t_data.get("updatedDate") or ""
+                        if raw_closing and str(raw_closing).strip():
+                            clean_c = str(raw_closing).strip()
+                            if "T" in clean_c:
+                                parts = clean_c.split("T")
+                                date_p = parts[0]
+                                time_p = parts[1][:8]
+                                if "-" in date_p:
+                                    dp = date_p.split("-")
+                                    comp_date = f"{time_p} {dp[2]}/{dp[1]}/{dp[0]}" if len(dp) == 3 else f"{time_p} {date_p}"
+                                else:
+                                    comp_date = f"{time_p} {date_p}"
+                            else:
+                                comp_date = clean_c
+                        else:
+                            comp_date = "Đã hoàn tất kỹ thuật trên OneOSS"
+
+                        # 🎯 Tự động đồng bộ trạng thái đóng vào database nếu trước đó bị kẹt Phiếu lỗi hoặc Chưa đóng
+                        try:
+                            conn_chk = get_db_connection()
+                            with conn_chk:
+                                closer_name = str(t_data.get("assigneeName") or t_data.get("assignee") or "Đóng trên OneOSS").strip()
+                                conn_chk.execute("""
+                                    UPDATE tickets 
+                                    SET ticket_status = 'Đã đóng 2.6', 
+                                        closed_at = COALESCE(closed_at, ?), 
+                                        closed_by = COALESCE(closed_by, ?), 
+                                        updated_at = CURRENT_TIMESTAMP 
+                                    WHERE ticket_id = ? AND (ticket_status NOT LIKE '%Đã đóng%' AND ticket_status NOT LIKE '%Da dong%')
+                                """, (comp_date, closer_name, t_id))
+                            conn_chk.close()
+                        except Exception:
+                            pass
+                    else:
+                        status_result = "Chưa về CCOS"
+                        curr_st = status_name or (f"Mã trạng thái {cl_status_id}" if cl_status_id else "Chưa đóng")
+                        error_detail = f"Phiếu chưa đóng hoàn tất trên OneOSS (hiện tại: {curr_st}), chưa thể chuyển giao CCOS."
+                elif r_edit.status_code == 401:
+                    status_result = "Lỗi xác thực OneOSS"
+                    error_detail = "Phiên TTS hết hạn"
+                else:
+                    status_result = "Lỗi kết nối OneOSS"
+                    error_detail = f"HTTP {r_edit.status_code}"
+            except Exception as ex_net:
+                status_result = "Lỗi kết nối"
+                error_detail = str(ex_net)
+
+        # Fallback: Nếu OneOSS chưa báo đã đóng nhưng có SĐT, đối soát trực tiếp với CCOS session nếu có
+        if status_result != "Đã về CCOS" and t_phone:
+            try:
+                import json as _json, urllib.parse, urllib.request
+                from ccos_client import normalize_msisdn_ccos, get_ccos_cookies, CCOS_BASE_URL
+                c_cookies = get_ccos_cookies()
+                if c_cookies:
+                    tb = normalize_msisdn_ccos(t_phone)
+                    cookie_hdr = "; ".join([f"{k}={v}" for k, v in c_cookies.items()])
+                    url_search = f"{CCOS_BASE_URL}/Views/TTKH/Handler/ThongTinKhachHang.ashx?Type=LSKhieuNai"
+                    post_data = urllib.parse.urlencode({"SoThueBao": tb, "ViewAll": "0", "page": 1, "rp": 5}).encode("utf-8")
+                    req1 = urllib.request.Request(url_search, data=post_data, headers={
+                        "Origin": CCOS_BASE_URL,
+                        "Referer": f"{CCOS_BASE_URL}/Views/TTKH/ThongTinKhachHang.aspx",
+                        "Cookie": cookie_hdr,
+                        "X-Requested-With": "XMLHttpRequest"
+                    })
+                    with urllib.request.urlopen(req1, timeout=3.5) as resp1:
+                        c_text = resp1.read().decode("utf-8", errors="ignore")
+                    c_data = _json.loads(c_text)
+                    c_rows = c_data.get("rows", [])
+                    if c_rows and len(c_rows) > 0:
+                        status_result = "Đã về CCOS"
+                        comp_date = comp_date or "Ghi nhận trên hệ thống CCOS"
+            except Exception:
+                pass
+
+        update_ticket_ccos_sync(
+            ticket_id=t_id,
+            phone=t_phone,
+            incident_time=inc_time,
+            ccos_sync_status=status_result,
+            customer_completion_date=comp_date
+        )
+
+        return {
+            "ticket_id": t_id,
+            "ticket_code": t_code,
+            "phone": t_phone,
+            "incident_time": inc_time,
+            "status": status_result,
+            "customer_completion_date": comp_date,
+            "ccos_code": ccos_code,
+            "error_detail": error_detail
+        }
+
+    results = []
+    synced_count = 0
+    not_synced_count = 0
+
+    max_workers = min(6, len(tickets_to_check)) if tickets_to_check else 1
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_check_ticket_worker, t) for t in tickets_to_check]
+        for f in as_completed(futures):
+            res_item = f.result()
+            results.append(res_item)
+            if res_item["status"] == "Đã về CCOS":
+                synced_count += 1
+            elif res_item["status"] in ("Chưa về CCOS", "Lỗi kết nối", "Lỗi kết nối OneOSS"):
+                not_synced_count += 1
+
+    return {
+        "success": True,
+        "total": len(results),
+        "synced_count": synced_count,
+        "not_synced_count": not_synced_count,
+        "items": results,
+        "message": f"Đã kiểm tra {len(results)} phiếu: {synced_count} phiếu đã về CCOS, {not_synced_count} phiếu chưa về CCOS."
+    }
 
 
 # ==============================================================================

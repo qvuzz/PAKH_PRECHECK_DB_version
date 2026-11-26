@@ -7,14 +7,22 @@ import json
 import openpyxl
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-EXCEL_FILE = os.path.join(BASE_DIR, "KICH_BAN_TIEN_KIEM_PRECHECK.xlsx")
+DEFAULT_EXCEL_FILE = os.path.join(BASE_DIR, "KICH_BAN_TIEN_KIEM_PRECHECK.xlsx")
+V2_EXCEL_FILE = os.path.join(BASE_DIR, "KICH_BAN_TIEN_KIEM_PRECHECK_DA_CHINH_SUA_v2.xlsx")
 
-def import_scenarios(dry_run=True, sheet_target="Kich_Ban_Tin_Nhan_SMS"):
-    if not os.path.exists(EXCEL_FILE):
-        print(f"[ERR] Khong tim thay file Excel: {EXCEL_FILE}")
+def import_scenarios(dry_run=True, sheet_target="all", excel_path=None):
+    if not excel_path:
+        if os.path.exists(V2_EXCEL_FILE):
+            excel_path = V2_EXCEL_FILE
+        else:
+            excel_path = DEFAULT_EXCEL_FILE
+
+    if not os.path.exists(excel_path):
+        print(f"[ERR] Khong tim thay file Excel: {excel_path}")
         return
 
-    wb = openpyxl.load_workbook(EXCEL_FILE, data_only=True)
+    print(f"[IMPORT] Dang doc file Excel: {os.path.basename(excel_path)}")
+    wb = openpyxl.load_workbook(excel_path, data_only=True)
     
     # 1. Doc Sheet SMS
     if sheet_target in ("all", "Kich_Ban_Tin_Nhan_SMS") and "Kich_Ban_Tin_Nhan_SMS" in wb.sheetnames:
@@ -112,6 +120,12 @@ def import_scenarios(dry_run=True, sheet_target="Kich_Ban_Tin_Nhan_SMS"):
                     print(f"[APPLY] Da cap nhat thanh cong: {f_name}")
                 else:
                     print(f"[DRY-RUN] San sang cap nhat vao: {f_name}")
+        if not dry_run:
+            try:
+                from services.sms_analyzer import _SMS_RESOURCES
+                _SMS_RESOURCES.clear()
+            except Exception:
+                pass
 
     # 2. Doc Sheet Data Mobile (neu chon all hoac Kich_Ban_Data_Mobile)
     if sheet_target in ("all", "Kich_Ban_Data_Mobile") and "Kich_Ban_Data_Mobile" in wb.sheetnames:
@@ -157,9 +171,16 @@ def import_scenarios(dry_run=True, sheet_target="Kich_Ban_Tin_Nhan_SMS"):
 if __name__ == "__main__":
     import sys
     dry_mode = "--apply" not in sys.argv
-    target = "Kich_Ban_Tin_Nhan_SMS"
-    if "--all" in sys.argv:
-        target = "all"
+    target = "all"
+    if "--sms" in sys.argv:
+        target = "Kich_Ban_Tin_Nhan_SMS"
     elif "--data" in sys.argv:
         target = "Kich_Ban_Data_Mobile"
-    import_scenarios(dry_run=dry_mode, sheet_target=target)
+        
+    custom_file = None
+    for arg in sys.argv[1:]:
+        if arg.endswith(".xlsx"):
+            custom_file = arg
+            break
+            
+    import_scenarios(dry_run=dry_mode, sheet_target=target, excel_path=custom_file)

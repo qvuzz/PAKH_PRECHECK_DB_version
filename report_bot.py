@@ -879,7 +879,7 @@ def check_core_profile_failure(sub_info):
         return (
             "CHƯA KHAI BÁO PROFILE 4G",
             "Kiểm tra trên hệ thống HSS Core, thuê bao chưa được mở profile dịch vụ 4G LTE, thiết bị chỉ kết nối được sóng 2G/3G hoặc không truy cập được dữ liệu.",
-            "Chuyển bộ phận IT/Khai thác mạng kiểm tra, bổ sung kích hoạt profile 4G cho thuê bao trên hệ thống.",
+            "Nhờ VNP kiểm tra, bổ sung kích hoạt profile 4G cho thuê bao trên hệ thống.",
             "FCE4D6"
         )
 
@@ -1303,7 +1303,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         return (
             "BỊ KHÓA SÓNG 3G (RESTRICTED AREA)",
             "Kiểm tra hệ thống Core HLR/HSS: Ghi nhận Sub State = RESTRICTED AREA. Thuê bao đang bị khóa sóng 3G / thuộc vùng hạn chế sóng nên không thể truy cập mạng Mobile Internet.",
-            "Chuyển IT/Khai thác mạng kiểm tra mở lại sóng 3G trên Core HLR/HSS cho thuê bao hoặc kích hoạt profile 4G LTE cho thuê bao.",
+            "Nhờ VNP kiểm tra mở lại sóng 3G trên Core HLR/HSS cho thuê bao hoặc kích hoạt profile 4G LTE cho thuê bao.",
             "FCE4D6"
         )
 
@@ -1490,7 +1490,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     return (
                         "GÓI HOME THIẾU CỜ OCSE",
                         f"Khách hàng phản ánh đang sử dụng gói {rep_p}, tuy nhiên tra cứu hệ thống PCRF (SAPC) không ghi nhận cờ OCSE (gói cước HOME bắt buộc phải có cờ OCSE để cấp lưu lượng data chia sẻ).",
-                        f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {rep_p} và kích hoạt bổ sung cờ OCSE cho thuê bao trên hệ thống PCRF/OCS." + action_suffix,
+                        f"Nhờ VNP kiểm tra cấu hình gói {rep_p} và kích hoạt bổ sung cờ OCSE cho thuê bao trên hệ thống PCRF/OCS." + action_suffix,
                         "FFF2CC"
                     )
 
@@ -1539,13 +1539,13 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                         return (
                             "LỖI GÓI CƯỚC (THIẾU ODA_BIG_OCS)",
                             f"Khách hàng phản ánh đang sử dụng gói {rep_p}{vol_str}, tuy nhiên tra cứu Core SAPC bị thiếu profile data chính (ODA_BIG_OCS){oda_str}. Thuê bao bị rớt/lỗi khai báo gói cước data trên SAPC dẫn đến không truy cập được Internet.",
-                            f"Chuyển IT/CCBS kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
+                            f"Nhờ VNP kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
                             "FFF2CC"
                         )
                     return (
                         "CHƯA ĐĂNG KÝ GÓI KHÁCH BÁO",
                         f"Khách hàng phản ánh đang sử dụng gói {rep_p}{vol_str}, tuy nhiên tra cứu hệ thống PCRF (SAPC) không ghi nhận gói cước này trên thuê bao{oda_str}. Do đó thuê bao không có quyền truy cập dữ liệu di động Internet.",
-                        f"Chuyển IT/CCBS kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
+                        f"Nhờ VNP kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
                         "FFF2CC"
                     )
 
@@ -1572,7 +1572,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         return (
             f"LỖI GÓI {dep_pkg_name} - THIẾU PAYGO",
             f"Thuê bao đăng ký gói {dep_pkg_name} (gói cước phụ thuộc mã dịch vụ 3001) nhưng hệ thống PCRF/SAPC chưa được khai báo gói nền PAYGO (M0), dẫn đến mất kết nối dữ liệu di động.",
-            f"Chuyển bộ phận IT/Khai thác cước kiểm tra và kích hoạt bổ sung gói nền PAYGO cho thuê bao trên hệ thống." + action_suffix,
+            f"Nhờ VNP kiểm tra và kích hoạt bổ sung gói nền PAYGO cho thuê bao trên hệ thống." + action_suffix,
             "FFF2CC"
         )
 
@@ -1667,7 +1667,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 return (
                     "LỖI GÓI CƯỚC (THIẾU ODA_BIG_OCS)",
                     f"Khách hàng phản ánh đang sử dụng gói {rep_p}{vol_str}, tuy nhiên tra cứu Core SAPC bị thiếu profile data chính (ODA_BIG_OCS) (SAPC chỉ có gói tiện ích {addon_names}). Thuê bao bị rớt/lỗi khai báo gói cước data trên SAPC dẫn đến không truy cập được Internet.",
-                    f"Chuyển IT/CCBS kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
+                    f"Nhờ VNP kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
                     "FFF2CC"
                 )
             return (
@@ -1699,7 +1699,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 return (
                     "LỖI DO GÓI CƯỚC",
                     f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
-                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                    f"Nhờ VNP kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                     "FFF2CC"
                 )
 
@@ -1727,7 +1727,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     return (
                         "LỖI DO GÓI CƯỚC",
                         f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu (kể cả trước 5 ngày gần đây), nghi ngờ lỗi luồng cước/profile gói.",
-                        f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                        f"Nhờ VNP kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                         "FFF2CC"
                     )
                 else:
@@ -1750,7 +1750,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             return (
                 "LỖI DO GÓI CƯỚC",
                 f"Thuê bao đăng ký gói {act_names} từ ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu, nghi ngờ lỗi luồng cước/profile gói.",
-                f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                f"Nhờ VNP kiểm tra cấu hình gói {act_names} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                 "FFF2CC"
             )
 
@@ -1933,7 +1933,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 return (
                     "LỖI GÓI CƯỚC (THIẾU ODA_BIG_OCS)",
                     f"Khách hàng phản ánh đang sử dụng gói {rep_p}{vol_str}, tuy nhiên tra cứu Core SAPC bị thiếu profile data chính (ODA_BIG_OCS) (SAPC chỉ có gói tiện ích {addon_names}). Thuê bao bị rớt/lỗi khai báo gói cước data trên SAPC dẫn đến không truy cập được Internet.",
-                    f"Chuyển IT/CCBS kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
+                    f"Nhờ VNP kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
                     "FFF2CC"
                 )
             return (
@@ -1986,7 +1986,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             return (
                 "LỖI DO GÓI CƯỚC",
                 f"Thuê bao có gói cước {act_names} (đăng ký từ ngày {act_reg_dates}, còn hạn đến {act_exp_dates}), tuy nhiên kể từ khi đăng ký đến nay lịch sử BTools không phát sinh các mã dịch vụ (Service ID) hợp lệ của gói cước (chỉ ghi nhận mã {sys_str}). Nghi ngờ lỗi luồng cước hoặc profile gói chưa được kích hoạt quyền truy cập data.",
-                f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {act_names} trên hệ thống PCRF/OCS để kích hoạt lại quyền truy cập cho thuê bao." + action_suffix,
+                f"Nhờ VNP kiểm tra cấu hình gói {act_names} trên hệ thống PCRF/OCS để kích hoạt lại quyền truy cập cho thuê bao." + action_suffix,
                 "FFF2CC"
             )
 
@@ -2561,7 +2561,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 return (
                     "LỖI GÓI CƯỚC (THIẾU ODA_BIG_OCS)",
                     f"Khách hàng phản ánh đang sử dụng gói {rep_p}{vol_str}, tuy nhiên tra cứu Core SAPC bị thiếu profile data chính (ODA_BIG_OCS) (SAPC chỉ có gói tiện ích {addon_names}). Thuê bao bị rớt/lỗi khai báo gói cước data trên SAPC dẫn đến không truy cập được Internet.",
-                    f"Chuyển IT/CCBS kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
+                    f"Nhờ VNP kiểm tra khai báo gói cước {rep_p} cho Khách hàng." + action_suffix,
                     "FFF2CC"
                 )
             return (
@@ -2649,7 +2649,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 return (
                     "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
                     f"Hồ sơ SAPC ghi nhận gói [{all_act_names}]{extra_ai_note} đăng ký ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu sử dụng thực tế{rec_codes_str}, nghi ngờ lỗi luồng cước/profile gói.",
-                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {all_act_names}{extra_fix_note} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                    f"Nhờ VNP kiểm tra cấu hình gói {all_act_names}{extra_fix_note} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                     "FFF2CC"
                 )
 
@@ -2693,7 +2693,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                     return (
                         "GÓI CÒN HẠN - KHÔNG DÙNG ĐƯỢC",
                         f"Hồ sơ SAPC ghi nhận gói [{all_act_names}]{extra_ai_note} đăng ký ngày {act_reg_dates} (còn hạn đến {act_exp_dates}) nhưng từ khi đăng ký đến nay không phát sinh dữ liệu sử dụng thực tế{rec_codes_str}, nghi ngờ lỗi luồng cước/profile gói.",
-                        f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {all_act_names}{extra_fix_note} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                        f"Nhờ VNP kiểm tra cấu hình gói {all_act_names}{extra_fix_note} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                         "FFF2CC"
                     )
             # Nhánh 2B: Có phát sinh data trước đó, chỉ gần đây không phát sinh dù bắt RAT TYPE = 6 (4G) bình thường -> ĐÓNG PHIẾU LUÔN
@@ -2773,7 +2773,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
         return (
             "LỖI GÓI HOME / NGHẼN BĂNG THÔNG",
             f"Lịch sử BTools ghi nhận mã dịch vụ 10002/10003 (Hạ băng thông gói HOME/Gia đình). Thuê bao {pkg_names} đang bị bóp băng thông nên không thể truy cập Internet tốc độ cao.",
-            f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {pkg_names} và khôi phục lưu lượng tốc độ cao cho thuê bao.",
+            f"Nhờ VNP kiểm tra cấu hình gói {pkg_names} và khôi phục lưu lượng tốc độ cao cho thuê bao.",
             "FFF2CC"
         )
 
@@ -2799,7 +2799,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
             return (
                 "LỖI GÓI HOME / NGHẼN BĂNG THÔNG",
                 f"{pkg_desc}, tuy nhiên {rec_str} và không có phiên kết nối nào trên 1MB (phiên lớn nhất đạt {max_session_mb:.2f}MB). Nghi ngờ bị bóp băng thông hoặc gói HOME bị lỗi chia sẻ data.",
-                f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình các gói [{sapc_str or ai_str}] trên hệ thống và luồng chia sẻ data của thuê bao.",
+                f"Nhờ VNP kiểm tra cấu hình các gói [{sapc_str or ai_str}] trên hệ thống và luồng chia sẻ data của thuê bao.",
                 "FFF2CC"
             )
         elif active_pkgs and all(p.get("is_home") or p.get("is_no_date") for p in active_pkgs):
@@ -2845,7 +2845,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 return (
                     "LỖI DO GÓI CƯỚC",
                     f"Khách hàng phản ánh sử dụng gói [{p_cand}]{sapc_note}, tuy nhiên {rec_str} và không phát sinh phiên nào trên 1MB (phiên lớn nhất đạt {max_session_mb:.2f}MB). Nghi ngờ lỗi luồng cước / chưa kích hoạt profile gói.",
-                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {p_cand}{f' và gói {sapc_str}' if sapc_note else ''} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                    f"Nhờ VNP kiểm tra cấu hình gói {p_cand}{f' và gói {sapc_str}' if sapc_note else ''} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                     "FFF2CC"
                 )
             elif not expected_codes and (recent_5d_mb < 1.0 or recent_traffic_mb < 1.0 or not has_session_over_1mb):
@@ -2853,7 +2853,7 @@ def analyze_subscriber_status(clean_data, package_title, ticket_content="", phon
                 return (
                     "LỖI DO GÓI CƯỚC",
                     f"Khách hàng phản ánh sử dụng gói [{p_cand}]{sapc_note}, tuy nhiên {rec_str}. Nghi ngờ lỗi luồng cước / gói cước chưa được kích hoạt quyền truy cập data.",
-                    f"Chuyển bộ phận IT/Tính cước kiểm tra cấu hình gói {p_cand}{f' và gói {sapc_str}' if sapc_note else ''} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
+                    f"Nhờ VNP kiểm tra cấu hình gói {p_cand}{f' và gói {sapc_str}' if sapc_note else ''} trên hệ thống để kích hoạt lại quyền truy cập cho thuê bao.",
                     "FFF2CC"
                 )
 

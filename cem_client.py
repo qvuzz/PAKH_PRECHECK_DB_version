@@ -137,18 +137,21 @@ class CEMClient:
     def load_cookies_from_chrome(self, driver=None, force_refresh=False):
         """Tự động trích xuất apikey và toàn bộ cookie của CEM từ trình duyệt (Chrome CDP, Firefox, Edge)."""
         drv = driver or self.driver
-        if not drv:
-            try:
-                from auth_extractor import get_chrome_debug_driver
-                drv = get_chrome_debug_driver()
-                if drv:
-                    self.driver = drv
-            except Exception:
-                pass
 
         try:
             from auth_extractor import get_universal_cem_auth
             extracted_key, cookies_dict = get_universal_cem_auth(driver=drv, force_refresh=force_refresh)
+
+            # Chỉ khởi tạo Selenium ChromeDriver nếu cache/CDP WS chưa có key và đang ép làm mới
+            if not extracted_key and not drv and force_refresh:
+                try:
+                    from auth_extractor import get_chrome_debug_driver
+                    drv = get_chrome_debug_driver()
+                    if drv:
+                        self.driver = drv
+                        extracted_key, cookies_dict = get_universal_cem_auth(driver=drv, force_refresh=force_refresh)
+                except Exception:
+                    pass
 
             for name, val in cookies_dict.items():
                 self.session.cookies.set(name, val, domain="cem.vnptmedia.vn", path="/")

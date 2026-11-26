@@ -264,7 +264,14 @@ def get_ccos_attachments(phone: str, driver=None, timeout: float = 6.0, retry_co
             clean_url = link_url.strip()
             if not clean_url.startswith("http"):
                 clean_url = urllib.parse.urljoin(CCOS_BASE_URL, clean_url)
-            if clean_name and "Download.aspx" in clean_url:
+            clean_url_low = clean_url.lower()
+            is_file_link = (
+                "download.aspx" in clean_url_low
+                or "attachment" in clean_url_low
+                or "viewfile" in clean_url_low
+                or any(clean_url_low.endswith(ext) for ext in ('.jpg', '.jpeg', '.png', '.pdf', '.docx', '.doc', '.xlsx', '.xls', '.rar', '.zip', '.mp3', '.wav', '.txt'))
+            )
+            if clean_name and is_file_link:
                 found_files.append({
                     "name": clean_name,
                     "url": clean_url

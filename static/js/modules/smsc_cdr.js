@@ -188,6 +188,7 @@ function getMessageStatusTooltip(statusVal) {
 
 function getTerminationCauseTooltip(causeVal) {
     const cStr = String(causeVal || '').trim().toUpperCase();
+    if (cStr === '0' || cStr === '0000') return '0 (SUCCESS): Giao tin thành công (Normal / Successful).';
     const cObj = smsCodeData?.smsc_cause_for_termination?.codes?.[cStr];
     if (cObj) {
         let tip = `Cause For Termination: Mã ${cStr} - ${cObj.standard_name || cObj.name || ''}\nÝ nghĩa: ${cObj.meaning_vi || ''}`;
@@ -292,7 +293,7 @@ function ensureSmscCdrHeaders() {
         thead.innerHTML = `
             <tr style="white-space:nowrap; background:#f1f5f9; color:#1e293b;">
                 <th style="position:sticky; top:0; z-index:10; background:#f1f5f9; border-bottom:2px solid #cbd5e1; padding:8px 8px; width:42px; text-align:center;" title="Số thứ tự bản ghi">STT</th>
-                <th style="position:sticky; top:0; z-index:10; background:#f1f5f9; border-bottom:2px solid #cbd5e1; padding:8px 8px; width:58px; text-align:center;" title="Site: Tổng đài SMSC phục vụ xử lý (HNI: Hà Nội, HCM: TP.Hồ Chí Minh)">Site</th>
+                <th style="position:sticky; top:0; z-index:10; background:#f1f5f9; border-bottom:2px solid #cbd5e1; padding:8px 8px; width:78px; text-align:center;" title="Cụm tổng đài SMSC / FDA chuẩn theo IP (FDA 26: 10.204.57.26, FDA 235: 10.161.72.235, FDA 204: 10.161.131.204)">FDA</th>
                 <th style="position:sticky; top:0; z-index:10; background:#f1f5f9; border-bottom:2px solid #cbd5e1; padding:8px 10px; min-width:120px;" title="Calling Number: Số thuê bao hoặc đầu số khởi tạo gửi tin nhắn">Calling Number</th>
                 <th style="position:sticky; top:0; z-index:10; background:#f1f5f9; border-bottom:2px solid #cbd5e1; padding:8px 10px; min-width:120px;" title="Called Number: Số thuê bao hoặc đầu số đích nhận tin nhắn">Called Number</th>
                 <th style="position:sticky; top:0; z-index:10; background:#f1f5f9; border-bottom:2px solid #cbd5e1; padding:8px 10px; min-width:210px; width:210px;" title="Dịch vụ / Brandname / Đầu số xác định từ thư viện SMS (sms_lib.json)">Dịch vụ / Brandname</th>
@@ -330,6 +331,10 @@ function openSmscCdrModal(phone, event) {
         innerBox.style.minHeight = '0';
     }
     ensureSmscCdrHeaders();
+
+    // Luôn mặc định KHÔNG chọn "Quét mới từ hệ thống", ưu tiên lấy Database có sẵn để hiển thị tức thì
+    const forceCheck = document.getElementById('cdrForceRefreshCheck');
+    if (forceCheck) forceCheck.checked = false;
 
     const input = document.getElementById('cdrPhoneInput');
     if (phone && input) {
@@ -378,6 +383,9 @@ function openSmscCdrModal(phone, event) {
 function closeSmscCdrModal() {
     const modal = document.getElementById('modalSmscCdr');
     if (modal) modal.style.display = 'none';
+    clearAllCdrDetailFilters(false);
+    const filterRow = document.getElementById('cdrFilterRow');
+    if (filterRow) filterRow.style.display = 'none';
 }
 
 function setCdrTimePreset(val, btn) {
@@ -422,15 +430,106 @@ document.addEventListener('keydown', function (e) {
 // Biến lưu trạng thái bảng tra cứu CDR
 let cdrFilterFailedOnly = false;
 let cdrDirectionFilter = 'all'; // 'all' | 'mo' | 'mt'
+let cdrFilterCalling = '';
+let cdrFilterCalled = '';
 let lastCdrRecords = [];
 let lastCdrPhone = '';
 let cdrCurrentPage = 1;
 let cdrPageSize = 50; // 'all' hoặc số lượng dòng trên 1 trang
 
+function onCdrFilterCallingChange(val) {
+    cdrFilterCalling = String(val || '').trim();
+    const btnClear = document.getElementById('btnClearFilterCalling');
+    if (btnClear) btnClear.style.display = cdrFilterCalling ? 'inline-block' : 'none';
+    cdrCurrentPage = 1;
+    updateCdrDetailFilterControls();
+    renderCdrTable();
+}
+
+function onCdrFilterCalledChange(val) {
+    cdrFilterCalled = String(val || '').trim();
+    const btnClear = document.getElementById('btnClearFilterCalled');
+    if (btnClear) btnClear.style.display = cdrFilterCalled ? 'inline-block' : 'none';
+    cdrCurrentPage = 1;
+    updateCdrDetailFilterControls();
+    renderCdrTable();
+}
+
+function clearCdrFilterCalling() {
+    const inp = document.getElementById('cdrFilterCallingInput');
+    if (inp) inp.value = '';
+    onCdrFilterCallingChange('');
+}
+
+function clearCdrFilterCalled() {
+    const inp = document.getElementById('cdrFilterCalledInput');
+    if (inp) inp.value = '';
+    onCdrFilterCalledChange('');
+}
+
+function clearAllCdrDetailFilters(shouldRender = true) {
+    cdrFilterCalling = '';
+    cdrFilterCalled = '';
+    const inpCalling = document.getElementById('cdrFilterCallingInput');
+    if (inpCalling) inpCalling.value = '';
+    const inpCalled = document.getElementById('cdrFilterCalledInput');
+    if (inpCalled) inpCalled.value = '';
+    const btnClearCalling = document.getElementById('btnClearFilterCalling');
+    if (btnClearCalling) btnClearCalling.style.display = 'none';
+    const btnClearCalled = document.getElementById('btnClearFilterCalled');
+    if (btnClearCalled) btnClearCalled.style.display = 'none';
+    updateCdrDetailFilterControls();
+    if (shouldRender) {
+        cdrCurrentPage = 1;
+        renderCdrTable();
+    }
+}
+
+function applyCdrCallingFilter(num) {
+    if (!num || num === '--') return;
+    const inp = document.getElementById('cdrFilterCallingInput');
+    if (inp) inp.value = num;
+    onCdrFilterCallingChange(num);
+}
+
+function applyCdrCalledFilter(num) {
+    if (!num || num === '--') return;
+    const inp = document.getElementById('cdrFilterCalledInput');
+    if (inp) inp.value = num;
+    onCdrFilterCalledChange(num);
+}
+
+function updateCdrDetailFilterControls() {
+    const hasFilter = !!(cdrFilterCalling || cdrFilterCalled);
+    const btnClearAll = document.getElementById('btnClearAllDetailFilters');
+    if (btnClearAll) btnClearAll.style.display = hasFilter ? 'inline-flex' : 'none';
+
+    const badge = document.getElementById('cdrFilterResultBadge');
+    if (badge) {
+        if (hasFilter) {
+            badge.style.display = 'inline-block';
+            const filteredRecs = getFilteredCdrRecords();
+            const txtFiltered = document.getElementById('cdrFilteredCountText');
+            if (txtFiltered) txtFiltered.innerText = filteredRecs.length.toLocaleString();
+            const txtTotal = document.getElementById('cdrTotalUnfilteredCountText');
+            let baseTotal = (lastCdrRecords || []).length;
+            if (cdrDirectionFilter === 'mo') {
+                baseTotal = (lastCdrRecords || []).filter(r => String(r.direction || '').toUpperCase().includes('MO')).length;
+            } else if (cdrDirectionFilter === 'mt') {
+                baseTotal = (lastCdrRecords || []).filter(r => String(r.direction || '').toUpperCase().includes('MT')).length;
+            }
+            if (txtTotal) txtTotal.innerText = baseTotal.toLocaleString();
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+}
+
 function setSmscCdrDirectionFilter(dir) {
     cdrDirectionFilter = dir || 'all';
     cdrCurrentPage = 1;
     updateCdrDirectionFilterUi();
+    updateCdrDetailFilterControls();
     renderCdrTable();
 }
 
@@ -479,6 +578,32 @@ function getFilteredCdrRecords() {
     if (cdrFilterFailedOnly) {
         records = records.filter(isCdrRecordFailed);
     }
+    if (cdrFilterCalling) {
+        const qCall = cdrFilterCalling.toLowerCase();
+        const cleanQCall = qCall.replace(/\D/g, '');
+        records = records.filter(r => {
+            const c = String(r.calling_number || '').toLowerCase();
+            if (c.includes(qCall)) return true;
+            if (cleanQCall.length >= 3) {
+                const cleanC = c.replace(/\D/g, '');
+                if (cleanC && (cleanC.includes(cleanQCall) || cleanC.endsWith(cleanQCall) || cleanQCall.endsWith(cleanC))) return true;
+            }
+            return false;
+        });
+    }
+    if (cdrFilterCalled) {
+        const qCalled = cdrFilterCalled.toLowerCase();
+        const cleanQCalled = qCalled.replace(/\D/g, '');
+        records = records.filter(r => {
+            const c = String(r.called_number || '').toLowerCase();
+            if (c.includes(qCalled)) return true;
+            if (cleanQCalled.length >= 3) {
+                const cleanC = c.replace(/\D/g, '');
+                if (cleanC && (cleanC.includes(cleanQCalled) || cleanC.endsWith(cleanQCalled) || cleanQCalled.endsWith(cleanC))) return true;
+            }
+            return false;
+        });
+    }
     return records;
 }
 
@@ -521,11 +646,14 @@ function isCdrRecordSuccess(r) {
     const sc = String(r.status_code || '').trim();
     const tc = String(r.termination_cause || r.result_code || '').trim().toUpperCase();
 
-    // CHỈ CÔNG NHẬN THÀNH CÔNG KHI CÓ MÃ XÁC NHẬN GIAO TIN CHUẨN XÁC 3GPP (100C / 133C / 4108 hoặc Status 2 Delivered)
+    // CHỈ CÔNG NHẬN THÀNH CÔNG KHI CÓ MÃ XÁC NHẬN GIAO TIN CHUẨN XÁC 3GPP (100C / 133C / 4108 hoặc Status 2 Delivered / Cause 0)
     if (tc === '100C' || tc === '133C' || tc === '4108' || sc === '100C' || sc === '133C' || sc === '4108') {
         return true;
     }
-    if (sc === '2' && (tc === '0' || tc === '0000' || tc === '' || tc === '--' || tc === 'NONE' || tc === 'NULL')) {
+    if ((sc === '2' || sc === '0') && (tc === '0' || tc === '0000' || tc === '' || tc === '--' || tc === 'NONE' || tc === 'NULL')) {
+        return true;
+    }
+    if (r.is_success === true || r.status_type === 'success') {
         return true;
     }
     // Tuyệt đối không fallback theo r.status_type cũ trong database
@@ -541,6 +669,13 @@ function isCdrRecordPending(r) {
     const code = String(r.status_code || '').trim();
     if (['0', '1', '3'].includes(code)) return true;
     return false;
+}
+
+if (typeof window !== 'undefined') {
+    window.isCdrRecordIntermediate = isCdrRecordIntermediate;
+    window.isCdrRecordFailed = isCdrRecordFailed;
+    window.isCdrRecordSuccess = isCdrRecordSuccess;
+    window.isCdrRecordPending = isCdrRecordPending;
 }
 
 // QUY TẮC B: Gom nhóm các bản ghi kết quả theo CALL REFERENCE (loại bỏ 199C và Attempts = 000)
@@ -617,6 +752,10 @@ function calculateCdrGroupStats(records) {
     };
 }
 
+if (typeof window !== 'undefined') {
+    window.calculateCdrGroupStats = calculateCdrGroupStats;
+}
+
 function toggleOnlyFailedCdr(btn) {
     cdrFilterFailedOnly = !cdrFilterFailedOnly;
     cdrCurrentPage = 1;
@@ -683,7 +822,20 @@ function renderCdrTable() {
         if (emptyState) {
             emptyState.style.display = 'block';
             let emptyMsg = 'Không có bản ghi nào.';
-            if (cdrFilterFailedOnly) {
+            if (cdrFilterCalling || cdrFilterCalled) {
+                const conds = [];
+                if (cdrFilterCalling) conds.push(`Số gửi chứa "${escapeHtml(cdrFilterCalling)}"`);
+                if (cdrFilterCalled) conds.push(`Số nhận chứa "${escapeHtml(cdrFilterCalled)}"`);
+                emptyMsg = `
+                    <div style="padding:24px 20px; text-align:center;">
+                        <div style="color:#64748b; font-weight:600; font-size:12px;">Không tìm thấy bản ghi nào khớp bộ lọc chi tiết:</div>
+                        <div style="color:#0f172a; font-weight:700; margin:6px 0 10px 0; font-size:13px;">${conds.join(' & ')}</div>
+                        <button type="button" onclick="clearAllCdrDetailFilters()"
+                            style="background:#0d9488; color:#ffffff; border:none; border-radius:2px; padding:6px 14px; font-size:11.5px; font-weight:700; cursor:pointer;">
+                            Xóa bộ lọc để xem lại ${lastCdrRecords.length} bản ghi
+                        </button>
+                    </div>`;
+            } else if (cdrFilterFailedOnly) {
                 emptyMsg = `<div style="color:#15803d; font-weight:700; padding:10px;">Không có tin nhắn lỗi nào trong ${lastCdrRecords.length} bản ghi CDR!</div>`;
             } else if (cdrDirectionFilter === 'mo') {
                 emptyMsg = `Không có bản ghi gửi đi (MO) nào.`;
@@ -785,10 +937,18 @@ function renderCdrTable() {
             return isNaN(num) ? String(val) : String(num).padStart(len, '0');
         };
 
-        const siteUpper = String(r.site || 'HCM').toUpperCase();
-        const siteBadge = (siteUpper === 'HNI' || siteUpper === 'HN' || siteUpper.includes('HN'))
-            ? `<span style="background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; font-weight:800; font-size:9.5px; padding:1px 5px; border-radius:3px;">HNI</span>`
-            : `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-weight:800; font-size:9.5px; padding:1px 5px; border-radius:3px;">HCM</span>`;
+        const siteUpper = String(r.site || '26').toUpperCase();
+        let siteBadge = '';
+        if (siteUpper.includes('204')) {
+            const fdaLabel = siteUpper.includes('(') ? r.site : 'FDA 204';
+            siteBadge = `<span style="background:#f5f3ff; color:#6d28d9; border:1px solid #ddd6fe; font-weight:700; font-size:9.5px; padding:1px 6px; border-radius:2px; white-space:nowrap;" title="FDAM2A (10.161.131.204)">${escapeHtml(fdaLabel)}</span>`;
+        } else if (siteUpper.includes('235') || siteUpper.includes('NODE2') || siteUpper.includes('NODE 2') || siteUpper.includes('72.235')) {
+            const fdaLabel = siteUpper.includes('(') ? r.site : 'FDA 235';
+            siteBadge = `<span style="background:#fffbeb; color:#b45309; border:1px solid #fde68a; font-weight:700; font-size:9.5px; padding:1px 6px; border-radius:2px; white-space:nowrap;" title="Core SMSC (10.161.72.235)">${escapeHtml(fdaLabel)}</span>`;
+        } else {
+            const fdaLabel = siteUpper.includes('(') ? r.site : 'FDA 26';
+            siteBadge = `<span style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-weight:700; font-size:9.5px; padding:1px 6px; border-radius:2px; white-space:nowrap;" title="SMSC Core (10.204.57.26)">${escapeHtml(fdaLabel)}</span>`;
+        }
 
         const isTargetCalling = isPhoneMatch(r.calling_number, lastCdrPhone);
         const isTargetCalled = isPhoneMatch(r.called_number, lastCdrPhone);
@@ -844,9 +1004,20 @@ function renderCdrTable() {
         }
 
         // Chi tiết nguyên nhân kết thúc
-        const termInfo = isIntermediate
+        let termInfo = isIntermediate
             ? 'Tiếp nhận ghép mảnh tin dài (Bỏ qua)'
-            : String(r.termination_cause_info || 'Message Delivery Successful').trim();
+            : String(r.termination_cause_info || '').trim();
+
+        if (!termInfo || termInfo === '0' || termInfo === '0000' || termInfo === '--' || termInfo === '100C' || termInfo === '100c') {
+            const tcKey = String(r.termination_cause || r.result_code || '').trim().toUpperCase();
+            if (tcKey === '100C' || tcKey === '0' || tcKey === '0000' || tcKey === '4108' || tcKey === '133C' || isSuccess) {
+                termInfo = 'Message Delivery Successful';
+            } else if (termCauseTip && !termCauseTip.startsWith('Cause For Termination:')) {
+                termInfo = termCauseTip;
+            } else {
+                termInfo = 'Message Delivery Successful';
+            }
+        }
         const fullTermInfoTip = `${termInfo}\n(${termCauseTip})`;
         const termInfoBox = `
             <div style="display:inline-flex; align-items:center; justify-content:space-between; background:#ffffff; border:1px solid ${isIntermediate ? '#cbd5e1' : (isFailed ? '#fca5a5' : (isSuccess ? '#86efac' : '#cbd5e1'))}; border-radius:4px; padding:3px 10px; font-size:11px; color:${isIntermediate ? '#64748b' : (isFailed ? '#b91c1c' : (isSuccess ? '#15803d' : '#334155'))}; width:230px; box-sizing:border-box; box-shadow:inset 0 1px 2px rgba(0,0,0,0.03); cursor:help;" title="${escapeHtml(fullTermInfoTip)}">
@@ -865,12 +1036,19 @@ function renderCdrTable() {
             ? escapeHtml(r.destination_msc) 
             : `<span style="color:#94a3b8; font-style:italic;" title="Không ghi nhận địa chỉ MSC đích">--</span>`;
 
+        const callClickAttr = (r.calling_number && r.calling_number !== '--')
+            ? `cursor:pointer; text-decoration:underline; text-underline-offset:2px;" onclick="applyCdrCallingFilter('${escapeHtml(r.calling_number)}')" title="Bấm để lọc nhanh theo số gửi này: ${escapeHtml(r.calling_number)}`
+            : `;`;
+        const calledClickAttr = (r.called_number && r.called_number !== '--')
+            ? `cursor:pointer; text-decoration:underline; text-underline-offset:2px;" onclick="applyCdrCalledFilter('${escapeHtml(r.called_number)}')" title="Bấm để lọc nhanh theo số nhận này: ${escapeHtml(r.called_number)}`
+            : `;`;
+
         return `
             <tr style="background:${rowBg}; border-left:${borderLeft}; border-bottom:1px solid #e2e8f0; transition:background 0.15s ease; white-space:nowrap;" onmouseover="this.style.background='${rowHoverBg}'" onmouseout="this.style.background='${rowBg}'">
                 <td style="padding:6px 8px; text-align:center;">${sttHtml}</td>
                 <td style="padding:6px 8px; text-align:center;">${siteBadge}</td>
-                <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; font-weight:${isTargetCalling ? '800' : '500'}; color:${isTargetCalling ? '#0f766e' : '#334155'};">${escapeHtml(r.calling_number || '--')}</td>
-                <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; font-weight:${isTargetCalled ? '800' : '500'}; color:${isTargetCalled ? '#0f766e' : '#334155'};">${escapeHtml(r.called_number || '--')}</td>
+                <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; font-weight:${isTargetCalling ? '800' : '500'}; color:${isTargetCalling ? '#0f766e' : '#334155'}; ${callClickAttr}">${escapeHtml(r.calling_number || '--')}</td>
+                <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; font-weight:${isTargetCalled ? '800' : '500'}; color:${isTargetCalled ? '#0f766e' : '#334155'}; ${calledClickAttr}">${escapeHtml(r.called_number || '--')}</td>
                 <td style="padding:6px 10px; font-family:'Segoe UI', sans-serif; font-size:11px; min-width:210px; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; box-sizing:border-box;">${serviceInfo.html}</td>
                 <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; color:#334155; min-width:145px; width:145px; box-sizing:border-box;">${escapeHtml(r.delivery_time || '--')}</td>
                 <td style="padding:6px 10px; font-family:'JetBrains Mono', monospace; font-size:11px; color:#475569; display:${cdrShowMscColumns ? '' : 'none'};">${origMscVal}</td>
@@ -959,6 +1137,9 @@ async function executeSmscCdrQuery(forceLive = false) {
     if (spinner) spinner.style.display = 'block';
     if (emptyState) emptyState.style.display = 'none';
     if (resultsTable) resultsTable.style.display = 'none';
+    if (kpiSection) kpiSection.style.display = 'none';
+    const filterRowLoading = document.getElementById('cdrFilterRow');
+    if (filterRowLoading) filterRowLoading.style.display = 'none';
     if (btnSubmit) {
         btnSubmit.disabled = true;
         btnSubmit.style.opacity = '0.65';
@@ -976,7 +1157,15 @@ async function executeSmscCdrQuery(forceLive = false) {
         if (isForce) {
             queryUrl += `&force_refresh=true`;
         }
-        const res = await fetch(queryUrl);
+        const controller = new AbortController();
+        const timeoutMs = isForce ? 65000 : 15000;
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        let res;
+        try {
+            res = await fetch(queryUrl, { signal: controller.signal });
+        } finally {
+            clearTimeout(timeoutId);
+        }
         const data = await res.json();
 
         if (spinner) spinner.style.display = 'none';
@@ -1032,6 +1221,7 @@ async function executeSmscCdrQuery(forceLive = false) {
         lastCdrPhone = cleanPhone;
         cdrFilterFailedOnly = false;
         cdrDirectionFilter = 'all';
+        clearAllCdrDetailFilters(false);
         cdrCurrentPage = 1;
         updateCdrDirectionFilterUi();
 
@@ -1046,6 +1236,87 @@ async function executeSmscCdrQuery(forceLive = false) {
 
         // QUY TẮC B: Gom nhóm theo CALL REFERENCE cho các bản ghi kết quả (loại bỏ 199C / Attempts = 000)
         const stats = calculateCdrGroupStats(records);
+
+        // ĐỒNG BỘ NGAY VÀO DASHBOARD CHÍNH (CACHE, CỘT BẢNG & DRAWER CHI TIẾT)
+        try {
+            const causeMap = {};
+            records.forEach(r => {
+                if (!isCdrRecordIntermediate(r) && isCdrRecordFailed(r)) {
+                    const cause = r.termination_cause_info || r.termination_cause || r.status_desc || 'Lỗi không xác định';
+                    causeMap[cause] = (causeMap[cause] || 0) + 1;
+                }
+            });
+            const topErrors = Object.entries(causeMap)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3)
+                .map(([cause, count]) => ({ cause, count }));
+
+            const syncSummaryObj = {
+                phone: cleanPhone,
+                totalHits: data.total_hits || records.length,
+                moCount: stats.moTotal,
+                moOk: stats.moOk,
+                moFail: stats.moFail,
+                moRate: stats.moRate,
+                mtCount: stats.mtTotal,
+                mtOk: stats.mtOk,
+                mtFail: stats.mtFail,
+                mtRate: stats.mtRate,
+                fromDate: fromDateVal,
+                toDate: toDateVal,
+                timeRangeDesc: timeRangeDesc || (fromDateVal && toDateVal ? `${fromDateVal} → ${toDateVal}` : 'Thời gian gần đây'),
+                topErrors: topErrors,
+                records: records
+            };
+
+            if (typeof window !== 'undefined') {
+                window.smsCdrSummaryCache = window.smsCdrSummaryCache || {};
+                window.smsCdrSummaryCache[cleanPhone] = syncSummaryObj;
+
+                if (typeof cachedTickets !== 'undefined' && Array.isArray(cachedTickets)) {
+                    cachedTickets.forEach(x => {
+                        const xPhone = String(x.phone || '').trim().replace(/\D/g, '');
+                        const cleanX = xPhone.startsWith('0') ? ('84' + xPhone.slice(1)) : ((!xPhone.startsWith('84') && xPhone.length === 9) ? ('84' + xPhone) : xPhone);
+                        if (cleanX === cleanPhone) {
+                            x.sms_cdr_summary = syncSummaryObj;
+                        }
+                    });
+                }
+
+                // Cập nhật ô tóm tắt trên bảng chính
+                document.querySelectorAll(`[id^="sms-cdr-summary-"]`).forEach(el => {
+                    if (el.id.includes(cleanPhone)) {
+                        el.innerHTML = `
+                            <div style="font-family:'JetBrains Mono', monospace; font-size:10.5px; line-height:1.35; text-align:center;">
+                                <div style="color:${stats.moTotal === 0 ? '#64748b' : (stats.moRate >= 90 ? '#15803d' : '#b45309')}; font-weight:700;">
+                                    MO: ${stats.moTotal} (${stats.moTotal > 0 ? stats.moRate + '%' : '--'})
+                                </div>
+                                <div style="color:${stats.mtTotal === 0 ? '#64748b' : (stats.mtRate >= 90 ? '#0369a1' : '#b45309')}; font-weight:700; margin-top:1px;">
+                                    MT: ${stats.mtTotal} (${stats.mtTotal > 0 ? stats.mtRate + '%' : '--'})
+                                </div>
+                                <div style="margin-top:2px;">
+                                    <a href="javascript:void(0)" onclick="openSmscCdrModal('${cleanPhone}', event)" style="font-size:10px; color:#0284c7; font-weight:700; text-decoration:underline;">
+                                        Chi tiết (${records.length}) ↗
+                                    </a>
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+
+                // Cập nhật trực tiếp vào thẻ chi tiết mở rộng trong Drawer
+                document.querySelectorAll(`[id^="sms-cdr-detail-card-"]`).forEach(el => {
+                    if (el.id.includes(cleanPhone)) {
+                        const ticketKey = el.id.replace('sms-cdr-detail-card-', '');
+                        if (typeof window.renderSmsCdrDetailContent === 'function') {
+                            el.innerHTML = window.renderSmsCdrDetailContent(ticketKey, cleanPhone, '', '');
+                        }
+                    }
+                });
+            }
+        } catch (exSync) {
+            console.warn('Lỗi đồng bộ tóm tắt CDR về Dashboard:', exSync);
+        }
 
         const kpiTotal = document.getElementById('kpiTotalCdr');
         const kpiMo = document.getElementById('kpiMoCdr');
@@ -1076,6 +1347,8 @@ async function executeSmscCdrQuery(forceLive = false) {
         if (badgeFailed) badgeFailed.innerText = stats.failedLogCount;
         if (boxFilter) boxFilter.style.display = stats.failedLogCount > 0 ? 'inline-flex' : 'none';
         if (kpiSection) kpiSection.style.display = 'flex';
+        const filterRow = document.getElementById('cdrFilterRow');
+        if (filterRow) filterRow.style.display = (records.length > 0) ? 'flex' : 'none';
 
         if (summaryText) {
             const failedNotice = stats.totalFail > 0 ? `, <span style="color:#dc2626; font-weight:700;">(Phát hiện ${stats.totalFail} tin nhắn thất bại)</span>` : '';
@@ -1084,6 +1357,7 @@ async function executeSmscCdrQuery(forceLive = false) {
         }
 
         if (records.length === 0) {
+            if (filterRow) filterRow.style.display = 'none';
             if (emptyState) {
                 emptyState.style.display = 'block';
                 emptyState.innerHTML = `Không có bản ghi tin nhắn SMSC nào phát sinh cho thuê bao <b>${escapeHtml(cleanPhone)}</b> trong khoảng ${escapeHtml(timeRangeDesc)}.`;
@@ -1163,6 +1437,12 @@ async function exportSmscCdrToExcel() {
     if (cdrFilterFailedOnly) {
         timeRangeDesc += ' [Chỉ bản tin lỗi]';
     }
+    if (cdrFilterCalling) {
+        timeRangeDesc += ` [Lọc Calling: ${cdrFilterCalling}]`;
+    }
+    if (cdrFilterCalled) {
+        timeRangeDesc += ` [Lọc Called: ${cdrFilterCalled}]`;
+    }
 
     // Làm giàu dữ liệu: bổ sung thông tin Service / Brandname cho từng bản ghi trước khi xuất
     const enrichedRecords = records.map(r => {
@@ -1175,15 +1455,23 @@ async function exportSmscCdrToExcel() {
         } catch (e) {
             sName = '';
         }
+        let fdaExcelName = 'FDA 26';
+        const sUp = String(r.site || '26').toUpperCase();
+        if (sUp.includes('204')) fdaExcelName = sUp.includes('(') ? r.site : 'FDA 204';
+        else if (sUp.includes('235') || sUp.includes('NODE2') || sUp.includes('NODE 2') || sUp.includes('72.235')) fdaExcelName = sUp.includes('(') ? r.site : 'FDA 235';
+        else fdaExcelName = sUp.includes('(') ? r.site : 'FDA 26';
+
         return {
             ...r,
+            site: fdaExcelName,
             service_name: sName || r.brandname || r.service_info || '--'
         };
     });
 
     const btns = [
         document.getElementById('btnExportSmscCdrExcel'),
-        ...document.querySelectorAll('button[onclick*="exportSmscCdrToExcel"]')
+        document.getElementById('btnExportSmscCdrCsv'),
+        ...document.querySelectorAll('button[onclick*="exportSmscCdrTo"]')
     ].filter(Boolean);
 
     btns.forEach(b => {
@@ -1235,6 +1523,7 @@ async function exportSmscCdrToExcel() {
     }
 }
 window.exportSmscCdrToExcel = exportSmscCdrToExcel;
+window.exportSmscCdrToCsv = exportSmscCdrToExcel;
 
 function exportCdrForPhone(phone, event) {
     if (event) event.stopPropagation();
@@ -1250,5 +1539,15 @@ function exportCdrForPhone(phone, event) {
     window.location.href = `/api/cdr/export_excel?phone=${encodeURIComponent(cleanP)}`;
 }
 window.exportCdrForPhone = exportCdrForPhone;
+
+if (typeof window !== 'undefined') {
+    window.onCdrFilterCallingChange = onCdrFilterCallingChange;
+    window.onCdrFilterCalledChange = onCdrFilterCalledChange;
+    window.clearCdrFilterCalling = clearCdrFilterCalling;
+    window.clearCdrFilterCalled = clearCdrFilterCalled;
+    window.clearAllCdrDetailFilters = clearAllCdrDetailFilters;
+    window.applyCdrCallingFilter = applyCdrCallingFilter;
+    window.applyCdrCalledFilter = applyCdrCalledFilter;
+}
 
 

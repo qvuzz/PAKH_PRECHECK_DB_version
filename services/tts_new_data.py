@@ -379,7 +379,7 @@ def _process_single_ticket(
         "processing_content": ticket.get("processing_content", ""),
         "region": ticket.get("region") or "MN",
         "loaded_by": ticket.get("loaded_by", ""),
-        "deadline_overall": ticket.get("deadline_overall", "")
+        "deadline_overall": ticket.get("deadline", "") or ticket.get("deadline_overall", "")
     }
 
     with list_lock:
@@ -641,9 +641,10 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False, target_
                 from region_detector import is_superadmin
                 is_admin_sync = is_superadmin(decode_jwt(user_token))
 
-            if (is_admin_sync or t_reg) and not force_recheck:
-                from db_manager import sync_active_tickets_state
-                sync_active_tickets_state([], source="tts_new", key_type="ticket_code", service_type="data", region=t_reg)
+            # TUYỆT ĐỐI KHÔNG dùng sync_active_tickets_state đóng hàng loạt bằng NOT IN
+            # if (is_admin_sync or t_reg) and not force_recheck:
+            #     from db_manager import sync_active_tickets_state
+            #     sync_active_tickets_state([], source="tts_new", key_type="ticket_code", service_type="data", region=t_reg)
 
             state.log("WARN", f"Đã quét {total_scanned} phiếu trên TTS Mới và không có phiếu Mobile Internet nào đang xử lý / cần tiền kiểm lại{f' tại {t_reg}' if t_reg else ''}.", region=t_reg)
             return
@@ -680,7 +681,7 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False, target_
                         "last_reopened_date": t.get("last_reopened_date") or "",
                         "region": t.get("region") or t_reg or "MN",
                         "loaded_by": t.get("loaded_by") or "",
-                        "deadline_overall": t.get("deadline_overall", "")
+                        "deadline_overall": t.get("deadline", "") or t.get("deadline_overall", "")
                     })
             if init_records:
                 save_tickets_bulk(init_records)
@@ -694,15 +695,17 @@ def execute_tts_new_data_cycle(driver=None, force_recheck: bool = False, target_
             from region_detector import is_superadmin
             is_admin_sync = is_superadmin(decode_jwt(user_token))
 
-        if (is_admin_sync or t_reg) and not force_recheck:
-            active_codes = {str(t.get("ticket_code", "")).strip() for t in enriched_tickets if t.get("ticket_code")}
-            scanned_regs = {t.get("region") for t in enriched_tickets if t.get("region")}
-            from db_manager import sync_active_tickets_state
-            if scanned_regs:
-                for s_reg in scanned_regs:
-                    sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data", region=s_reg)
-            else:
-                sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data", region=t_reg)
+        # TUYỆT ĐỐI KHÔNG dùng sync_active_tickets_state đóng hàng loạt bằng NOT IN,
+        # tránh việc một KTV quét làm đóng oan toàn bộ phiếu của KTV khác trong vùng.
+        # if (is_admin_sync or t_reg) and not force_recheck:
+        #     active_codes = {str(t.get("ticket_code", "")).strip() for t in enriched_tickets if t.get("ticket_code")}
+        #     scanned_regs = {t.get("region") for t in enriched_tickets if t.get("region")}
+        #     from db_manager import sync_active_tickets_state
+        #     if scanned_regs:
+        #         for s_reg in scanned_regs:
+        #             sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data", region=s_reg)
+        #     else:
+        #         sync_active_tickets_state(active_codes, source="tts_new", key_type="ticket_code", service_type="data", region=t_reg)
 
         # 🎯 LỌC DANH SÁCH PHIẾU CẦN TIỀN KIỂM:
         # Nếu không force_recheck: CHỈ TIỀN KIỂM NHỮNG PHIẾU MỚI VỪA NHẬN (chưa có nhận định hợp lệ trong DB).

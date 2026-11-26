@@ -246,17 +246,36 @@ def get_universal_btools_cookie(driver=None) -> str:
 def get_universal_ttsnew_token(driver=None) -> str:
     """
     Lấy Bearer Token TTS Mới từ bất kỳ trình duyệt nào (Chrome, Edge, Firefox, hoặc cache).
+    Đảm bảo token hợp lệ và CHƯA HẾT HẠN (exp > now + 30s).
     """
+    def _is_valid_tok(t_str: str) -> bool:
+        if not t_str or len(t_str) < 30:
+            return False
+        try:
+            import base64, json, time
+            raw = t_str.replace("Bearer ", "").strip()
+            parts = raw.split(".")
+            if len(parts) >= 2:
+                p = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+                data = json.loads(base64.b64decode(p).decode("utf-8"))
+                exp = data.get("exp")
+                if exp:
+                    return exp > (time.time() + 30)
+                return True
+        except Exception:
+            pass
+        return False
+
     # 1. Thử lấy từ Chrome/Edge CDP 9222
     tok = extract_cdp_local_storage("tts.vnptnet.vn", "TOKEN")
-    if tok:
+    if tok and _is_valid_tok(tok):
         if not tok.startswith("Bearer "):
             tok = "Bearer " + tok
         return tok
 
     # 2. Thử lấy từ Firefox localStorage
     tok_ff = extract_firefox_local_storage("tts.vnptnet.vn", "TOKEN")
-    if tok_ff:
+    if tok_ff and _is_valid_tok(tok_ff):
         if not tok_ff.startswith("Bearer "):
             tok_ff = "Bearer " + tok_ff
         return tok_ff
@@ -266,12 +285,29 @@ def get_universal_ttsnew_token(driver=None) -> str:
         try:
             if "tts.vnptnet.vn" in driver.current_url.lower():
                 tok_drv = driver.execute_script("return localStorage.getItem('TOKEN');")
-                if tok_drv:
+                if tok_drv and _is_valid_tok(tok_drv):
                     if not tok_drv.startswith("Bearer "):
                         tok_drv = "Bearer " + tok_drv
                     return tok_drv
         except Exception:
             pass
+
+    # 4. Thử tìm trong lan_sessions.json nếu có session còn hạn
+    try:
+        from pathlib import Path
+        import json
+        lan_f = Path(__file__).resolve().parent / "lan_sessions.json"
+        if lan_f.exists():
+            with open(lan_f, "r", encoding="utf-8") as f:
+                s_data = json.load(f)
+            for ip, sess in s_data.items():
+                c_tok = sess.get("ttsnew_token")
+                if c_tok and _is_valid_tok(c_tok):
+                    if not c_tok.startswith("Bearer "):
+                        c_tok = "Bearer " + c_tok
+                    return c_tok
+    except Exception:
+        pass
 
     return ""
 
